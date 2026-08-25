@@ -4,46 +4,13 @@ import profiler
 
 import widgets, windows
 import dynamic_virtuallist
+import theme
 
 include compat2
 
 const
   ThemeEditorItemHeight = 150.0'f32
   ThemeTextEditorItemHeight = 120.0'f32
-
-  ThemeStyleNames: array[UiThemeStyleSlotCount, string] = [
-    "Default",
-    "Label",
-    "Window",
-    "Window Title Bar",
-    "Button",
-    "Button Hover",
-    "Checkbox",
-    "Checkbox Hover",
-    "Checkbox Mark",
-    "Slider",
-    "Slider Track",
-    "Slider Track Hover",
-    "Slider Fill",
-    "Slider Handle",
-    "Scroll Bar",
-    "Scroll Bar Handle",
-    "Scroll Bar Handle Hover",
-    "Window Content",
-    "Window Resize Handle",
-    "Tab Bar Header",
-    "Tab Bar Item",
-    "Tab Bar Item Active",
-    "Tab Bar Content",
-    "Text Field",
-    "Text Field Focused",
-    "Text Field Hint",
-    "Text Cursor",
-    "Menu",
-    "Menu Item",
-    "Menu Item Hover",
-    "Title Bar Collapse Button Hover",
-  ]
 
 type
   ListFontsFun* = proc(): seq[(string, UiFontId)] {.raises: [], gcsafe.}
@@ -53,14 +20,23 @@ type
     highlightedStyleIndex*: int
     lastHighlightedStyleIndex*: int
     activeTabIndex*: int
+    primaryColor*: UiColor
+    cornerRadiusDisabled*: bool
     listStorage: UiDynamicVirtualListStorage
     listFonts*: nil ListFontsFun
     resolveFont*: nil ResolveFontFun
 
 func themeStyleName(styleIndex: int): string =
-  if styleIndex <= 0 or styleIndex > ThemeStyleNames.len:
+  if styleIndex <= 0 or styleIndex > UiThemeStyleSlotCount:
     return "Unknown"
-  ThemeStyleNames[styleIndex - 1]
+  for e in low(UiStyleIndex) .. high(UiStyleIndex):
+    if int(e) == styleIndex:
+      let name = $e
+      const prefix = "UiStyleIndex"
+      if name.len > prefix.len and name[0 .. prefix.len - 1] == prefix:
+        return name[prefix.len .. ^1]
+      return name
+  "Style " & $styleIndex
 
 proc editFloatSlider(b: var UiBuilder, labelText: string, value: var float32, minValue, maxValue: float32) =
   discard b.pushId(labelText)
@@ -87,7 +63,7 @@ proc labeledColorPicker(b: var UiBuilder, labelText: string, value: var UiColor)
     b.node("theme-editor-labeled-color-picker-label"):
       discard b.fitX().fitY().alignCenter()
       discard b.text(labelText)
-      discard b.textColor(rgba(0.84, 0.88, 0.94, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     discard b.colorPicker(value)
   discard b.popId()
 
@@ -105,11 +81,11 @@ proc buildThemeStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nim
   let isHighlighted = themeEditor.highlightedStyleIndex == styleIndex
   let rowBackground =
     if isHighlighted:
-      rgba(0.24, 0.30, 0.40, 1.0)
+      accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, 0.0'f32, 0.5'f32)
     elif itemIndex mod 2 == 0:
-      rgba(0.12, 0.14, 0.19, 1.0)
+      b.themeStyle(UiStyleIndexRow)[].fillColor
     else:
-      rgba(0.14, 0.17, 0.23, 1.0)
+      b.themeStyle(UiStyleIndexRowAlt)[].fillColor
 
   discard b.layout(LayoutVertical)
   discard b.padding(8).fitY()
@@ -117,13 +93,13 @@ proc buildThemeStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nim
   discard b.fillBackground()
   discard b.backgroundColor(rowBackground)
   discard b.borderWidth(if isHighlighted: 2.0'f32 else: 1.0'f32)
-  discard b.borderColor(if isHighlighted: rgba(1.0, 0.82, 0.20, 1.0) else: rgba(0.26, 0.32, 0.42, 1.0))
+  discard b.borderColor(if isHighlighted: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0) else: b.themeStyle(UiStyleIndexStage)[].borderColor)
   discard b.cornerRadius(6)
 
   b.node("theme-editor-style-title"):
     discard b.fitX().fitY()
     discard b.text($styleIndex & ". " & styleName)
-    discard b.textColor(rgba(0.95, 0.95, 0.80, 1.0))
+    discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
   b.layoutHorizontal("theme-editor-style-preview-row"):
     discard b.fillX().fitY().gap(12)
@@ -199,11 +175,11 @@ proc buildThemeTextStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {
   let isHighlighted = false
   let rowBackground =
     if isHighlighted:
-      rgba(0.24, 0.30, 0.40, 1.0)
+      accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, 0.0'f32, 0.5'f32)
     elif itemIndex mod 2 == 0:
-      rgba(0.12, 0.14, 0.19, 1.0)
+      b.themeStyle(UiStyleIndexRow)[].fillColor
     else:
-      rgba(0.14, 0.17, 0.23, 1.0)
+      b.themeStyle(UiStyleIndexRowAlt)[].fillColor
 
   discard b.layout(LayoutVertical)
   discard b.padding(8).fitY()
@@ -211,13 +187,13 @@ proc buildThemeTextStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {
   discard b.fillBackground()
   discard b.backgroundColor(rowBackground)
   discard b.borderWidth(1.0'f32)
-  discard b.borderColor(rgba(0.26, 0.32, 0.42, 1.0))
+  discard b.borderColor(b.themeStyle(UiStyleIndexStage)[].borderColor)
   discard b.cornerRadius(6)
 
   b.node("theme-editor-text-style-title"):
     discard b.fitX().fitY()
     discard b.text($itemIndex & ". Text Style")
-    discard b.textColor(rgba(0.95, 0.95, 0.80, 1.0))
+    discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
   b.layoutHorizontal("theme-editor-text-style-row"):
     discard b.fillX().fitY().gap(12)
@@ -225,7 +201,7 @@ proc buildThemeTextStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {
     b.node("theme-editor-text-style-meta"):
       discard b.fitX().fitY()
       discard b.text("fontId: " & $textStyleValue.fontId)
-      discard b.textColor(rgba(0.82, 0.86, 0.92, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     b.node("theme-editor-text-style-preview"):
       discard b.fillX().fitY()
@@ -249,6 +225,23 @@ const ThemeTitle = "Theme Editor"
 
 let themeEditorId* = ThemeTitle.hashChars.UiNodeId
 
+proc rebuildTheme(themeEditor: var ThemeEditor, b: var UiBuilder) =
+  ## Rebuild the active theme from the editor's primary color (or the built-in
+  ## default when none is chosen) and optionally strip all corner radii.
+  var styles: seq[UiStyle]
+  var texts: seq[UiNodeText]
+  if themeEditor.primaryColor.a > 0.0'f32:
+    (styles, texts) = createThemeFromColor(themeEditor.primaryColor)
+  else:
+    styles = initDefaultThemeStyles()
+    texts = initDefaultThemeTextStyles()
+  if themeEditor.cornerRadiusDisabled:
+    for i in 0 ..< styles.len:
+      styles[i].cornerRadius = 0.0'f32
+      styles[i].cornerRadii = UiCornerRadii()
+  b.themeStyles = styles
+  b.themeTextStyles = texts
+
 proc themeEditor*(b: var UiBuilder, themeEditor: var ThemeEditor): var UiBuilder {.discardable.} =
   prof("themeEditor")
 
@@ -271,7 +264,23 @@ proc themeEditor*(b: var UiBuilder, themeEditor: var ThemeEditor): var UiBuilder
       b.node("theme-editor-header"):
         discard b.fitX().fitY()
         discard b.text("Adjust shared theme slots. Preview nodes below use the edited style directly.")
-        discard b.textColor(rgba(0.82, 0.86, 0.92, 1.0))
+        discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+      b.layoutHorizontal("theme-editor-primary-color"):
+        discard b.fitX().fitY().gap(8)
+        b.node("theme-editor-primary-color-label"):
+          discard b.fitX().fitY().alignCenter()
+          discard b.text("Primary / Accent Color")
+          discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+        if b.colorPicker(themeEditor.primaryColor):
+          rebuildTheme(themeEditor, b)
+        if b.button("Restore Defaults"):
+          themeEditor.primaryColor = UiColor()
+          rebuildTheme(themeEditor, b)
+        var cornerEnabled = not themeEditor.cornerRadiusDisabled
+        if b.checkbox("Corner Radius", cornerEnabled):
+          themeEditor.cornerRadiusDisabled = not cornerEnabled
+          rebuildTheme(themeEditor, b)
 
       b.tabBar(["Styles", "Other"], themeEditor.activeTabIndex):
         case themeEditor.activeTabIndex

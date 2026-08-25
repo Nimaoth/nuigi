@@ -190,7 +190,7 @@ template menuBar*(b: var UiBuilder, inBody: untyped): untyped =
     b.node("menu-bar"):
       discard b.fillX().fitY().padding(4).gap(4)
       discard b.flexLayout(true).flexFlow(FlexDirectionRow, FlexWrap)
-      discard b.fillBackground().backgroundColor(rgba(0.11, 0.13, 0.18, 1.0))
+      discard b.fillBackground().styleIndex(UiStyleIndexMenuBar)
       inBody
 
 template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32, inBody: untyped, inMinWidth: float32 = 160.0): untyped =

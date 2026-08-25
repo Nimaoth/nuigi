@@ -19,7 +19,7 @@ proc getOrCreateColorPickerStorage(b: var UiBuilder, node: ptr UiNode): ColorPic
   nodeStorage(b, node, storage)
   storage
 
-proc rgbToHsv(c: UiColor): tuple[h, s, v: float32] =
+proc rgbToHsv*(c: UiColor): tuple[h, s, v: float32] =
   let r = c.r
   let g = c.g
   let b = c.b
@@ -40,7 +40,7 @@ proc rgbToHsv(c: UiColor): tuple[h, s, v: float32] =
   let s = if maxc <= 0.00001'f32: 0.0'f32 else: d / maxc
   (h, s, maxc)
 
-proc hsvToRgb(h, s, v: float32, a: float32 = 1.0'f32): UiColor =
+proc hsvToRgb*(h, s, v: float32, a: float32 = 1.0'f32): UiColor =
   let hh = h - floor(h)
   let i = int(hh * 6.0'f32)
   let f = hh * 6.0'f32 - i.float32

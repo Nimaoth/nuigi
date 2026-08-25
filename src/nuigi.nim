@@ -444,37 +444,125 @@ type
 
 const
   DefaultAnimationSpeed* = 18.0'f32
-  UiStyleIndexDefault* = 1'u16
-  UiStyleIndexWindow* = 3'u16
-  UiStyleIndexWindowTitleBar* = 4'u16
-  UiStyleIndexButton* = 5'u16
-  UiStyleIndexButtonHover* = 6'u16
-  UiStyleIndexCheckbox* = 7'u16
-  UiStyleIndexCheckboxHover* = 8'u16
-  UiStyleIndexCheckboxMark* = 9'u16
-  UiStyleIndexSlider* = 10'u16
-  UiStyleIndexSliderTrack* = 11'u16
-  UiStyleIndexSliderTrackHover* = 12'u16
-  UiStyleIndexSliderFill* = 13'u16
-  UiStyleIndexSliderHandle* = 14'u16
-  UiStyleIndexScrollBar* = 15'u16
-  UiStyleIndexScrollBarHandle* = 16'u16
-  UiStyleIndexScrollBarHandleHover* = 17'u16
-  UiStyleIndexWindowContent* = 18'u16
-  UiStyleIndexWindowResizeHandle* = 19'u16
-  UiStyleIndexTabBarHeader* = 20'u16
-  UiStyleIndexTabBarItem* = 21'u16
-  UiStyleIndexTabBarItemActive* = 22'u16
-  UiStyleIndexTabBarContent* = 23'u16
-  UiStyleIndexTextField* = 24'u16
-  UiStyleIndexTextFieldFocused* = 25'u16
-  UiStyleIndexTextFieldHint* = 26'u16
-  UiStyleIndexTextCursor* = 27'u16
-  UiStyleIndexMenu* = 28'u16
-  UiStyleIndexMenuItem* = 29'u16
-  UiStyleIndexMenuItemHover* = 30'u16
-  UiStyleIndexWindowTitleBarCollapseHover* = 31'u16
-  UiThemeStyleSlotCount* = int(UiStyleIndexWindowTitleBarCollapseHover)
+
+type
+  UiStyleIndex* = enum
+    UiStyleIndexNone
+    UiStyleIndexDefault
+    UiStyleIndexWindow
+    UiStyleIndexWindowTitleBar
+    UiStyleIndexButton
+    UiStyleIndexButtonHover
+    UiStyleIndexCheckbox
+    UiStyleIndexCheckboxHover
+    UiStyleIndexCheckboxMark
+    UiStyleIndexSlider
+    UiStyleIndexSliderTrack
+    UiStyleIndexSliderTrackHover
+    UiStyleIndexSliderFill
+    UiStyleIndexSliderHandle
+    UiStyleIndexScrollBar
+    UiStyleIndexScrollBarHandle
+    UiStyleIndexScrollBarHandleHover
+    UiStyleIndexWindowContent
+    UiStyleIndexWindowResizeHandle
+    UiStyleIndexTabBarHeader
+    UiStyleIndexTabBarItem
+    UiStyleIndexTabBarItemActive
+    UiStyleIndexTabBarContent
+    UiStyleIndexTextField
+    UiStyleIndexTextFieldFocused
+    UiStyleIndexTextFieldHint
+    UiStyleIndexTextCursor
+    UiStyleIndexMenu
+    UiStyleIndexMenuItem
+    UiStyleIndexMenuItemHover
+    UiStyleIndexWindowTitleBarCollapseHover
+    UiStyleIndexMenuBar
+    UiStyleIndexPanel
+    UiStyleIndexStage
+    UiStyleIndexCard
+    UiStyleIndexHeader
+    UiStyleIndexRow
+    UiStyleIndexRowAlt
+    UiStyleIndexTooltip
+    UiStyleIndexAccent
+
+  UiTextStyleIndex* = enum
+    UiTextStyleIndexNone
+    UiStyleIndexDefaultText
+    UiStyleIndexSmallText
+    UiStyleIndexLargeText
+    UiStyleIndexExtraLargeText
+    UiStyleIndexButtonText
+    UiStyleIndexMenuItemHoverText
+    UiStyleIndexMenuItemText
+    UiStyleIndexLabelText
+    UiStyleIndexWindowText
+    UiStyleIndexWindowTitleBarText
+    UiStyleIndexWindowContentText
+    UiStyleIndexButtonHoverText
+    UiStyleIndexCheckboxText
+    UiStyleIndexCheckboxHoverText
+    UiStyleIndexCheckboxMarkText
+    UiStyleIndexSliderText
+    UiStyleIndexTabBarHeaderText
+    UiStyleIndexTabBarItemText
+    UiStyleIndexTabBarItemActiveText
+    UiStyleIndexTabBarContentText
+    UiStyleIndexTextFieldText
+    UiStyleIndexTextFieldFocusedText
+    UiStyleIndexTextFieldHintText
+    UiStyleIndexHeadingText
+    UiStyleIndexMutedText
+    UiStyleIndexHeaderText
+
+const
+  UiThemeStyleSlotCount* = int(UiStyleIndexAccent)
+  UiTextStyleCount* = int(UiStyleIndexHeaderText)
+
+converter uiStyleIndexToUint16*(x: UiStyleIndex): uint16 = uint16(ord(x))
+converter uiTextStyleIndexToUint16*(x: UiTextStyleIndex): uint16 = uint16(ord(x))
+
+const
+  UiStyleIndexLabel* = UiStyleIndexCheckboxHover
+
+func accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
+  ## Derive a color from `base` by rotating hue (`hueShift` in turns, 0..1)
+  ## and scaling brightness (V) by `brightness`. Used to generate the varied
+  ## colored blocks in the demos from a single `Accent` theme color.
+  let r = base.r
+  let g = base.g
+  let b = base.b
+  let maxc = max(r, max(g, b))
+  let minc = min(r, min(g, b))
+  let d = maxc - minc
+  var h = 0.0'f32
+  if d > 0.00001'f32:
+    if maxc == r:
+      h = (g - b) / d
+    elif maxc == g:
+      h = (b - r) / d + 2.0'f32
+    else:
+      h = (r - g) / d + 4.0'f32
+    h = h / 6.0'f32
+    if h < 0.0'f32:
+      h += 1.0'f32
+  let s = if maxc <= 0.00001'f32: 0.0'f32 else: d / maxc
+  let v = clamp(maxc * brightness, 0.0'f32, 1.0'f32)
+  let hh = h + hueShift - floor(h + hueShift)
+  let i = int(hh * 6.0'f32)
+  let f = hh * 6.0'f32 - i.float32
+  let p = v * (1.0'f32 - s)
+  let q = v * (1.0'f32 - f * s)
+  let t = v * (1.0'f32 - (1.0'f32 - f) * s)
+  case i mod 6
+  of 0: return UiColor(r: v, g: t, b: p, a: base.a)
+  of 1: return UiColor(r: q, g: v, b: p, a: base.a)
+  of 2: return UiColor(r: p, g: v, b: t, a: base.a)
+  of 3: return UiColor(r: p, g: q, b: v, a: base.a)
+  of 4: return UiColor(r: t, g: p, b: v, a: base.a)
+  else: return UiColor(r: v, g: p, b: q, a: base.a)
 
 func uiString*(s: string): UiString =
   return UiString(valueHash: nui_hash.hash(s), value: s)
@@ -1082,6 +1170,11 @@ proc copyStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.
   b.copyCurrentNodeStyleAtIndex(value)
   b
 
+proc textStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
+  ## Fluent setter: set the current node's text style index to a theme slot.
+  b.setCurrentNodeTextIndex(value)
+  b
+
 proc textStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
   ## Fluent setter: set the current node's text style index to a theme slot (int overload).
   b.setCurrentNodeTextIndex(value)
@@ -1337,7 +1430,7 @@ proc clearFrameOutput(output: var UiFrameOutput) =
   output.commandLayers.setLen(0)
   output.commands.setLen(0)
 
-proc initDefaultThemeStyles(): seq[UiStyle] =
+proc initDefaultThemeStyles*(): seq[UiStyle] =
   result = newSeq[UiStyle](UiThemeStyleSlotCount)
 
   let panelFill = UiColor(r: 0.14'f32, g: 0.16'f32, b: 0.20'f32, a: 1.0'f32)
@@ -1513,36 +1606,83 @@ proc initDefaultThemeStyles(): seq[UiStyle] =
     fillColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
     borderColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
   )
+  result[int(UiStyleIndexMenuBar) - 1] = UiStyle(
+    paddingX: 4.0'f32,
+    paddingY: 4.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 0.0'f32,
+    fillColor: UiColor(r: 0.18'f32, g: 0.22'f32, b: 0.30'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexPanel) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 8.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.12'f32, g: 0.16'f32, b: 0.22'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexStage) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 8.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.15'f32, g: 0.17'f32, b: 0.22'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.28'f32, g: 0.33'f32, b: 0.42'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexCard) - 1] = UiStyle(
+    paddingX: 10.0'f32,
+    paddingY: 10.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.16'f32, g: 0.20'f32, b: 0.28'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexHeader) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.20'f32, g: 0.25'f32, b: 0.34'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.30'f32, g: 0.36'f32, b: 0.46'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexRow) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 3.0'f32,
+    fillColor: UiColor(r: 0.12'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.12'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexRowAlt) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 3.0'f32,
+    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.23'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.23'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTooltip) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.18'f32, a: 0.98'f32),
+    borderColor: UiColor(r: 0.36'f32, g: 0.42'f32, b: 0.54'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexAccent) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.40'f32, g: 0.64'f32, b: 0.90'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.40'f32, g: 0.64'f32, b: 0.90'f32, a: 1.0'f32),
+  )
 
-const UiStyleIndexDefaultText* = 1
-const UiStyleIndexSmallText* = 2
-const UiStyleIndexLargeText* = 3
-const UiStyleIndexExtraLargeText* = 4
-const UiStyleIndexButtonText* = 5
-const UiStyleIndexMenuItemHoverText* = 6
-const UiStyleIndexMenuItemText* = 7
-const
-  UiStyleIndexLabelText* = 8
-  UiStyleIndexLabel* = 8'u16
-const UiStyleIndexWindowText* = 9
-const UiStyleIndexWindowTitleBarText* = 10
-const UiStyleIndexWindowContentText* = 11
-const UiStyleIndexButtonHoverText* = 12
-const UiStyleIndexCheckboxText* = 13
-const UiStyleIndexCheckboxHoverText* = 14
-const UiStyleIndexCheckboxMarkText* = 15
-const UiStyleIndexSliderText* = 16
-const UiStyleIndexTabBarHeaderText* = 17
-const UiStyleIndexTabBarItemText* = 18
-const UiStyleIndexTabBarItemActiveText* = 19
-const UiStyleIndexTabBarContentText* = 20
-const UiStyleIndexTextFieldText* = 21
-const UiStyleIndexTextFieldFocusedText* = 22
-const UiStyleIndexTextFieldHintText* = 23
-const UiStyleIndexMaxText* = 23
 
-proc initDefaultThemeTextStyles(): seq[UiNodeText] =
-  result = newSeq[UiNodeText](UiStyleIndexMaxText)
+
+proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
+  result = newSeq[UiNodeText](UiTextStyleCount)
 
   let defaultText = UiColor(r: 0.92'f32, g: 0.92'f32, b: 0.92'f32, a: 1.0'f32)
   let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
@@ -1661,6 +1801,21 @@ proc initDefaultThemeTextStyles(): seq[UiNodeText] =
     fontSize: 16,
     text: "Text Field Hint".uiString,
     textColor: UiColor(r: 0.50'f32, g: 0.55'f32, b: 0.65'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexHeadingText) - 1] = UiNodeText(
+    fontSize: 22,
+    text: "Heading".uiString,
+    textColor: UiColor(r: 0.96'f32, g: 0.92'f32, b: 0.78'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexMutedText) - 1] = UiNodeText(
+    fontSize: 14,
+    text: "Muted".uiString,
+    textColor: UiColor(r: 0.84'f32, g: 0.88'f32, b: 0.94'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexHeaderText) - 1] = UiNodeText(
+    fontSize: 14,
+    text: "Header".uiString,
+    textColor: UiColor(r: 0.96'f32, g: 0.90'f32, b: 0.55'f32, a: 1.0'f32),
   )
 
 proc rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =

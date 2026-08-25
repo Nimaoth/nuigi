@@ -28,10 +28,10 @@ var fillDemoBoth = false
 proc buildFillExamples*(b: var UiBuilder) =
   b.layoutVertical("fill-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("fillX / fillY / fill — claim space from the parent along one or both axes"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("fill-controls"):
       discard b.fillX().fitY().gap(8)
@@ -41,8 +41,8 @@ proc buildFillExamples*(b: var UiBuilder) =
 
     b.node("fill-stage"):
       discard b.size(360, 150).padding(6)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       b.node("fill-child"):
         discard b.size(80, 36)
@@ -52,7 +52,7 @@ proc buildFillExamples*(b: var UiBuilder) =
           discard b.fillX()
         if fillDemoY:
           discard b.fillY()
-        discard b.padding(6).fillBackground().backgroundColor(rgba(0.40, 0.66, 0.92, 1.0))
+        discard b.padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.text("child")
 
 # ---------------------------------------------------------------------------
@@ -65,10 +65,10 @@ var stcDemoY = false
 proc buildFitExamples*(b: var UiBuilder) =
   b.layoutVertical("stc-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("fitX / fitY / fit — size to text and children"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("stc-controls"):
       discard b.fillX().fitY().gap(8)
@@ -77,8 +77,8 @@ proc buildFitExamples*(b: var UiBuilder) =
 
     b.node("stc-stage"):
       discard b.size(360, 150).padding(6)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       b.node("stc-child"):
         discard b.size(200, 50)
@@ -86,7 +86,7 @@ proc buildFitExamples*(b: var UiBuilder) =
           discard b.fitX()
         if stcDemoY:
           discard b.fitY()
-        discard b.padding(6).fillBackground().backgroundColor(rgba(0.42, 0.80, 0.56, 1.0))
+        discard b.padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         discard b.text("sizes to content")
 
 # ---------------------------------------------------------------------------
@@ -100,13 +100,13 @@ var anchorDemoParentHeight = 220.0'f32
 proc buildAnchorExamples*(b: var UiBuilder) =
   b.layoutVertical("anchor-demos"):
     discard b.fillX().fitY().padding(6).gap(6)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Anchors — position a child relative to its parent using normalized 0..1 coordinates"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.label("top-left and bottom-right are 0..1 fractions of the parent; offsets add pixels; pivot is the anchor point on the child"):
-      discard b.textColor(rgba(0.80, 0.86, 0.94, 1.0)).fontSize(13)
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).fontSize(13)
 
     b.layoutHorizontal("anchor-controls"):
       const anchorModeLabels = ["Center", "TopLeft", "Bottom", "Right"]
@@ -122,8 +122,8 @@ proc buildAnchorExamples*(b: var UiBuilder) =
       b.animate:
         discard b.sizeAnim(anchorDemoParentWidth, anchorDemoParentHeight)
       discard b.maxWidth(440).alignCenter()
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       template place(name: string, ax, ay, bx, by, off, px, py: float32, col: UiColor) =
         b.node(name):
@@ -132,11 +132,11 @@ proc buildAnchorExamples*(b: var UiBuilder) =
           discard b.padding(4).fillBackground().backgroundColor(col)
           discard b.text(name)
 
-      place("TL", 0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32, 8.0'f32, 0.0'f32, 0.0'f32, rgba(0.86, 0.33, 0.31, 1.0))
-      place("TR", 1.0'f32, 0.0'f32, 1.0'f32, 0.0'f32, 8.0'f32, 1.0'f32, 0.0'f32, rgba(0.26, 0.62, 0.86, 1.0))
-      place("BL", 0.0'f32, 1.0'f32, 0.0'f32, 1.0'f32, 8.0'f32, 0.0'f32, 1.0'f32, rgba(0.26, 0.78, 0.78, 1.0))
-      place("BR", 1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32, 8.0'f32, 1.0'f32, 1.0'f32, rgba(0.88, 0.66, 0.24, 1.0))
-      place("Center", 0.5'f32, 0.5'f32, 0.5'f32, 0.5'f32, 0.0'f32, 0.5'f32, 0.5, rgba(0.33, 0.74, 0.44, 1.0))
+      place("TL", 0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32, 8.0'f32, 0.0'f32, 0.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
+      place("TR", 1.0'f32, 0.0'f32, 1.0'f32, 0.0'f32, 8.0'f32, 1.0'f32, 0.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
+      place("BL", 0.0'f32, 1.0'f32, 0.0'f32, 1.0'f32, 8.0'f32, 0.0'f32, 1.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
+      place("BR", 1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32, 8.0'f32, 1.0'f32, 1.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HOrange, 1.0))
+      place("Center", 0.5'f32, 0.5'f32, 0.5'f32, 0.5'f32, 0.0'f32, 0.5'f32, 0.5, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
 
       let (ax, ay, bx, by, px, py) = case anchorDemoMode
         of 0: (0.5'f32, 0.5'f32, 0.5'f32, 0.5'f32, 0.5'f32, 0.5'f32)
@@ -148,7 +148,7 @@ proc buildAnchorExamples*(b: var UiBuilder) =
         b.animate:
           discard b.anchorsAnim(ax, ay, bx, by).offsetsAnim(0, 0, 0, 0).pivotAnim(px, py)
           discard b.finishAnchors()
-        discard b.fit().padding(4).fillBackground().backgroundColor(rgba(0.62, 0.42, 0.78, 1.0))
+        discard b.fit().padding(4).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         discard b.text("blend child")
 
 # ---------------------------------------------------------------------------
@@ -160,10 +160,10 @@ var layoutDirMode = 0
 proc buildLayoutDirectionExamples*(b: var UiBuilder) =
   b.layoutVertical("layout-dir-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("layoutVertical / layoutHorizontal + DirectionReverse (column / column-reverse / row / row-reverse)"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("layout-dir-controls"):
       discard b.fillX().fitY().gap(6)
@@ -173,8 +173,8 @@ proc buildLayoutDirectionExamples*(b: var UiBuilder) =
 
     b.node("layout-dir-stage"):
       discard b.fit().padding(6).gap(6)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       case layoutDirMode
       of 0: discard b.layout(LayoutVertical).forwardLayout()
       of 1: discard b.layout(LayoutVertical).reverseLayout()
@@ -185,7 +185,7 @@ proc buildLayoutDirectionExamples*(b: var UiBuilder) =
       for i in 0 .. 3:
         b.node:
           discard b.fit().padding(6).fillBackground()
-          discard b.backgroundColor(rgba(0.40 + i.float32 * 0.12, 0.60, 0.90 - i.float32 * 0.10, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0 - i.float32 * 0.05'f32))
           discard b.text("item " & $i)
           discard b.animatePos(DefaultAnimationSpeed * 0.3'f32).animateDelayed()
 
@@ -198,10 +198,10 @@ var alignDemoMode = 0
 proc buildAlignExamples*(b: var UiBuilder) =
   b.layoutVertical("align-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("alignCenter and vertical alignment via anchors (anchorsY / pivotY)"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("align-controls"):
       discard b.fillX().fitY().gap(6)
@@ -211,11 +211,11 @@ proc buildAlignExamples*(b: var UiBuilder) =
 
     b.node("align-stage"):
       discard b.size(360, 150).padding(6)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       b.node("align-child"):
-        discard b.fit().padding(6).fillBackground().backgroundColor(rgba(0.96, 0.72, 0.28, 1.0))
+        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0))
         case alignDemoMode
         of 0: discard b.alignCenter()
         of 1: discard b.anchorsY(0.0'f32, 0.0'f32).offsetsY(0.0'f32, 0.0'f32).pivotY(0.0'f32).finishAnchors()
@@ -233,10 +233,10 @@ var gapDemoPadding = 10.0'f32
 proc buildGapPaddingExamples*(b: var UiBuilder) =
   b.layoutVertical("gap-pad-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("gap (spacing between children, needs a layout) and padding (inset around a node's content box)"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("gap-pad-controls"):
       discard b.fillX().fitY().gap(8)
@@ -246,13 +246,13 @@ proc buildGapPaddingExamples*(b: var UiBuilder) =
     b.node("gap-pad-stage"):
       discard b.width(360).fitY().padding(gapDemoPadding).gap(gapDemoGap)
       discard b.layout(LayoutVertical).forwardLayout()
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       for i in 0 .. 3:
         b.node:
           discard b.fit().padding(6).fillBackground()
-          discard b.backgroundColor(rgba(0.40 + i.float32 * 0.12, 0.60, 0.90 - i.float32 * 0.10, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0 - i.float32 * 0.05'f32))
           discard b.text("item " & $i)
 
 # ---------------------------------------------------------------------------
@@ -276,10 +276,10 @@ var styleDemoRadiusBL = 12.0'f32
 proc buildStyleExamples*(b: var UiBuilder) =
   b.layoutVertical("style-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("backgroundColor, borderWidths (per side), cornerRadii (per corner), borderColors (per side)"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.node("style-child"):
       discard b.fit().padding(30)
@@ -333,7 +333,7 @@ proc buildStyleExamples*(b: var UiBuilder) =
 
     b.label("Per-corner radii and per-side borders"):
       discard b.fontSize(18)
-      discard b.textColor(rgba(0.96, 0.90, 0.68, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
 
     b.node("border-style-gallery"):
       discard b.fillX().fitY().gap(12)
@@ -341,35 +341,35 @@ proc buildStyleExamples*(b: var UiBuilder) =
 
       b.layoutVertical("asymmetric-corners"):
         discard b.size(260, 150).padding(14).gap(8)
-        discard b.fillBackground().backgroundColor(rgba(0.16, 0.30, 0.34, 1.0))
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(30, 4, 24, 0)
         discard b.borderWidth(3)
-        discard b.borderColor(rgba(0.36, 0.88, 0.80, 1.0))
+        discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
         discard b.animatePos().animateDelayed()
         b.labelWrapped("Asymmetric corners"):
           discard b.fillX()
-          discard b.fontSize(16).textColor(rgba(0.92, 1.0, 0.98, 1.0))
+          discard b.fontSize(16).textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
         b.labelWrapped("TL 30  TR 4  BR 24  BL 0"):
           discard b.fillX()
-          discard b.textColor(rgba(0.72, 0.88, 0.86, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("asymmetric-widths"):
         discard b.size(260, 150).padding(14).gap(8)
-        discard b.fillBackground().backgroundColor(rgba(0.24, 0.19, 0.30, 1.0))
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadius(12)
         discard b.borderWidths(2, 8, 14, 4)
-        discard b.borderColor(rgba(0.84, 0.68, 0.96, 1.0))
+        discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         discard b.animatePos().animateDelayed()
         b.labelWrapped("Per-side widths"):
           discard b.fillX()
-          discard b.fontSize(16).textColor(rgba(0.98, 0.94, 1.0, 1.0))
+          discard b.fontSize(16).textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
         b.labelWrapped("Left 2  Top 8  Right 14  Bottom 4"):
           discard b.fillX()
-          discard b.textColor(rgba(0.84, 0.78, 0.92, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("combined-border-style"):
         discard b.size(260, 150).padding(14).gap(8)
-        discard b.fillBackground().backgroundColor(rgba(0.18, 0.20, 0.25, 1.0))
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(28, 12, 28, 12)
         discard b.borderWidths(5, 9, 5, 9)
         discard b.animatePos().animateDelayed()
@@ -380,14 +380,14 @@ proc buildStyleExamples*(b: var UiBuilder) =
           rgba(0.40, 0.88, 0.54, 1.0))
         b.labelWrapped("Combined"):
           discard b.fillX()
-          discard b.fontSize(16).textColor(rgba(0.98, 0.98, 0.98, 1.0))
+          discard b.fontSize(16).textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
         b.labelWrapped("Four side colors, two widths, four radii"):
           discard b.fillX()
-          discard b.textColor(rgba(0.82, 0.86, 0.92, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("all"):
         discard b.size(260, 150).padding(14).gap(8)
-        discard b.fillBackground().backgroundColor(rgba(0.16, 0.30, 0.34, 1.0))
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(30, 4, 60, 0)
         discard b.borderWidths(2, 8, 15, 1)
         discard b.animatePos().animateDelayed()
@@ -397,7 +397,7 @@ proc buildStyleExamples*(b: var UiBuilder) =
           rgba(0.30, 0.72, 0.98, 1.0),
           rgba(0.40, 0.88, 0.54, 1.0))
         b.label("Asymmetric all"):
-          discard b.fontSize(16).textColor(rgba(0.92, 1.0, 0.98, 1.0))
+          discard b.fontSize(16).textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
 # ---------------------------------------------------------------------------
 # Type 1 #8 — Text style
 # ---------------------------------------------------------------------------
@@ -411,10 +411,10 @@ var textDemoFontIdx = 0
 proc buildTextStyleExamples*(b: var UiBuilder) =
   b.layoutVertical("text-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("text, fontSize, textColor, wrapText"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutVertical("text-controls"):
       discard b.fillX().fitY().gap(6)
@@ -446,8 +446,8 @@ proc buildTextStyleExamples*(b: var UiBuilder) =
 
     b.node("text-stage"):
       discard b.size(360, 150).fitY().padding(8).gap(8)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       var fontNames2: seq[string] = newSeq[string]()
       for name, id in b.fonts.pairs:
         fontNames2.add(name)
@@ -468,10 +468,10 @@ var maskDemoNoChildHover = false
 proc buildMaskChildrenExamples*(b: var UiBuilder) =
   b.layoutVertical("mask-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("maskChildren (clip overflow), noHover, noChildHover"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("mask-controls"):
       discard b.fillX().fitY().gap(8)
@@ -482,7 +482,7 @@ proc buildMaskChildrenExamples*(b: var UiBuilder) =
     b.node("mask-stage"):
       discard b.size(320, 170).padding(8)
       let h = b.wasHovered()
-      discard b.backgroundColor(if h: rgba(0.96, 0.43, 0.41, 1.0) else: rgba(0.86, 0.33, 0.31, 1.0))
+      discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 0.9))
       if maskDemoMask:
         discard b.maskChildren()
       if maskDemoNoHover:
@@ -494,7 +494,7 @@ proc buildMaskChildrenExamples*(b: var UiBuilder) =
         discard b.fit().padding(8).fillBackground()
         discard b.anchors(1.0'f32, 0.5'f32, 1.0'f32, 0.5'f32).offsets(-8, -8, -8, -8).pivot(0.5'f32, 0.5'f32).finishAnchors()
         let h = b.wasHovered()
-        discard b.backgroundColor(if h: rgba(0.40, 0.90, 0.50, 1.0) else: rgba(0.40, 0.66, 0.92, 1.0))
+        discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.text("hover me")
 
 # ---------------------------------------------------------------------------
@@ -507,12 +507,12 @@ var animDemoShow = false
 proc buildAnimationExamples*(b: var UiBuilder) =
   b.layoutVertical("anim-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("animate (immediate, triggered on hover/click): sizeAnim, backgroundColorAnim, transformScaleAnim, positionAnim, widthAnim, heightAnim"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.label("animateDelayed: transformScaleAnim only when the node appears"):
-      discard b.textColor(rgba(0.80, 0.86, 0.94, 1.0)).fontSize(13)
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).fontSize(13)
 
     b.layoutHorizontal("anim-controls"):
       discard b.fillX().fitY().gap(8)
@@ -529,12 +529,12 @@ proc buildAnimationExamples*(b: var UiBuilder) =
       b.node("anim-hover-transform"):
         discard b.size(140, 90).padding(8).fillBackground().cornerRadius(8)
         if b.wasHovered():
-          discard b.backgroundColor(rgba(0.40, 0.90, 0.50, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         else:
-          discard b.backgroundColor(rgba(0.40, 0.66, 0.92, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         let h = b.wasHovered()
         b.animate:
-          discard b.backgroundColorAnim(if h: rgba(0.40, 0.90, 0.50, 1.0) else: rgba(0.40, 0.66, 0.92, 1.0))
+          discard b.backgroundColorAnim(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
           discard b.transformScaleAnim(if h: 1.5'f32 else: 1.0'f32)
         discard b.alignCenter()
         discard b.text("animate transform")
@@ -542,21 +542,21 @@ proc buildAnimationExamples*(b: var UiBuilder) =
       b.node("anim-hover-size"):
         discard b.size(140, 90).padding(8).fillBackground().cornerRadius(8)
         if b.wasHovered():
-          discard b.backgroundColor(rgba(0.40, 0.90, 0.50, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         else:
-          discard b.backgroundColor(rgba(0.40, 0.66, 0.92, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         let h = b.wasHovered()
         b.animate:
           discard b.sizeAnim(if h: 200.0'f32 else: 140.0'f32, if h: 130.0'f32 else: 90.0'f32)
-          discard b.backgroundColorAnim(if h: rgba(0.40, 0.90, 0.50, 1.0) else: rgba(0.40, 0.66, 0.92, 1.0))
+          discard b.backgroundColorAnim(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.alignCenter()
         discard b.text("animate size")
 
     b.node("anim-click"):
-      discard b.size(360, 130).padding(8).fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0)).cornerRadius(8)
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.size(360, 130).padding(8).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor).cornerRadius(8)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       b.node("anim-click-box"):
-        discard b.alignCenter().padding(6).fillBackground().backgroundColor(rgba(0.96, 0.72, 0.28, 1.0)).cornerRadius(6)
+        discard b.alignCenter().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0)).cornerRadius(6)
         let s = if animDemoExpanded: 110.0'f32 else: 60.0'f32
         let w = if animDemoExpanded: 220.0'f32 else: 120.0'f32
         b.animate:
@@ -568,7 +568,7 @@ proc buildAnimationExamples*(b: var UiBuilder) =
     if animDemoShow:
       b.node("anim-delayed"):
         discard b.padding(12).fillBackground().cornerRadius(8)
-        discard b.backgroundColor(rgba(0.62, 0.42, 0.78, 1.0))
+        discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         let firstAppearance = b.previousNodeIndex(b.currentNode.id, b.currentNodeIndex) < 0
         if firstAppearance:
           discard b.size(0, 0)
@@ -595,12 +595,12 @@ var transformDemoAnimate = true
 proc buildTransformExamples*(b: var UiBuilder) =
   b.layoutVertical("transform-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("transformOffset, transformRotation, transformScale, transformPivot — render-space transform around a pivot"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.label("pivot is a 0..1 fraction of the node box; offset is in pixels; rotation in radians; scale is multiplicative"):
-      discard b.textColor(rgba(0.80, 0.86, 0.94, 1.0)).fontSize(13)
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).fontSize(13)
 
     b.node("transform-controls"):
       discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap).flexGaps(8, 8)
@@ -628,15 +628,15 @@ proc buildTransformExamples*(b: var UiBuilder) =
 
     b.node("transform-stage"):
       discard b.size(360, 200).padding(10)
-      discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-      discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+      discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+      discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
 
       b.node("transform-child"):
         discard b.fit().padding(10).alignCenter().fillBackground()
         if b.wasHovered():
-          discard b.backgroundColor(rgba(0.60, 0.80, 0.99, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         else:
-          discard b.backgroundColor(rgba(0.40, 0.66, 0.92, 1.0))
+          discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.cornerRadius(6)
         if transformDemoAnimate:
           b.animate:
@@ -657,8 +657,8 @@ proc buildTransformExamples*(b: var UiBuilder) =
       template cornerPivot(name: string, px, py: float32, col: UiColor) =
         b.node(name):
           discard b.size(110, 90).padding(4)
-          discard b.fillBackground().backgroundColor(rgba(0.10, 0.11, 0.14, 1.0))
-          discard b.borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+          discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+          discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
           b.node("cp-child"):
             discard b.fit().padding(6).alignCenter().fillBackground().backgroundColor(col).cornerRadius(4)
             let spin = b.frameCtx.input.frameIndex.float32 * 0.03'f32 * b.animationSpeed
@@ -666,10 +666,10 @@ proc buildTransformExamples*(b: var UiBuilder) =
             discard b.transformRotation(spin)
             discard b.text("pivot")
 
-      cornerPivot("cp-tl", 0.0'f32, 0.0'f32, rgba(0.86, 0.33, 0.31, 1.0))
-      cornerPivot("cp-tr", 1.0'f32, 0.0'f32, rgba(0.26, 0.62, 0.86, 1.0))
-      cornerPivot("cp-bl", 0.0'f32, 1.0'f32, rgba(0.26, 0.78, 0.78, 1.0))
-      cornerPivot("cp-br", 1.0'f32, 1.0'f32, rgba(0.88, 0.66, 0.24, 1.0))
+      cornerPivot("cp-tl", 0.0'f32, 0.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
+      cornerPivot("cp-tr", 1.0'f32, 0.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
+      cornerPivot("cp-bl", 0.0'f32, 1.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
+      cornerPivot("cp-br", 1.0'f32, 1.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HOrange, 1.0))
 
 # ---------------------------------------------------------------------------
 # Type 3 — every simple widget (vertical list)
@@ -687,25 +687,25 @@ var awMenuOpen = false
 proc buildAllWidgetsExample*(b: var UiBuilder) =
   b.layoutVertical("all-widgets"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Builtin widgets"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.tableLayout([tableColumnFit(), tableColumnFill()], 8.0, 4.0):
       discard b.fillX().fitY().padding(6)
-      discard b.backgroundColor(rgba(0.10, 0.12, 0.17, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
       template headerCell(cap: string) =
         b.node:
-          discard b.fitY().padding(4).fillBackground().backgroundColor(rgba(0.20, 0.25, 0.34, 1.0))
+          discard b.fitY().padding(4).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
           discard b.text(cap).fit()
-          discard b.textColor(rgba(0.96, 0.90, 0.55, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
       template labelCell(cap: string) =
         b.node:
           discard b.fitY().padding(4).fillBackground()
           discard b.text(cap).fit()
-          discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
       template widgetCell(body: untyped) =
         b.node:
           discard b.fillX().fitY().padding(4)
@@ -755,7 +755,7 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
           if b.wasHovered(b.nodes.high):
             b.tooltip:
               discard b.fit().padding(4)
-              discard b.backgroundColor(rgba(0.10, 0.12, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+              discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
               b.label("This is a tooltip"): discard
       labelCell("menu")
       widgetCell:
@@ -800,26 +800,26 @@ var cvItemCount = 200
 
 proc cvFixedItem(b: var UiBuilder, itemIndex: int, userData: int) =
   discard b.fillX().fitY().padding(6)
-  discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: rgba(0.13, 0.15, 0.20, 1.0) else: rgba(0.15, 0.18, 0.24, 1.0))
+  discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
   discard b.text("Item " & $itemIndex).fit()
-  discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+  discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
 
 proc cvDynItem(b: var UiBuilder, itemIndex: int, userData: int) =
   discard b.fillX().fitY().padding(6).layout(LayoutVertical)
-  discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: rgba(0.13, 0.15, 0.20, 1.0) else: rgba(0.15, 0.18, 0.24, 1.0))
+  discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
   b.label("Dynamic item " & $itemIndex):
-    discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+    discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
   if itemIndex mod 3 == 0:
     b.labelWrapped("This row is taller: wrapped text that spans multiple lines to show variable-height measurement in the dynamic virtual list."):
-      discard b.fillX().fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fillX().fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
 proc buildComplexWidgetsExample*(b: var UiBuilder) =
   b.layoutVertical("complex-widgets"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Complex widgets: virtualList (fixed-height rows) and dynamicVirtualList (variable-height rows)"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     var count = cvItemCount.float32
     discard b.slider("Virtual list item count", count, 1.0'f32, 1_000_000.0'f32, 200)
@@ -827,21 +827,21 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
 
     b.tableLayout([tableColumnProportional(1), tableColumnProportional(2)], 8.0, 4.0):
       discard b.fillX().fitY().padding(6)
-      discard b.backgroundColor(rgba(0.10, 0.12, 0.17, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
       template headerCell(cap: string) =
         b.node:
-          discard b.fitY().padding(4).fillBackground().backgroundColor(rgba(0.20, 0.25, 0.34, 1.0))
+          discard b.fitY().padding(4).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
           discard b.text(cap).fit()
-          discard b.textColor(rgba(0.96, 0.90, 0.55, 1.0))
+          discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
 
       template nameCell(name, desc: string) =
         b.layoutVertical:
           discard b.fitY().padding(4).gap(2).fillBackground()
           b.label(name):
-            discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+            discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
           b.labelWrapped(desc):
-            discard b.fillX().fontSize(12).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+            discard b.fillX().fontSize(12).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       headerCell("Widget")
       headerCell("Preview")
@@ -855,9 +855,9 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
             for i in 0 .. 15:
               b.node:
                 discard b.fillX().fitY().padding(6).fillBackground()
-                discard b.backgroundColor(if i mod 2 == 0: rgba(0.13, 0.15, 0.20, 1.0) else: rgba(0.15, 0.18, 0.24, 1.0))
+                discard b.backgroundColor(if i mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
                 discard b.text("Scrollable row " & $i).fit()
-                discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+                discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
 
       nameCell("virtualList", "Fixed row height; only renders visible rows. Very fast for huge lists, but every row must be the same height.")
       b.node:
@@ -883,86 +883,86 @@ var layoutDemoFormRemember = true
 proc buildLayoutExamples*(b: var UiBuilder) =
   b.layoutVertical("layout-examples"):
     discard b.fillX().fitY().padding(8).gap(12)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Combined common layouts — Top bar, Sidebar, Card grid, Settings panel, Toolbar, Form"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     # 1. Top bar -----------------------------------------------------------
     b.label("Top bar — fixed blocks on the left/right, fills the middle"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("topbar"):
       discard b.fillX().fitY().padding(6).gap(6)
       discard b.flexLayout().flexDirection(FlexDirectionRow).flexGaps(6, 6)
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(rgba(0.86, 0.33, 0.31, 1.0))
+        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
         discard b.text("Logo")
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(rgba(0.26, 0.62, 0.86, 1.0))
+        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.text("File")
       b.node:
         discard b.fitY().flex(1, 1)
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(rgba(0.26, 0.78, 0.78, 1.0))
+        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
         discard b.text("Search")
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(rgba(0.88, 0.66, 0.24, 1.0))
+        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HOrange, 1.0))
         discard b.text("Profile")
 
     # 2. Sidebar -----------------------------------------------------------
     b.label("Sidebar — fixed-width sidebar next to a filling content area"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("sidebar"):
       discard b.fillX().height(150).padding(6).gap(6)
       discard b.flexLayout().flexDirection(FlexDirectionRow).flexGaps(6, 6)
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.node:
         discard b.size(90, 0).fitY().padding(6).gap(4)
         discard b.layout(LayoutVertical).forwardLayout()
         discard b.flex(0.0, 0.0, 90.0)
-        discard b.backgroundColor(rgba(0.20, 0.24, 0.32, 1.0))
-        b.label("Home"): discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
-        b.label("Projects"): discard b.textColor(rgba(0.80, 0.86, 0.94, 1.0))
-        b.label("Settings"): discard b.textColor(rgba(0.80, 0.86, 0.94, 1.0))
+        discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
+        b.label("Home"): discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
+        b.label("Projects"): discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+        b.label("Settings"): discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
       b.node:
         discard b.fillX().fitY().padding(8).gap(6)
         discard b.layout(LayoutVertical).forwardLayout()
-        discard b.fillBackground().backgroundColor(rgba(0.10, 0.12, 0.18, 1.0))
-        b.label("Content area"): discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+        b.label("Content area"): discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
         b.labelWrapped("This region grows to fill the remaining width while the sidebar keeps a fixed size."):
-          discard b.fillX().fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+          discard b.fillX().fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     # 3. Card grid ---------------------------------------------------------
     b.label("Card grid — cards laid out from a loop in a wrapping flex"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("card-grid"):
       discard b.fillX().fitY().padding(8).gap(8)
       discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap).flexGaps(8, 8)
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       for i in 0 .. 7:
         b.node:
           discard b.size(96, 64).padding(6).gap(4)
           discard b.layout(LayoutVertical).forwardLayout()
           discard b.flex(0.0, 1.0, 96.0)
-          discard b.fillBackground().backgroundColor(rgba(0.30 + i.float32 * 0.05'f32, 0.50, 0.74 - i.float32 * 0.04'f32, 1.0)).cornerRadius(4)
-          b.label("Card " & $i): discard b.textColor(rgba(0.96, 0.96, 0.98, 1.0))
+          discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 0.9 - i.float32 * 0.04'f32)).cornerRadius(4)
+          b.label("Card " & $i): discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
           b.labelWrapped("item description"):
-            discard b.fontSize(11).textColor(rgba(0.82, 0.86, 0.94, 1.0))
+            discard b.fontSize(11).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     # 4. Settings panel ---------------------------------------------------
     b.label("Settings panel — label + control rows"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("settings-panel"):
       discard b.fillX().fitY().padding(8)
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.tableLayout([tableColumnFit(), tableColumnFill()], 8.0, 4.0):
         discard b.fillX().fitY()
         template settingRow(rowLabel: string, body: untyped) =
           b.node:
             discard b.fitY().padding(4).fillBackground()
             discard b.text(rowLabel).fit()
-            discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+            discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
           b.node:
             discard b.fillX().fitY().padding(4)
             body
@@ -977,22 +977,22 @@ proc buildLayoutExamples*(b: var UiBuilder) =
 
     # 5. Toolbar -----------------------------------------------------------
     b.label("Toolbar — wrapping row of buttons"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("toolbar"):
       discard b.fillX().fitY().padding(6).gap(6)
       discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap).flexGaps(6, 6)
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       for name in ["New", "Open", "Save", "Cut", "Copy", "Paste", "Undo", "Redo", "Find", "Run"]:
         if b.button(name): discard
 
     # 6. Form --------------------------------------------------------------
     b.label("Form — text field, checkbox and button stacked"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("form"):
       discard b.fillX().fitY().padding(8).gap(8)
       discard b.layout(LayoutVertical).forwardLayout()
-      discard b.backgroundColor(rgba(0.16, 0.20, 0.28, 1.0)).cornerRadius(4)
-      b.label("Name"): discard b.textColor(rgba(0.88, 0.88, 0.92, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
+      b.label("Name"): discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
       b.node("form-name"):
         discard b.fit().gap(4)
         if b.textField(layoutDemoFormName, "Enter name..."): discard
@@ -1047,31 +1047,31 @@ proc buildFontAtlasCommands*(frameArena: ptr Arena, fontAtlasImageId: UiImageId,
 proc buildUnicodeExamples*(b: var UiBuilder) =
   b.layoutVertical("unicode-root"):
     discard b.sizeToParentX().fitY().padding(8).gap(6)
-    discard b.backgroundColor(rgba(0.10, 0.13, 0.18, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Unicode stress test (one label per line)"):
-      discard b.textColor(rgba(0.82, 0.88, 0.96, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     for i, lineText in unicodeStressLines:
       b.label($i & ": " & lineText):
-        discard b.textColor(rgba(0.90, 0.92, 0.96, 1.0))
+        discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     b.label("Raw text pass (fillX nodes, no labels)"):
-      discard b.textColor(rgba(0.82, 0.88, 0.96, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     for i, lineText in unicodeStressLines:
       b.node:
         discard b.fillX().fitY().wrapText()
         discard b.text($i & ": " & lineText)
-        discard b.textColor(rgba(0.90, 0.92, 0.96, 1.0))
+        discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
 proc buildFontAtlasExamples*(b: var UiBuilder) =
   b.node("font-atlas"):
     discard b.size(1024, 1024)
     discard b.padding(6)
-    discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     discard b.borderWidth(1)
-    discard b.borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+    discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
     let atlasNode = b.currentNode
     let atlasContentSize = vec2(
       max(0.0'f32, atlasNode.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1082,7 +1082,7 @@ proc buildFontAtlasExamples*(b: var UiBuilder) =
 proc buildSubpixelExamples*(b: var UiBuilder) =
   b.layoutVertical("unicode-root"):
     discard b.sizeToParentX().fitY().padding(8).gap(6)
-    discard b.backgroundColor(rgba(0.10, 0.13, 0.18, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     var parentId = b.generateId()
     var labelId = b.generateId()
@@ -1106,9 +1106,9 @@ proc buildSubpixelExamples*(b: var UiBuilder) =
 
     b.node("font-atlas"):
       discard b.size(absoluteSize * 10)
-      discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
       discard b.borderWidth(1)
-      discard b.borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+      discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       var commands = b.frame.arena[].allocEmptyArray(2, UiRenderCommand)
       commands.add UiRenderCommand(
         kind: CmdImage,
@@ -1216,18 +1216,18 @@ proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
 proc buildCustomRenderExamples*(b: var UiBuilder) =
   b.layoutVertical("custom-render-root"):
     discard b.fillX().fitY().padding(8).gap(8)
-    discard b.backgroundColor(rgba(0.12, 0.16, 0.22, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Custom render commands — sine wave, circle and star drawn with customRenderCommands"):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.label("Each shape is a node whose content box is filled with CmdLine segments each frame."):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     b.layoutHorizontal("cr-shapes"):
       discard b.fillX().fitY().gap(8)
       b.node("cr-circle"):
         discard b.size(200, 180).padding(6)
-        discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+        discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
         let n = b.currentNode
         let cs = vec2(
           max(0.0'f32, n.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1236,7 +1236,7 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
         discard b.customRenderCommands(buildCircleCommands(b.frame.arena, cs))
       b.node("cr-star"):
         discard b.size(200, 180).padding(6)
-        discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+        discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
         let n = b.currentNode
         let cs = vec2(
           max(0.0'f32, n.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1245,10 +1245,10 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
         discard b.customRenderCommands(buildStarCommands(b.frame.arena, cs))
 
     b.label("Two plots (sine + cosine) drawn on top of each other via plot.nim (CmdRawVertices):"):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("cr-plot"):
       discard b.size(520, 240).padding(8)
-      discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       discard b.deferBuild(buildPlotDeferred)
 
 # ---------------------------------------------------------------------------
@@ -1317,12 +1317,12 @@ proc buildCustomMaterialExample*(b: var UiBuilder) =
       discard b.fillY()
     discard b.fillX().padding(8).gap(8)
     b.label("Custom material — a quad rendered with a registered Render2D material (custom fragment shader)."):
-      discard b.textColor(rgba(0.96, 0.92, 0.78, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.label("The quad is drawn via CmdRawVertices with materialId = " & $customMaterialId):
-      discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("custom-mat-node"):
       discard b.fill().padding(6)
-      discard b.backgroundColor(rgba(0.12, 0.13, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.38, 0.48, 1.0))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       discard b.deferBuild(buildCustomDeferred)
 
 proc buildAllExamples(b: var UiBuilder)

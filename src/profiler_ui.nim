@@ -156,7 +156,7 @@ proc buildFlameDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
       )
 
     block:
-      let (vertexData, vertexCount) = buildRectStrokeVertices(b.frame.arena, nodeAbs + vec2(x, r.y1), vec2(w, h), rgba(0.20'f32, 0.20'f32, 0.20'f32, 1.0'f32), 0, 1)
+      let (vertexData, vertexCount) = buildRectStrokeVertices(b.frame.arena, nodeAbs + vec2(x, r.y1), vec2(w, h), b.themeStyle(UiStyleIndexStage)[].borderColor, 0, 1)
       if vertexData != nil and vertexCount > 0:
         commands.add UiRenderCommand(
           kind: CmdRawVertices,
@@ -190,7 +190,7 @@ proc buildFlameDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
       if b.wasHovered(b.currentNode):
         b.tooltip:
           discard b.fit().padding(4)
-          discard b.backgroundColor(rgba(0.10, 0.12, 0.18, 1.0)).borderWidth(1).borderColor(rgba(0.32, 0.40, 0.52, 1.0))
+          discard b.backgroundColor(b.themeStyle(UiStyleIndexTooltip)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexTooltip)[].borderColor)
           b.label(r.tag & " " & $(r.ms) & "ms")
 
   gprof.record = record
@@ -313,11 +313,11 @@ proc buildNuiProfiler*(b: var UiBuilder) =
 
     b.node("profiler-plot"):
       discard b.fillX().height(300.0'f32).maskChildren()
-      discard b.backgroundColor(rgba(0.08'f32, 0.10'f32, 0.14'f32, 1.0'f32))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.deferBuild(buildPlotDeferred)
 
     b.node("profiler-flame"):
       # discard b.fill().maskChildren()
       discard b.fillX().height(500.0'f32).maskChildren()
-      discard b.backgroundColor(rgba(0.08'f32, 0.10'f32, 0.14'f32, 1.0'f32))
+      discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.deferBuild(buildFlameDeferred)

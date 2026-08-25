@@ -76,7 +76,7 @@ proc applyDebugOutlineToNode(b: var UiBuilder, targetId: UiNodeId, cutoff: int) 
   if targetIdx >= 0:
     var s = b.ensureNodeStyle(b.nodes[targetIdx].addr).addr
     s.borderWidth = max(s.borderWidth, 2.0'f32)
-    s.borderColor = rgba(1.0, 0.82, 0.20, 1.0)
+    s.borderColor = accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0)
 
 type
   UiNodeStorageStats = object
@@ -142,18 +142,21 @@ proc fmtAnchorInfo(flags: UiFlags): string =
   if anchorFlags != default(UiFlags):
     result = fmtFlagList(anchorFlags)
 
-proc detailRow(b: var UiBuilder, labelText, valueText: string, valueColor = rgba(0.95, 0.96, 0.98, 1.0'f32)) =
+proc detailRow(b: var UiBuilder, labelText, valueText: string, valueColor = UiColor()) =
+  var vc = valueColor
+  if vc.a <= 0.0'f32:
+    vc = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
   discard b.pushId(labelText)
   b.layoutHorizontal("debug-panel-detail-row"):
     discard b.fillX().fitY().gap(4)
     b.node("debug-panel-detail-label"):
       discard b.fitX().fitY()
       discard b.text(labelText & ":")
-      discard b.textColor(rgba(0.68, 0.72, 0.80, 1.0'f32))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("debug-panel-detail-value"):
       discard b.fitX().fitY()
       discard b.text(valueText)
-      discard b.textColor(valueColor)
+      discard b.textColor(vc)
   discard b.popId()
 
 proc fmtStyleFloatProps(style: UiStyle, gapValue: float32): string =
@@ -169,28 +172,28 @@ proc detailColorRow(b: var UiBuilder, labelText: string, textColor, backgroundCo
     b.node("debug-panel-detail-label"):
       discard b.fitX().fitY()
       discard b.text(labelText & ":")
-      discard b.textColor(rgba(0.68, 0.72, 0.80, 1.0'f32)).alignCenter()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).alignCenter()
     b.node("debug-panel-detail-text-color"):
       discard b.fitX().fitY()
       discard b.text("text")
-      discard b.textColor(rgba(0.95, 0.96, 0.98, 1.0'f32)).alignCenter()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor).alignCenter()
     b.node("debug-panel-detail-text-swatch"):
       discard b.size(14, 12)
       discard b.fillBackground()
       discard b.backgroundColor(textColor)
       discard b.borderWidth(1)
-      discard b.borderColor(rgba(0.06, 0.07, 0.09, 0.90'f32))
+      discard b.borderColor(b.themeStyle(UiStyleIndexStage)[].borderColor)
       discard b.cornerRadius(2).alignCenter()
     b.node("debug-panel-detail-background-label"):
       discard b.fitX().fitY()
       discard b.text("background")
-      discard b.textColor(rgba(0.95, 0.96, 0.98, 1.0'f32)).alignCenter()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor).alignCenter()
     b.node("debug-panel-detail-background-swatch"):
       discard b.size(14, 12)
       discard b.fillBackground()
       discard b.backgroundColor(backgroundColor)
       discard b.borderWidth(1)
-      discard b.borderColor(rgba(0.06, 0.07, 0.09, 0.90'f32))
+      discard b.borderColor(b.themeStyle(UiStyleIndexStage)[].borderColor)
       discard b.cornerRadius(2).alignCenter()
   discard b.popId()
 
@@ -200,15 +203,15 @@ proc buildDebugPanelDetails(b: var UiBuilder, inspectedId: UiNodeId) =
     discard b.padding(6).gap(2)
     discard b.fillBackground()
     # discard b.maskChildren()
-    discard b.backgroundColor(rgba(0.12, 0.15, 0.20, 1))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     discard b.borderWidth(1)
-    discard b.borderColor(rgba(0.34, 0.40, 0.50, 1.0))
+    discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
     discard b.cornerRadius(4)
 
     b.node("debug-panel-details-title"):
       discard b.fitX().fitY()
       discard b.text("Hovered Node")
-      discard b.textColor(rgba(0.95, 0.95, 0.80, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     let inspectedIdx = b.previousNodeIndex(inspectedId)
     if inspectedIdx >= 0 and inspectedIdx < b.previousFrame.nodes.len:
@@ -327,41 +330,41 @@ proc buildDebugPanelDetails(b: var UiBuilder, inspectedId: UiNodeId) =
           b,
           "events",
           $eventHistory.len & " recorded (trace mode: " & $b.traceMode & ")",
-          rgba(0.80, 0.95, 0.82, 1.0),
+          accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.26'f32, 1.0),
         )
         for evIdx in 0 ..< eventHistory.len:
           detailRow(
             b,
             "  event " & $evIdx,
             eventHistory[evIdx],
-            rgba(0.74, 0.92, 0.78, 1.0),
+            accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.26'f32, 1.0),
           )
     else:
       b.node("debug-panel-details-empty"):
         discard b.fitX().fitY()
         discard b.text("No hovered node")
-        discard b.textColor(rgba(0.66, 0.70, 0.76, 1.0))
+        discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
 proc buildDebugPanelStats(b: var UiBuilder, inspectedId: UiNodeId, currentNodeStats, previousNodeStats: UiNodeStorageStats,
     previousCommandCount, previousCommandBytes, frameArenaUsed, frameArenaCapacity,
     frameArenaBuckets, previousFrameArenaUsed, previousFrameArenaCapacity,
     previousFrameArenaBuckets, activeAnimationCount, activeAnimatedFieldCount: int) =
-  let statsColor = rgba(0.84, 0.88, 0.94, 1.0)
+  let statsColor = b.themeTextStyle(UiStyleIndexMutedText)[].textColor
 
   b.layoutVertical("debug-panel-stats"):
     discard b.fillX().fitY()
     discard b.padding(6).gap(2)
     discard b.fillBackground()
     # discard b.maskChildren()
-    discard b.backgroundColor(rgba(0.11, 0.14, 0.19, 1.0))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     discard b.borderWidth(1)
-    discard b.borderColor(rgba(0.30, 0.38, 0.50, 1.0))
+    discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
     discard b.cornerRadius(4)
 
     b.node("debug-panel-stats-title"):
       discard b.fitX().fitY()
       discard b.text("UI Stats")
-      discard b.textColor(rgba(0.95, 0.95, 0.80, 1.0))
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("debug-panel-debug-toggles"):
       discard b.fillX().fitY().gap(6)
@@ -533,14 +536,14 @@ proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimc
     panel.rowHoverFromTree = true
 
   if rowIsHovered or targetIsHovered:
-    discard b.fillBackground().backgroundColor(rgba(0.28, 0.33, 0.44, 1.0))
+    discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, 0.0'f32, 0.6'f32))
   else:
-    let evenBg = rgba(0.12, 0.14, 0.19, 1.0)
-    let oddBg  = rgba(0.14, 0.17, 0.23, 1.0)
+    let evenBg = b.themeStyle(UiStyleIndexRow)[].fillColor
+    let oddBg  = b.themeStyle(UiStyleIndexRowAlt)[].fillColor
     discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: evenBg else: oddBg)
 
   if panel.rowHoverTarget == n.id:
-    discard b.borderWidth(2.0).borderColor(rgba(1.0, 0.82, 0.20, 1.0))
+    discard b.borderWidth(2.0).borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0))
 
   when not defined(nimony) and defined(nuiDebug):
     let rowNodeIdx = b.stack[^1]
@@ -557,7 +560,7 @@ proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimc
   label.add(n[].nodeDebugName())
   label.add(" id=")
   label.add($nodeIdValue(n.id))
-  discard b.textColor(rgba(0.86, 0.88, 0.92, 1.0))
+  discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
   discard b.fontSize(13)
   discard b.text(label)
 
@@ -596,7 +599,7 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
     discard b.fillY()
     discard b.padding(8).gap(4)
     discard b.fillBackground()
-    discard b.backgroundColor(rgba(0.08, 0.10, 0.14, 0.96))
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
 
     buildDebugPanelDetails(b, inspectedId)
     buildDebugPanelStats(b, inspectedId, currentNodeStats, previousNodeStats, previousCommandCount,
@@ -612,7 +615,7 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
       b.node("debug-panel-title"):
         discard b.fitX().fitY()
         discard b.text("UI Tree")
-        discard b.textColor(rgba(0.95, 0.95, 0.80, 1.0))
+        discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
       b.node("vlist-container"):
         discard b.fill()

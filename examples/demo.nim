@@ -367,7 +367,7 @@ proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY:
     let display = prefix & ": " & formatFloat(plotMetricAvg(metric, 50).float64, ffDecimal, precision)
     b.node:
       let plotSize = vec2(100.0'f32, 50.0'f32)
-      discard b.size(plotSize).backgroundColor(rgba(0.08'f32, 0.10'f32, 0.14'f32, 1.0))
+      discard b.size(plotSize).backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       let nodeIdx = b.currentNodeIndex()
       let nodeAbs = b.absoluteNodePos(nodeIdx)
       let style = b.nodeStyle(b.currentNode)
