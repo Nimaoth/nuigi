@@ -35,4 +35,4 @@ switch("nimcache", "build/nimcache_wasm")
 # `build/nui-demo.js` (the JS glue) and `build/nui-demo.wasm`. STANDALONE_WASM=0
 # keeps the full runtime glue, and we no longer pass `--no-entry` so emscripten
 # calls `main` (provided by Nim now that --noMain is off).
-switch("passL", "-sSTANDALONE_WASM=0 -sERROR_ON_UNDEFINED_SYMBOLS=0 -g -gsource-map -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sMAXIMUM_MEMORY=4294967296 -obuild/nui-demo.html")
+switch("passL", "-sSTANDALONE_WASM=0 -sERROR_ON_UNDEFINED_SYMBOLS=0 -g -gsource-map -sALLOW_MEMORY_GROWTH=1 -sINITIAL_MEMORY=134217728 -sMAXIMUM_MEMORY=4294967296 -obuild/nuigi-demo.js")
