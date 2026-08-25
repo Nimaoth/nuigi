@@ -1,6 +1,6 @@
 import std/strutils
 import mymath
-import arena, array_view, profiler, nui, nui_mesh
+import arena, array_view, profiler, nuigi, mesh
 
 type
   PlotPointFn* = proc (x: float32, userData: int): float32

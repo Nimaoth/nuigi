@@ -1,4 +1,4 @@
-import nui, nui_dynamic_virtualist, mymath
+import nuigi, dynamic_virtuallist, mymath
 
 {.passL: "-Lbuild".}
 

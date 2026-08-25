@@ -1,9 +1,9 @@
-import nui
+import nuigi
 import mymath, arena
 import array_view
 import profiler
 
-import nui_flex
+import flex
 
 include compat2
 

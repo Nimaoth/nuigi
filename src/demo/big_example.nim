@@ -1,5 +1,5 @@
 import std/[math, assertions]
-import "../nui", "../nui_widgets", "../nui_flex", "../nui_grid"
+import "../nuigi", "../widgets", "../flex", "../grid"
 import "../mymath", "../arena", "../array_view"
 import "../profiler"
 

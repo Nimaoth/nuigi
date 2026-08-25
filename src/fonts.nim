@@ -1,7 +1,7 @@
 
 import std/[os, syncio, tables, unicode, strutils, math, hashes, assertions]
-import sdl3, profiler, mymath, nui_text, nui_mesh
-export nui_text
+import sdl3, profiler, mymath, text, mesh
+export text
 
 include compat2
 import freetype/[

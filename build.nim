@@ -108,8 +108,6 @@ proc buildSdl3Wasm() =
     echo "wasm: SDL3 wasm static library already built (build/sdl3_wasm/libSDL3.a)"
     return
   createDir("build/sdl3_wasm")
-  if dirExists("vendor/SDL"):
-    shell("rm -r SDL", "vendor")
   if not dirExists("vendor/SDL"):
     echo "clone sdl"
     shell("git clone https://github.com/libsdl-org/SDL", "vendor")
@@ -186,7 +184,7 @@ proc buildFribidi() =
 proc buildNuiDemo(compiler: NimCompiler) =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
-  let outFlag = if wasm: "-o:build/nui-demo.js" else: "-o:nui-nim.exe"
+  let outFlag = if wasm: "-o:build/nuigi-demo.js" else: "-o:nuigi-nim.exe"
   if wasm:
     if gEmscriptenEnv.len == 0:
       gEmscriptenEnv = emscriptenEnv()
@@ -199,45 +197,25 @@ proc buildNuiDemo(compiler: NimCompiler) =
   let sdlLink = if wasm: "--passL:-Lbuild/sdl3_wasm --passL:-lSDL3" else: "--passL:-Lbuild"
   case compiler
   of Nim2:
-    shell &"nim c {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} src/nui_main.nim"
+    shell &"nim c {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nim2Ic:
-    shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} --nimcache:nimcacheic src/nui_main.nim"
+    shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
-    shell &"nimony c {outFlag} {sdlLink} {passthroughArgs} src/nui_main.nim"
+    shell &"nimony c {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
-    shell &"nimony l -d:llvm {outFlag} {sdlLink} {passthroughArgs} src/nui_main.nim"
+    shell &"nimony l -d:llvm {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:
-    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} {sdlLink} {passthroughArgs} src/nui_main.nim"
+    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
 
   if wasm:
     createDir("build")
-    copyFile("assets/nui-demo.html", "build/nui-demo.html")
-
-proc buildUiNim2() =
-  let passthroughArgs = passthroughArgs.join(" ")
-  createDir("build")
-  shellCapture(
-    &"nim c -o:ui-example-nim.exe --cc:clang --d:debug {passthroughArgs} src/ui_example.nim",
-    "nim2"
-  )
-
-proc buildUiNimony() =
-  let passthroughArgs = passthroughArgs.join(" ")
-  createDir("build")
-  shellCapture(
-    &"nimony c -o:ui-example-nimony.exe {passthroughArgs} src/ui_example.nim",
-    "nimony"
-  )
-
-proc buildUi() =
-  buildUiNim2()
-  buildUiNimony()
+    copyFile("assets/nuigi-demo.html", "build/nuigi-demo.html")
 
 proc buildDemoNim2() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nim c -o:demo-nim2.exe --cc:clang --d:debug --path:src {passthroughArgs} src/demo/nui_demo.nim",
+    &"nim c -o:demo-nim2.exe --cc:clang --d:debug --path:src {passthroughArgs} src/demo/demo_window.nim",
     "demo-nim2"
   )
 
@@ -245,7 +223,7 @@ proc buildDemoNimony() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nimony c -o:demo-nimony.exe --path:src {passthroughArgs} src/demo/nui_demo.nim",
+    &"nimony c -o:demo-nimony.exe --path:src {passthroughArgs} src/demo/demo_window.nim",
     "demo-nimony"
   )
 
@@ -377,11 +355,8 @@ proc main() =
   of "clean":
     removeDir("./build", false)
 
-  of "nui-demo":
+  of "nuigi-demo":
     buildNuiDemo(compiler)
-
-  of "ui":
-    buildUi()
 
   of "ui-test":
     buildUiTest()
@@ -391,12 +366,6 @@ proc main() =
 
   of "ui-test-nimony":
     buildUiTestNimony()
-
-  of "ui-nim2":
-    buildUiNim2()
-
-  of "ui-nimony":
-    buildUiNimony()
 
   of "demo":
     buildDemo()

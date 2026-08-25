@@ -1,16 +1,16 @@
 import std/[strutils, sequtils]
 import sdl3
 import mymath, arena, array_view
-import nui
-import nui_widgets
-import nui_plot
+import nuigi
+import widgets
+import plot
 import profiler
 
 include compat2
 
 var gShowNuiProfiler* = true
 
-# Proxy state used by the nui controls (the underlying `gprof` fields use the
+# Proxy state used by the nuigi controls (the underlying `gprof` fields use the
 # same types, but some widgets only accept `var float32`, so we mirror them).
 var profFrameIndexFloat* = 0.0'f32
 var profPlottedStatsCsv* = "frame,tick"
@@ -277,10 +277,10 @@ proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   discard b.customRenderCommands(commands)
 
 proc buildNuiProfiler*(b: var UiBuilder) =
-  ## Build the nui-based profiler UI (flame graph + per-tag time plot).
+  ## Build the nuigi-based profiler UI (flame graph + per-tag time plot).
   ## Reference implementation: `drawProfiler` in `profiler.nim` (dear imgui renderer).
   prof "buildNuiProfiler"
-  b.layoutVertical("nui-profiler"):
+  b.layoutVertical("nuigi-profiler"):
     discard b.fillX().fitY().gap(4).padding(4)
 
     b.layoutHorizontal("profiler-controls-1"):

@@ -1,5 +1,5 @@
 import std/[os, syncio, times, tables, strutils, math]
-import sdl3, profiler, mymath, fonts, nui, array_view
+import sdl3, profiler, mymath, fonts, nuigi, array_view
 
 include compat2
 

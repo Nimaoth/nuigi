@@ -1,5 +1,5 @@
 include "../compat2"
-import "../nui", "../nui_widgets"
+import "../nuigi", "../widgets"
 
 when not defined(nimony):
   proc forceNim2ToIncludeUiBuilderInTheGeneratedCFileIntro*(): UiBuilder {.exportc.} = UiBuilder()
@@ -13,10 +13,10 @@ proc buildIntroPage*(b: var UiBuilder) =
     discard b.fillX().fitY().padding(12).gap(10)
     discard b.backgroundColor(rgba(0.09, 0.11, 0.16, 1.0))
 
-    b.label("NUI Demo"):
+    b.label("nuigi Demo"):
       discard b.fontSize(28).textColor(rgba(0.98, 0.92, 0.70, 1.0))
 
-    b.labelWrapped("This window is a self-contained tour of NUI. Each tab above demonstrates one feature, or a small composition of features."):
+    b.labelWrapped("This window is a self-contained tour of nuigi. Each tab above demonstrates one feature, or a small composition of features."):
       discard b.fillX().textColor(rgba(0.84, 0.88, 0.94, 1.0)).fontSize(14)
 
     b.label("Use the tabs to explore:"):

@@ -2,10 +2,10 @@ import std/[tables, assertions, os, hashes]
 import sdl3
 import mymath
 import render2d, fonts
-import nui, nui_widgets, debug_panel, theme_editor, demo/nui_demo, nui_windows
+import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, windows
 import profiler
-import nui_profiler
-import nui_plot
+import profiler_ui
+import plot
 
 include compat2
 
@@ -431,7 +431,7 @@ proc buildSettingsWindow(b: var UiBuilder) =
         if b.button("Font: fractional"):
           gFontRender.flags = {}
 
-        discard b.checkbox("Show Profiler (nui)", gShowNuiProfiler)
+        discard b.checkbox("Show Profiler (nuigi)", gShowNuiProfiler)
 
 proc buildUi(b: var UiBuilder) =
   prof("buildUi")
@@ -454,7 +454,7 @@ proc buildUi(b: var UiBuilder) =
         b.buildDemoUi()
 
     if gShowNuiProfiler:
-      b.window("Profiler (nui)", 300, 140, 1000, 1000):
+      b.window("Profiler (nuigi)", 300, 140, 1000, 1000):
         b.buildNuiProfiler()
 
     if b.showThemeEditor:

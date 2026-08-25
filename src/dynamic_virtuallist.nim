@@ -1,4 +1,4 @@
-import nui
+import nuigi
 import profiler
 
 type UiDynamicVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall.}

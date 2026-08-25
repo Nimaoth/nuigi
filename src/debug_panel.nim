@@ -1,11 +1,11 @@
-import nui
+import nuigi
 import mymath, arena
 import array_view
 import profiler
-import nui_flex, nui_grid
+import flex, grid
 
 import nev_navigation
-import nui_widgets
+import widgets
 
 include compat2
 

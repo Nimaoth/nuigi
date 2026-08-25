@@ -1,4 +1,4 @@
-import nui, nui_widgets, nui_flex, nui_grid, mymath, arena, array_view
+import nuigi, widgets, flex, grid, mymath, arena, array_view
 
 {.passL: "-Lbuild".}
 

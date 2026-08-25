@@ -3,8 +3,8 @@ include "../compat2"
 import std/[math, assertions, random]
 import intro
 import big_example
-import "../nui", "../nui_widgets", "../nui_flex", "../nui_plot"
-import "../nui_dynamic_virtualist"
+import "../nuigi", "../widgets", "../flex", "../plot"
+import "../dynamic_virtuallist"
 import "../mymath", "../arena", "../array_view"
 import "../profiler"
 
@@ -90,7 +90,7 @@ proc buildFitExamples*(b: var UiBuilder) =
         discard b.text("sizes to content")
 
 # ---------------------------------------------------------------------------
-# Type 1 #3 — Anchors (moved here from nui_demo.nim)
+# Type 1 #3 — Anchors (moved here from demo.nim)
 # ---------------------------------------------------------------------------
 
 var anchorDemoMode = 0
@@ -1244,7 +1244,7 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
         )
         discard b.customRenderCommands(buildStarCommands(b.frame.arena, cs))
 
-    b.label("Two plots (sine + cosine) drawn on top of each other via nui_plot.nim (CmdRawVertices):"):
+    b.label("Two plots (sine + cosine) drawn on top of each other via plot.nim (CmdRawVertices):"):
       discard b.fontSize(13).textColor(rgba(0.80, 0.86, 0.94, 1.0))
     b.node("cr-plot"):
       discard b.size(520, 240).padding(8)

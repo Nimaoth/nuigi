@@ -1,4 +1,4 @@
-import nui, nui_mesh, mymath, arena
+import nuigi, mesh, mymath, arena
 
 when defined(nimony):
   import std/assertions

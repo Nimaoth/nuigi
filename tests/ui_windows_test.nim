@@ -1,4 +1,4 @@
-import nui, nui_windows, mymath
+import nuigi, windows, mymath
 
 {.passL: "-Lbuild".}
 

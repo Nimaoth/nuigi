@@ -7,11 +7,11 @@ include compat2
 
 import mymath, arena, array_view
 import profiler
-import nui_mesh
-import nui_text
-export nui_mesh, nui_text
+import mesh
+import text
+export mesh, text
 
-from nui_hash import Hash, `!&`, `!$`
+from "."/hash as nui_hash import Hash, `!&`, `!$`
 
 type
   MaterialId* = uint64

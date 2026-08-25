@@ -1,9 +1,9 @@
-import nui
+import nuigi
 import mymath
 import profiler
 
-import nui_widgets, nui_windows
-import nui_dynamic_virtualist
+import widgets, windows
+import dynamic_virtuallist
 
 include compat2
 

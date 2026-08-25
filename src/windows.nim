@@ -1,8 +1,8 @@
 import std/sequtils
-import nui
+import nuigi
 import mymath
 import profiler
-import nui_flex, nui_widgets
+import flex, widgets
 
 include compat2
 

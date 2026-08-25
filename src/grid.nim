@@ -1,4 +1,4 @@
-import nui, nui_flex, arena, array_view, profiler, mymath
+import nuigi, flex, arena, array_view, profiler, mymath
 
 type
   UiGridTrackKind* = enum

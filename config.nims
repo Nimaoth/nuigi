@@ -10,6 +10,7 @@ switch("lineTrace", "off")
 switch("stackTrace", "off")
 switch("d", "nuiDebug")
 switch("d", "profiler")
+switch("path", "src")
 
 when defined(wasm):
   echo "build wasm"

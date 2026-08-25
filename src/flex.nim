@@ -1,4 +1,4 @@
-import nui, arena, array_view, profiler
+import nuigi, arena, array_view, profiler
 
 type
   UiFlexAlign* = enum

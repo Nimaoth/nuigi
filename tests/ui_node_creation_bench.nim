@@ -1,4 +1,4 @@
-import nui, nui_widgets, mymath, arena, array_view
+import nuigi, widgets, mymath, arena, array_view
 import std/monotimes, std/strutils, std/math, std/syncio
 
 {.passL: "-Lbuild".}
