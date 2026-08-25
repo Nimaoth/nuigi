@@ -22,7 +22,7 @@ concurrency:
 
 jobs:
   build-and-deploy:
-    name: Build nui-demo (wasm) on Windows
+    name: Build nuigi-demo (wasm) on Windows
     runs-on: windows-2022
     steps:
       - name: Checkout the repo
@@ -43,7 +43,7 @@ jobs:
             deps
             nimcache
             emsdk
-          key: ${{ runner.os }}-nui-demo-wasm-${{ hashFiles('atlas.lock') }}
+          key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}
 
       - name: Download emscripten
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -69,20 +69,20 @@ jobs:
       - name: Compile build.nim
         run: nim c -o:build.exe build.nim
 
-      # 2) Build the nui-demo as wasm (html + js + wasm) via the build tool.
+      # 2) Build the nuigi-demo as wasm (html + js + wasm) via the build tool.
       #    EMSDK is read by build.nim to activate the emscripten environment.
-      - name: Build nui-demo with wasm
+      - name: Build nuigi-demo with wasm
         env:
           EMSDK: ${{ github.workspace }}/emsdk
-        run: ./emsdk/emsdk.ps1 activate 4.0.10; ./build.exe nui-demo --wasm
+        run: ./emsdk/emsdk.ps1 activate 4.0.10; ./build.exe nuigi-demo --wasm
 
       # 3) Collect the wasm artifacts for GitHub Pages
       - name: Stage GitHub Pages artifact
         run: |
           New-Item -ItemType Directory -Force -Path pages | Out-Null
-          Copy-Item build/nui-demo.html pages/
-          Copy-Item build/nui-demo.js   pages/
-          Copy-Item build/nui-demo.wasm pages/
+          Copy-Item build/nuigi-demo.html pages/
+          Copy-Item build/nuigi-demo.js   pages/
+          Copy-Item build/nuigi-demo.wasm pages/
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@v3
