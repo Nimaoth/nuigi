@@ -2,8 +2,10 @@ import nuigi
 import mymath, arena
 import array_view
 import profiler
+import colorpicker
 
 import flex
+export colorpicker
 
 include compat2
 
@@ -383,82 +385,6 @@ proc slider*(b: var UiBuilder, label: string, value: var float32, minValue = 0.0
     return changed
 
   false
-
-proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
-  prof("colorPicker")
-  var changed = false
-
-  var swatchIdx = -1
-  var swatchId = noneNodeId()
-  var pickerIdx = -1
-  b.node:
-    b.debugName("color-picker")
-    pickerIdx = b.stack[^1]
-    discard b.size(38, 18)
-
-    swatchIdx = b.stack[^1]
-    swatchId = b.currentNode.id
-    let swatchHovered = b.wasHovered(b.stack[^1], includeChildren = true)
-    let swatchOpen = b.focusedNode == swatchId
-    discard b.fillBackground()
-    discard b.backgroundColor(value)
-    discard b.borderWidth(if swatchOpen or swatchHovered: 2.0'f32 else: 1.0'f32)
-    discard b.borderColor(if swatchOpen or swatchHovered: rgba(0.95, 0.86, 0.40, 1.0) else: rgba(0.64, 0.28, 0.34, 1.0))
-
-  if b.previousOutput.clickedId == swatchId:
-    if b.focusedNode == swatchId:
-      b.focusedNode = noneNodeId()
-    else:
-      b.focusedNode = swatchId
-
-  let pickerOpen = b.focusedNode == swatchId
-  var popupIdx = -1
-  if pickerOpen:
-    if swatchIdx >= 0 and swatchIdx < b.nodes.len:
-      let swatchAbsPos = b.absoluteNodePosPrev(swatchId, swatchIdx)
-      let swatchNode = b.nodes[swatchIdx].addr
-
-      b.withParent(b.overlays):
-        b.node("color-picker-popup"):
-          popupIdx = b.stack[^1]
-          discard b.position(swatchAbsPos.x, swatchAbsPos.y + swatchNode.size.y + 4.0'f32)
-          discard b.layout(LayoutVertical)
-          discard b.fitX().fitY()
-          discard b.padding(6)
-          discard b.gap(4)
-          discard b.fillBackground()
-          discard b.backgroundColor(rgba(0.10, 0.12, 0.16, 0.98))
-          discard b.borderWidth(1)
-          discard b.borderColor(rgba(0.34, 0.40, 0.50, 1.0))
-          discard b.cornerRadius(4)
-
-          var rValue = value.r
-          var gValue = value.g
-          var bValue = value.b
-          var aValue = value.a
-          if b.slider("R", rValue, 0.0'f32, 1.0'f32, value.r):
-            changed = true
-          if b.slider("G", gValue, 0.0'f32, 1.0'f32, value.g):
-            changed = true
-          if b.slider("B", bValue, 0.0'f32, 1.0'f32, value.b):
-            changed = true
-          if b.slider("A", aValue, 0.0'f32, 1.0'f32, value.a):
-            changed = true
-          value.r = rValue
-          value.g = gValue
-          value.b = bValue
-          value.a = aValue
-
-  if pickerOpen and KeyEscape in b.frameCtx.input.keysPressed:
-    b.focusedNode = noneNodeId()
-
-  if pickerOpen and MouseLeft in b.frameCtx.input.mousePressed:
-    let swatchHovered = swatchIdx >= 0 and b.wasHovered(swatchIdx, includeChildren = true)
-    let popupHovered = popupIdx >= 0 and b.wasHovered(popupIdx, includeChildren = true)
-    if not swatchHovered and not popupHovered and not b.wasHovered(pickerIdx, includeChildren = true):
-      b.focusedNode = noneNodeId()
-
-  changed
 
 type DropdownStorage = ref object of UiNodeStorageData
   open: bool

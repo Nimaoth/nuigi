@@ -450,11 +450,11 @@ proc buildUi(b: var UiBuilder) =
       b.buildSettingsWindow()
 
     if gShowDemoWindow:
-      b.window("Demo", 210, 140, 800, 900):
+      b.window("Demo", 400, 100, 800, 900):
         b.buildDemoUi()
 
     if gShowNuiProfiler:
-      b.window("Profiler (nuigi)", 300, 140, 1000, 1000):
+      b.window("Profiler", 1200, 100, 700, 1000):
         b.buildNuiProfiler()
 
     if b.showThemeEditor:
