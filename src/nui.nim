@@ -1,0 +1,5473 @@
+import std/[assertions]
+
+when defined(nimony):
+  import std/tables
+
+include compat2
+
+import mymath, arena, array_view
+import profiler
+import nui_mesh
+import nui_text
+export nui_mesh, nui_text
+
+from nui_hash import Hash, `!&`, `!$`
+
+type
+  MaterialId* = uint64
+
+const
+  textArrangementCacheCapacity = 512
+
+type
+  UiFlag* = enum
+    AlignCenter
+    FillX, FillY
+    FitX, FitY
+    AnchorX, AnchorY
+    SizeXKnown, SizeYKnown
+    DrawText, WrapText, FillBackground
+    MaskChildren, PostProcessChildren, IsPostProcessing
+    LayoutVertical, LayoutHorizontal
+    FlexLayout, GridLayout
+    DirectionReverse
+    NoHover
+    NoChildHover
+    Scrollable
+    SizeDirty
+    NodeStorageParent
+    VirtualNode
+    VirtualizeNode
+
+  UiTraceMode* = enum
+    TraceNone
+    TraceAll
+    TraceNodeId
+
+  UiString* = object
+    valueHash: Hash
+    value*: string
+
+  UiFlags* = set[UiFlag]
+
+  UiNodeId* = distinct uint64
+
+  UiMouseButton* = enum
+    MouseLeft, MouseRight, MouseMiddle
+
+  UiFieldAnimation* = object
+    currentValue*: float32
+    targetValue*: float32
+    speed*: float32
+    fieldOffset*: UiNodeFloatFieldOffset # Byte offset of float32 field in UiNode to animate to targetValue
+    touchedFrame*: uint64
+
+  UiNodeFloatFieldOffset* = enum
+    UiNodePosXFieldOffset = 28
+    UiNodePosYFieldOffset = 32
+    UiNodeSizeXFieldOffset = 36
+    UiNodeSizeYFieldOffset = 40
+    UiNodeMinSizeXFieldOffset = 44
+    UiNodeMinSizeYFieldOffset = 48
+    UiNodeMaxSizeXFieldOffset = 52
+    UiNodeMaxSizeYFieldOffset = 56
+    UiNodeCursorXFieldOffset = 60
+    UiNodeCursorYFieldOffset = 64
+    UiNodeContentExtentXFieldOffset = 68
+    UiNodeContentExtentYFieldOffset = 72
+    UiNodeStylePaddingXFieldOffset = 116
+    UiNodeStylePaddingYFieldOffset = 120
+    UiNodeStyleBorderWidthFieldOffset = 124
+    UiNodeStyleCornerRadiusFieldOffset = 128
+    UiNodeStyleFillColorRFieldOffset = 132
+    UiNodeStyleFillColorGFieldOffset = 136
+    UiNodeStyleFillColorBFieldOffset = 140
+    UiNodeStyleFillColorAFieldOffset = 144
+    UiNodeStyleBorderColorRFieldOffset = 148
+    UiNodeStyleBorderColorGFieldOffset = 152
+    UiNodeStyleBorderColorBFieldOffset = 156
+    UiNodeStyleBorderColorAFieldOffset = 160
+    UiNodeStyleTextColorRFieldOffset = 164
+    UiNodeStyleTextColorGFieldOffset = 168
+    UiNodeStyleTextColorBFieldOffset = 172
+    UiNodeStyleTextColorAFieldOffset = 176
+    UiNodeGapFieldOffset = 180
+    UiNodeAnchorTopLeftXFieldOffset = 184
+    UiNodeAnchorTopLeftYFieldOffset = 188
+    UiNodeAnchorBottomRightXFieldOffset = 192
+    UiNodeAnchorBottomRightYFieldOffset = 196
+    UiNodeAnchorTopLeftOffsetXFieldOffset = 200
+    UiNodeAnchorTopLeftOffsetYFieldOffset = 204
+    UiNodeAnchorBottomRightOffsetXFieldOffset = 208
+    UiNodeAnchorBottomRightOffsetYFieldOffset = 212
+    UiNodeAnchorPivotXFieldOffset = 216
+    UiNodeAnchorPivotYFieldOffset = 220
+    UiNodeAnchoredOffsetXFieldOffset = 224
+    UiNodeAnchoredOffsetYFieldOffset = 228
+    UiNodeTransformOffsetXFieldOffset = 232
+    UiNodeTransformOffsetYFieldOffset = 236
+    UiNodeTransformRotationFieldOffset = 240
+    UiNodeTransformScaleXFieldOffset = 244
+    UiNodeTransformScaleYFieldOffset = 248
+    UiNodeTransformPivotXFieldOffset = 252
+    UiNodeTransformPivotYFieldOffset = 256
+
+  UiMouseButtons* = set[UiMouseButton]
+
+  UiKey* = enum
+    KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM
+    KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ
+    Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9
+    KeySpace, KeyEnter, KeyEscape, KeyBackspace, KeyTab
+    KeyLeft, KeyRight, KeyUp, KeyDown
+    KeyF1, KeyF2, KeyF3, KeyF4, KeyF5, KeyF6, KeyF7, KeyF8, KeyF9, KeyF10, KeyF11, KeyF12
+    KeyDelete, KeyHome, KeyEnd, KeyPageUp, KeyPageDown
+    KeyShiftLeft, KeyShiftRight, KeyControlLeft, KeyControlRight
+    KeyAltLeft, KeyAltRight, KeySuperLeft, KeySuperRight
+    KeyCapsLock, KeyScrollLock, KeyNumLock
+    KeyInsert, KeyPause, KeyMenu
+    KeyKp0, KeyKp1, KeyKp2, KeyKp3, KeyKp4
+    KeyKp5, KeyKp6, KeyKp7, KeyKp8, KeyKp9
+    KeyKpDivide, KeyKpMultiply, KeyKpSubtract, KeyKpAdd, KeyKpDecimal, KeyKpEnter
+    KeySemicolon, KeyApostrophe, KeyComma, KeyMinus, KeyPeriod, KeySlash, KeyBackslash
+    KeyLeftBracket, KeyRightBracket, KeyGrave, KeyWorld1, KeyWorld2
+
+  UiKeys* = set[UiKey]
+
+  UiModifier* = enum
+    ModShift, ModControl, ModAlt, ModSuper
+
+  UiModifiers* = set[UiModifier]
+
+  UiInputSnapshot* = object
+    frameIndex*: uint64
+    mouse*: Vec2
+    mouseDelta*: Vec2
+    wheel*: Vec2
+    mouseDown*: UiMouseButtons
+    mousePressed*: UiMouseButtons
+    mouseReleased*: UiMouseButtons
+    keysDown*: UiKeys
+    keysPressed*: UiKeys
+    keysReleased*: UiKeys
+    keysRepeated*: UiKeys
+    modsDown*: UiModifiers
+    textInput*: string
+
+  UiStyle* = object
+    paddingX*, paddingY*: float32
+    borderWidth*: float32
+    cornerRadius*: float32
+    fillColor*: UiColor
+    borderColor*: UiColor
+    cornerRadii*: UiCornerRadii
+    borderWidths*: UiBorderWidths
+    borderColors*: UiBorderColors
+
+  UiFontId* = int16
+
+  UiNodeText* = object
+    text*: UiString
+    fontSize*: float32
+    fontId*: UiFontId
+    textColor*: UiColor
+    measuredTextSizeCache*: Vec2
+    measuredTextDirty*: bool
+
+  UiNodeAnchor* = object
+    topLeft*: Vec2
+    bottomRight*: Vec2
+    topLeftOffset*: Vec2
+    bottomRightOffset*: Vec2
+    pivot*: Vec2
+    offset*: Vec2
+
+  UiCustomLayoutProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].}
+
+  UiNodeCustomLayout* = object
+    layoutProc*: UiCustomLayoutProc
+    userData*: int
+
+  UiDeferredBuildProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+
+  UiDeferredNode* = object
+    nodeIdx*: int
+    buildProc*: UiDeferredBuildProc
+    userData*: int
+    storageParentStack: seq[UiNodeId]
+
+  UiVirtualNode* = object
+    ## A buffered subtree that is inserted into the actual tree under `parent`
+    ## during `endUiFrame`. `nodes` is the full flat list of `UiNode`s forming
+    ## the subtree (or forest); internal `parent`/`lastChild`/`nextSibling` links
+    ## are relative to this list. The side arrays (texts, styles, gaps, anchors,
+    ## transforms, customCommands, customLayouts) hold the sub-data referenced by
+    ## the nodes' 1-based indices; they are appended to the frame's own arrays on
+    ## insertion and the node indices are remapped accordingly. `animations` holds
+    ## per-field animations (by `UiNode` byte-offset) applied to this subtree.
+    parent*: UiNodeId
+    nodes*: seq[UiNode]
+    animations*: seq[UiFieldAnimation]
+    texts*: seq[UiNodeText]
+    styles*: seq[UiStyle]
+    gaps*: seq[float32]
+    anchors*: seq[UiNodeAnchor]
+    transforms*: seq[UiNodeTransform]
+    customCommands*: seq[ArrayView[UiRenderCommand]]
+    customLayouts*: seq[UiNodeCustomLayout]
+    # Persistent (frame-independent) copies of custom render command data and the
+    # vertex buffers they reference. Required because a virtual node outlives the
+    # frame arena the original commands/vertices were allocated in; the
+    # `customCommands` ArrayViews point into `commandData`, and each command's
+    # `vertexData` is repointed into `commandVertices`.
+    commandData*: seq[UiRenderCommand]
+    commandVertices*: seq[UiVertex]
+
+  UiNodeTransform* = object
+    offset*: Vec2
+    rotation*: float32
+    scale*: Vec2
+    pivot*: Vec2
+
+  UiFrameContext* = object
+    viewportSize*: Vec2
+    animationTick*: float32
+    time*: float32
+    input*: UiInputSnapshot
+
+  UiRenderCommandKind* = enum
+    CmdRectFill, CmdRectStroke
+    CmdCircleFill, CmdLine
+    CmdText, CmdImage
+    CmdClipPush, CmdClipPop
+    CmdTransformPush, CmdTransformPop
+    CmdRawVertices
+
+  UiImageId* = distinct uint64
+
+  TextureSamplerMode* {.pure.} = enum
+    Linear
+    Nearest
+
+  UiRenderCommand* = object
+    kind*: UiRenderCommandKind
+    nodeIndex*: int32 = -1
+    textIndex*: uint16 = 0
+    clipDepth*: uint16
+    color*: UiColor
+    pos*: Vec2
+    pos2*: Vec2
+    size*: Vec2
+    uv0*: Vec2
+    uv1*: Vec2
+    samplerMode*: TextureSamplerMode
+    radius*: float32
+    thickness*: float32
+    imageId*: UiImageId
+    vertexData*: nil ptr UncheckedArray[UiVertex]
+    vertexCount*: int32
+    transformOrigin*: Vec2
+    pivot*: Vec2
+    offset*: Vec2
+    scale*: Vec2
+    rotation*: float32
+    materialId*: MaterialId
+    materialUniform*: ArrayView[uint8]
+
+  UiFrameOutput* = object
+    hoveredId*: UiNodeId
+    hoveredIndex*: int
+    scrolledId*: UiNodeId
+    scrolledIndex*: int
+    hoverBeganId*: UiNodeId
+    hoverEndedId*: UiNodeId
+    pressedId*: UiNodeId
+    heldId*: UiNodeId
+    pressedIndex*: int
+    heldIndex*: int
+    rightPressedId*: UiNodeId
+    rightPressedIndex*: int
+    clickedId*: UiNodeId
+    clickedIndex*: int
+    rightClickedId*: UiNodeId
+    rightClickedIndex*: int
+    commandLayers*: seq[seq[UiRenderCommand]]
+    commands*: seq[UiRenderCommand]
+
+  UiNode* = object
+    id*: UiNodeId
+    parent*: int
+    lastChild*: int32
+    nextSibling*: int32
+    flags*: UiFlags
+    pos*: Vec2
+    size*: Vec2
+    minSize*: Vec2
+    maxSize*: Vec2
+    cursor*: Vec2
+    contentExtent*: Vec2
+
+    renderParent*: int32
+    renderChildLast*: int32
+    renderSibling*: int32
+    layoutIndex*: int32 = 0
+
+    # Indices into arrays in the UiBuilder
+    textIndex*: uint16
+    anchorIndex*: uint16
+    gapIndex*: uint16
+    styleIndex*: uint16
+    transformIndex*: uint16
+    commandsIndex*: uint16
+    customLayoutIndex*: uint16
+    customChildLayoutIndex*: uint16
+
+    when defined(nuiDebug):
+      debugName*: string
+      postProcessCounter*: int32
+    when not defined(nimony) and defined(nuiDebug):
+      debugSourceFile*: string
+      debugSourceLine*: int32
+      debugSourceColumn*: int32
+
+  UiAnimation* = object
+    nodeId*: UiNodeId
+    fields*: seq[UiFieldAnimation]
+    unchangedFrames*: int
+
+  UiFrame* = object
+    arena*: ptr Arena
+    arenaCheckpoint*: uint64
+    nodes*: seq[UiNode]
+    nodeIdToIndex*: Table[uint64, int]
+    duplicateNodeIds*: Table[uint64, seq[int]]
+    texts*: seq[UiNodeText]
+    styles*: seq[UiStyle]
+    gaps*: seq[float32]
+    anchors*: seq[UiNodeAnchor]
+    transforms*: seq[UiNodeTransform]
+    customCommands*: seq[ArrayView[UiRenderCommand]]
+    customLayouts*: seq[UiNodeCustomLayout]
+
+  UiNodeStorageData* = ref object of RootObj
+    ## Base type for custom data for widgets. Create subtype and access using `proc nodeStorage`
+
+  UiNodeStorage* = object
+    data*: nil UiNodeStorageData
+    lastAccess*: uint64
+    parents*: seq[UiNodeId]
+    clearOldChildren*: bool
+
+  UiTextArrangementCacheEntry = object
+    key*: uint64
+    text*: UiString
+    fontSize*: float32
+    fontId*: UiFontId
+    lastUsedTick*: uint64
+    maxWidth*: float32
+    arrangement*: UiTextArrangement
+
+  UiMeasureTextFn* = proc(text: openArray[char], fontId: UiFontId, fontSize: float32, maxWidth: float32): UiTextArrangement {.raises: [].}
+  UiBuildTextMeshFn* = proc(arrangement: UiTextArrangement, pos: Vec2,
+    screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
+
+  UiBuilder* = object
+    stack*: seq[int]
+    nodeIdStack*: seq[UiNodeId]
+    # Composed ID scopes from pushId/popId; mixed into child node IDs.
+    idScopeStack*: seq[uint64]
+    storageParentStack: seq[UiNodeId]
+    # Per-parent counter used for deterministic auto-generated child IDs.
+    autoChildCounter*: seq[uint32]
+    frame*: UiFrame
+    previousFrame*: UiFrame
+    frameCtx*: UiFrameContext
+    previousOutput*: UiFrameOutput
+    frameOutput*: UiFrameOutput
+    themeStyles*: seq[UiStyle]
+    themeTextStyles*: seq[UiNodeText]
+    animations*: seq[UiAnimation]
+    animationSpeed*: float32 = 1.0'f32
+    configuringAnimationStack*: seq[bool]
+    animationTriggerStack*: seq[bool]
+    windows*: UiNodeId
+    overlays*: UiNodeId
+    focusedNode*: UiNodeId
+    debugDrawGridLines*: bool
+    showDebugPanel*: bool = false
+    showDebugPanel2*: bool = false
+    showThemeEditor*: bool = false
+    fontAtlasImageId*: UiImageId
+
+    nodeStorage: Table[uint64, UiNodeStorage]
+
+    currentNode: ptr UiNode
+    currentParent: nil ptr UiNode
+    lastNode: ptr UiNode
+    lastNodeIndex: int
+
+    defaultText*: UiNodeText
+    defaultStyle*: UiStyle
+    defaultAnchor*: UiNodeAnchor
+    defaultTransform*: UiNodeTransform
+    defaultCustomCommands*: ArrayView[UiRenderCommand]
+    defaultCustomLayout*: UiNodeCustomLayout
+    deferredNodes*: seq[UiDeferredNode]
+    virtualNodes*: seq[UiVirtualNode]
+    virtualNodeAnimations*: Table[uint64, seq[UiFieldAnimation]]
+
+    textArrangementLookup: Table[uint64, int]
+    textArrangementEntries: seq[UiTextArrangementCacheEntry]
+    textArrangementTick: uint64
+    measureText*: UiMeasureTextFn
+    buildTextMesh*: nil UiBuildTextMeshFn
+    fonts*: Table[string, UiFontId]
+
+    # Event tracing for debugging: maps a node id to the sequence of events
+    # recorded for that node during the current frame. Cleared at frame start.
+    eventTraces*: Table[uint64, seq[string]]
+    # Controls which nodes have their events recorded. In `TraceNodeId` mode,
+    # only events for `traceNodeId` are recorded.
+    traceMode*: UiTraceMode
+    traceNodeId*: UiNodeId
+
+    # Middle-click drag scrolling: while the middle mouse button is held over a
+    # scrollable node, the offset of the cursor from the drag start drives the
+    # scroll position. `middleDragScroll` holds the per-frame scroll delta (in
+    # pixels) to apply during the current frame's build.
+    middleDragActive*: bool
+    middleDragScrollStart*: Vec2
+    middleDragScroll*: Vec2
+
+  UiClipRect* = object
+    x*, y*, w*, h*: float32
+
+const
+  DefaultAnimationSpeed* = 18.0'f32
+  UiStyleIndexDefault* = 1'u16
+  UiStyleIndexWindow* = 3'u16
+  UiStyleIndexWindowTitleBar* = 4'u16
+  UiStyleIndexButton* = 5'u16
+  UiStyleIndexButtonHover* = 6'u16
+  UiStyleIndexCheckbox* = 7'u16
+  UiStyleIndexCheckboxHover* = 8'u16
+  UiStyleIndexCheckboxMark* = 9'u16
+  UiStyleIndexSlider* = 10'u16
+  UiStyleIndexSliderTrack* = 11'u16
+  UiStyleIndexSliderTrackHover* = 12'u16
+  UiStyleIndexSliderFill* = 13'u16
+  UiStyleIndexSliderHandle* = 14'u16
+  UiStyleIndexScrollBar* = 15'u16
+  UiStyleIndexScrollBarHandle* = 16'u16
+  UiStyleIndexScrollBarHandleHover* = 17'u16
+  UiStyleIndexWindowContent* = 18'u16
+  UiStyleIndexWindowResizeHandle* = 19'u16
+  UiStyleIndexTabBarHeader* = 20'u16
+  UiStyleIndexTabBarItem* = 21'u16
+  UiStyleIndexTabBarItemActive* = 22'u16
+  UiStyleIndexTabBarContent* = 23'u16
+  UiStyleIndexTextField* = 24'u16
+  UiStyleIndexTextFieldFocused* = 25'u16
+  UiStyleIndexTextFieldHint* = 26'u16
+  UiStyleIndexTextCursor* = 27'u16
+  UiStyleIndexMenu* = 28'u16
+  UiStyleIndexMenuItem* = 29'u16
+  UiStyleIndexMenuItemHover* = 30'u16
+  UiStyleIndexWindowTitleBarCollapseHover* = 31'u16
+  UiThemeStyleSlotCount* = int(UiStyleIndexWindowTitleBarCollapseHover)
+
+func uiString*(s: string): UiString =
+  return UiString(valueHash: nui_hash.hash(s), value: s)
+
+func hash*(s: UiString): Hash =
+  return s.valueHash
+
+func len*(s: UiString): int =
+  return s.value.len
+
+func `==`*(a, b: UiString): bool =
+  return a.valueHash == b.valueHash and a.value == b.value
+
+func intersectClipRect*(a, b: UiClipRect): UiClipRect =
+  ## Compute the intersection of two clip rectangles. Returns an empty rect if they don't overlap.
+  let x1 = max(a.x, b.x)
+  let y1 = max(a.y, b.y)
+  let x2 = min(a.x + a.w, b.x + b.w)
+  let y2 = min(a.y + a.h, b.y + b.h)
+  UiClipRect(
+    x: x1,
+    y: y1,
+    w: max(0.0'f32, x2 - x1),
+    h: max(0.0'f32, y2 - y1),
+  )
+
+func isEmpty*(r: UiClipRect): bool {.inline.} =
+  ## Returns true if the clip rect has zero or negative width/height.
+  r.w <= 0.0'f32 or r.h <= 0.0'f32
+
+func intersectsClipRect*(clipStack: seq[UiClipRect], cmdPos, cmdSize: Vec2): bool =
+  ## Returns true if a rectangle at cmdPos with cmdSize intersects the topmost clip rect on the stack.
+  if clipStack.len == 0:
+    return true
+  let clip = clipStack[^1]
+  if isEmpty(clip):
+    return false
+  let cmdRight = cmdPos.x + cmdSize.x
+  let cmdBottom = cmdPos.y + cmdSize.y
+  cmdRight > clip.x and cmdPos.x < clip.x + clip.w and
+    cmdBottom > clip.y and cmdPos.y < clip.y + clip.h
+
+proc cachedMeasuredTextSize*(b: var UiBuilder, node: ptr UiNode): Vec2 {.raises: [].}
+proc updateNodeFit*(b: var UiBuilder, n: ptr UiNode)
+proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardable.}
+proc clampNodeSize*(b: var UiBuilder, n: ptr UiNode) {.inline.}
+proc updateParentAfterChildEnd(b: var UiBuilder, child: ptr UiNode)
+proc removeStaleAnimations(b: var UiBuilder)
+proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect])
+proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect])
+proc absoluteNodePos*(b: UiBuilder, idx: int): Vec2
+proc contentSize*(b: var UiBuilder, n: ptr UiNode): Vec2 {.raises: [].}
+proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int)
+proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.}
+proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId)
+  ## Prevent node storage from being garbage-collected this frame.
+
+proc makeTextArrangementKey(text: UiString, fontSize: float32, fontId: UiFontId, maxWidth: float32 = -1): uint64 {.inline, raises: [].} =
+  uint64(!$(nui_hash.hash(text) !& nui_hash.hash(fontSize) !& nui_hash.hash(maxWidth) !& nui_hash.hash(fontId)))
+
+proc evictOldestTextArrangement(b: var UiBuilder) {.raises: [].} =
+  prof("evictOldestTextArrangement")
+  if b.textArrangementEntries.len <= 0:
+    return
+
+  var oldestIdx = 0
+  var oldestTick = b.textArrangementEntries[0].lastUsedTick
+  for i in 1 ..< b.textArrangementEntries.len:
+    let tick = b.textArrangementEntries[i].lastUsedTick
+    if tick < oldestTick:
+      oldestTick = tick
+      oldestIdx = i
+
+  let oldKey = b.textArrangementEntries[oldestIdx].key
+  if onRaiseQuit(b.textArrangementLookup.hasKey(oldKey)):
+    del(b.textArrangementLookup, oldKey)
+
+  let lastIdx = b.textArrangementEntries.high
+  if oldestIdx != lastIdx:
+    let moved = b.textArrangementEntries[lastIdx]
+    b.textArrangementEntries[oldestIdx] = moved
+    b.textArrangementLookup[moved.key] = oldestIdx
+
+  b.textArrangementEntries.setLen(lastIdx)
+
+proc buildTextArrangement(b: UiBuilder, text: ptr UiNodeText, key: uint64, maxWidth: float32 = -1): UiTextArrangementCacheEntry =
+  ## Arrange text without building atlas UVs or render vertices.
+  prof("buildTextArrangement")
+  result = UiTextArrangementCacheEntry()
+  if b.measureText != nil:
+    result.arrangement = b.measureText(text.text.value, text.fontId, text.fontSize, maxWidth)
+  result.arrangement.fontSize = text.fontSize
+  result.key = key
+  result.text = text.text
+  result.fontSize = text.fontSize
+  result.fontId = text.fontId
+  result.maxWidth = maxWidth
+
+proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): ptr UiTextArrangement {.raises: [].} =
+  prof("getTextArrangement")
+  let key = makeTextArrangementKey(text.text, text.fontSize, text.fontId, maxWidth)
+  inc b.textArrangementTick
+
+  let idx = onRaiseQuit(b.textArrangementLookup.getOrDefault(key, -1))
+  if idx >= 0 and idx < b.textArrangementEntries.len:
+    let entry = b.textArrangementEntries[idx].addr
+    if entry.key == key and entry.text == text.text and entry.fontSize == text.fontSize and entry.fontId == text.fontId and entry.maxWidth == maxWidth:
+      entry.lastUsedTick = b.textArrangementTick
+      return entry.arrangement.addr
+
+    entry[] = b.buildTextArrangement(text, key, maxWidth)
+    entry.lastUsedTick = b.textArrangementTick
+    return entry.arrangement.addr
+  elif idx >= b.textArrangementEntries.len:
+    if onRaiseQuit(b.textArrangementLookup.hasKey(key)):
+      del(b.textArrangementLookup, key)
+
+  if b.textArrangementEntries.len >= textArrangementCacheCapacity:
+    b.evictOldestTextArrangement()
+
+  let newIdx = b.textArrangementEntries.len
+  b.textArrangementEntries.add(b.buildTextArrangement(text, key, maxWidth))
+  b.textArrangementEntries[newIdx].lastUsedTick = b.textArrangementTick
+  b.textArrangementLookup[key] = newIdx
+  b.textArrangementEntries[newIdx].arrangement.addr
+
+var sentinelNode = UiNode()
+
+func noneNodeId*(): UiNodeId {.inline.} =
+  ## Returns the sentinel "no node" ID (value 0).
+  UiNodeId(0'u64)
+
+func `==`*(a, b: UiNodeId): bool {.borrow.}
+
+template nodes*(b: var UiBuilder): var seq[UiNode] = b.frame.nodes
+  ## Access the node array of the current frame.
+
+proc currentNode*(b: var UiBuilder): ptr UiNode =
+  ## Pointer to the node currently being built (innermost begin/endNode).
+  b.currentNode
+
+proc lastNode*(b: var UiBuilder): ptr UiNode =
+  ## Pointer to the node which was finished most recently (most recent endNode call)
+  b.lastNode
+
+proc lastNodeIndex*(b: var UiBuilder): int =
+  ## Index of the node which was finished most recently (most recent endNode call)
+  b.lastNodeIndex
+
+proc currentParent*(b: var UiBuilder): nil ptr UiNode =
+  ## Pointer to the parent of the current node, or nil if at root.
+  b.currentParent
+
+proc nodeStorageParent*(b: var UiBuilder) {.inline.} =
+  ## Mark the current node as a storage parent; its ID is recorded for child storage lookup.
+  b.frame.nodeIdToIndex[b.currentNode.id.uint64] = b.stack[^1]
+  b.storageParentStack.add(b.currentNode.id)
+  b.currentNode.flags.incl NodeStorageParent
+
+proc nodeStorage*(b: var UiBuilder, node: ptr UiNode, data: UiNodeStorageData) {.inline.} =
+  ## Store node storage for given node.
+  let nodeId = node.id.uint64
+  b.nodeStorage[nodeId] = UiNodeStorage(data: data, parents: b.storageParentStack, lastAccess: b.frameCtx.input.frameIndex)
+
+proc nodeStorageClearOldChildren*(b: var UiBuilder, node: ptr UiNode) {.inline.} =
+  ## Don't keep node storage of non-rendered children alive.
+  let nodeId = node.id.uint64
+  b.nodeStorage.mgetOrPut(nodeId, UiNodeStorage()).clearOldChildren = true
+  b.nodeStorage.getOrQuit(nodeId).lastAccess = b.frameCtx.input.frameIndex
+
+proc nodeStorageGet*(b: var UiBuilder, node: ptr UiNode): nil UiNodeStorageData {.inline.} =
+  ## Get node storage for given node, or nil if not found.
+  let nodeId = node.id.uint64
+  if b.nodeStorage.hasKey(nodeId):
+    var found = b.nodeStorage.getOrQuit(nodeId).addr
+    found.lastAccess = b.frameCtx.input.frameIndex
+    return found.data
+  return nil
+
+proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's text data.
+  if node.textIndex == 0:
+    node.textIndex = (b.frame.texts.len + 1).uint16
+    b.frame.texts.add(UiNodeText(measuredTextDirty: true, fontSize: b.defaultText.fontSize, fontId: b.defaultText.fontId, textColor: b.defaultText.textColor))
+    return b.frame.texts[^1]
+  b.frame.texts[node.textIndex - 1]
+
+proc ensureNodeStyle*(b: var UiBuilder, node: ptr UiNode): var UiStyle {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's style data.
+  if node.styleIndex == 0:
+    node.styleIndex = (b.frame.styles.len + 1).uint16
+    b.frame.styles.add(b.defaultStyle)
+    return b.frame.styles[^1]
+  b.frame.styles[node.styleIndex - 1]
+
+proc ensureNodeGap*(b: var UiBuilder, node: ptr UiNode): var float32 {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's gap value.
+  if node.gapIndex == 0:
+    node.gapIndex = (b.frame.gaps.len + 1).uint16
+    b.frame.gaps.add(0.0'f32)
+    return b.frame.gaps[^1]
+  b.frame.gaps[node.gapIndex - 1]
+
+proc ensureNodeAnchor*(b: var UiBuilder, node: ptr UiNode): var UiNodeAnchor {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's anchor data.
+  if node.anchorIndex == 0:
+    node.anchorIndex = (b.frame.anchors.len + 1).uint16
+    b.frame.anchors.add(UiNodeAnchor())
+    return b.frame.anchors[^1]
+  b.frame.anchors[node.anchorIndex - 1]
+
+proc ensureNodeTransform*(b: var UiBuilder, node: ptr UiNode): var UiNodeTransform {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's transform data.
+  if node.transformIndex == 0:
+    node.transformIndex = (b.frame.transforms.len + 1).uint16
+    b.frame.transforms.add(UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32)))
+    return b.frame.transforms[^1]
+  b.frame.transforms[node.transformIndex - 1]
+
+proc ensureNodeCustomCommands*(b: var UiBuilder, node: ptr UiNode): var ArrayView[UiRenderCommand] {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's custom render commands.
+  if node.commandsIndex == 0:
+    node.commandsIndex = (b.frame.customCommands.len + 1).uint16
+    b.frame.customCommands.add(default(ArrayView[UiRenderCommand]))
+    return b.frame.customCommands[^1]
+  b.frame.customCommands[node.commandsIndex - 1]
+
+proc ensureNodeCustomLayout*(b: var UiBuilder, node: ptr UiNode): var UiNodeCustomLayout {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's custom layout proc.
+  if node.customLayoutIndex == 0:
+    node.customLayoutIndex = (b.frame.customLayouts.len + 1).uint16
+    b.frame.customLayouts.add(default(UiNodeCustomLayout))
+    return b.frame.customLayouts[^1]
+  b.frame.customLayouts[node.customLayoutIndex - 1]
+
+proc ensureNodeCustomChildLayout*(b: var UiBuilder, node: ptr UiNode): var UiNodeCustomLayout {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's custom child layout proc.
+  if node.customChildLayoutIndex == 0:
+    node.customChildLayoutIndex = (b.frame.customLayouts.len + 1).uint16
+    b.frame.customLayouts.add(default(UiNodeCustomLayout))
+    return b.frame.customLayouts[^1]
+  b.frame.customLayouts[node.customChildLayoutIndex - 1]
+
+proc nodeText*(b: UiBuilder, idx: int): ptr UiNodeText {.inline.} =
+  ## Get the text data for node at idx, or a pointer to the default text if unset.
+  let n = b.frame.nodes[idx]
+  let textSlot = int(n.textIndex)
+  if textSlot > 0 and textSlot <= b.frame.texts.len: addr(b.frame.texts[textSlot - 1]) else: addr(b.defaultText)
+
+proc nodeStyle*(b: UiBuilder, idx: int): ptr UiStyle {.inline.} =
+  ## Get the style for node at idx, or a pointer to the default style if unset.
+  let n = b.frame.nodes[idx]
+  let styleSlot = int(n.styleIndex)
+  if styleSlot > 0 and styleSlot <= b.frame.styles.len: addr(b.frame.styles[styleSlot - 1]) else: addr(b.defaultStyle)
+
+proc nodeGap*(b: UiBuilder, idx: int): float32 {.inline.} =
+  ## Get the gap value for node at idx, or 0.0 if unset.
+  let n = b.frame.nodes[idx]
+  let gapSlot = int(n.gapIndex)
+  if gapSlot > 0 and gapSlot <= b.frame.gaps.len: b.frame.gaps[gapSlot - 1] else: 0.0'f32
+
+proc nodeAnchor*(b: UiBuilder, idx: int): ptr UiNodeAnchor {.inline.} =
+  ## Get the anchor data for node at idx, or a pointer to the default anchor if unset.
+  let n = b.frame.nodes[idx]
+  let anchorSlot = int(n.anchorIndex)
+  if anchorSlot > 0 and anchorSlot <= b.frame.anchors.len: addr(b.frame.anchors[anchorSlot - 1]) else: addr(b.defaultAnchor)
+
+proc nodeTransform*(b: UiBuilder, idx: int): ptr UiNodeTransform {.inline.} =
+  ## Get the transform for node at idx, or a pointer to the default transform if unset.
+  let n = b.frame.nodes[idx]
+  let transformSlot = int(n.transformIndex)
+  if transformSlot > 0 and transformSlot <= b.frame.transforms.len: addr(b.frame.transforms[transformSlot - 1]) else: addr(b.defaultTransform)
+
+proc nodeCustomCommands*(b: UiBuilder, idx: int): ptr ArrayView[UiRenderCommand] {.inline.} =
+  ## Get the custom render commands for node at idx, or a pointer to the default empty view if unset.
+  let n = b.frame.nodes[idx]
+  let commandsSlot = int(n.commandsIndex)
+  if commandsSlot > 0 and commandsSlot <= b.frame.customCommands.len: addr(b.frame.customCommands[commandsSlot - 1]) else: addr(b.defaultCustomCommands)
+
+proc nodeCustomLayout*(b: UiBuilder, idx: int): ptr UiNodeCustomLayout {.inline.} =
+  ## Get the custom layout for node at idx, or a pointer to the default (no-op) layout if unset.
+  let n = b.frame.nodes[idx]
+  let customLayoutSlot = int(n.customLayoutIndex)
+  if customLayoutSlot > 0 and customLayoutSlot <= b.frame.customLayouts.len: addr(b.frame.customLayouts[customLayoutSlot - 1]) else: addr(b.defaultCustomLayout)
+
+proc nodeCustomChildLayout*(b: UiBuilder, idx: int): ptr UiNodeCustomLayout {.inline.} =
+  ## Get the custom child layout for node at idx, or a pointer to the default (no-op) layout if unset.
+  let n = b.frame.nodes[idx]
+  let customLayoutSlot = int(n.customChildLayoutIndex)
+  if customLayoutSlot > 0 and customLayoutSlot <= b.frame.customLayouts.len: addr(b.frame.customLayouts[customLayoutSlot - 1]) else: addr(b.defaultCustomLayout)
+
+proc nodeText*(b: UiBuilder, node: ptr UiNode): ptr UiNodeText {.inline.} =
+  ## Get the text data for the given node, or a pointer to the default text if unset.
+  let textSlot = int(node.textIndex)
+  if textSlot > 0 and textSlot <= b.frame.texts.len: addr(b.frame.texts[textSlot - 1]) else: addr(b.defaultText)
+
+proc nodeStyle*(b: UiBuilder, node: ptr UiNode): ptr UiStyle {.inline.} =
+  ## Get the style for the given node, or a pointer to the default style if unset.
+  let styleSlot = int(node.styleIndex)
+  if styleSlot > 0 and styleSlot <= b.frame.styles.len: addr(b.frame.styles[styleSlot - 1]) else: addr(b.defaultStyle)
+
+proc nodeGap*(b: UiBuilder, node: ptr UiNode): float32 {.inline.} =
+  ## Get the gap value for the given node, or 0.0 if unset.
+  let gapSlot = int(node.gapIndex)
+  if gapSlot > 0 and gapSlot <= b.frame.gaps.len: b.frame.gaps[gapSlot - 1] else: 0.0'f32
+
+proc nodeAnchor*(b: UiBuilder, node: ptr UiNode): ptr UiNodeAnchor {.inline.} =
+  ## Get the anchor data for the given node, or a pointer to the default anchor if unset.
+  let anchorSlot = int(node.anchorIndex)
+  if anchorSlot > 0 and anchorSlot <= b.frame.anchors.len: addr(b.frame.anchors[anchorSlot - 1]) else: addr(b.defaultAnchor)
+
+proc nodeTransform*(b: UiBuilder, node: ptr UiNode): ptr UiNodeTransform {.inline.} =
+  ## Get the transform for the given node, or a pointer to the default transform if unset.
+  let transformSlot = int(node.transformIndex)
+  if transformSlot > 0 and transformSlot <= b.frame.transforms.len: addr(b.frame.transforms[transformSlot - 1]) else: addr(b.defaultTransform)
+
+proc nodeCustomCommands*(b: UiBuilder, node: ptr UiNode): ptr ArrayView[UiRenderCommand] {.inline.} =
+  ## Get the custom render commands for the given node, or a pointer to the default empty view if unset.
+  let commandsSlot = int(node.commandsIndex)
+  if commandsSlot > 0 and commandsSlot <= b.frame.customCommands.len: addr(b.frame.customCommands[commandsSlot - 1]) else: addr(b.defaultCustomCommands)
+
+proc nodeCustomLayout*(b: UiBuilder, node: ptr UiNode): ptr UiNodeCustomLayout {.inline.} =
+  ## Get the custom layout for the given node, or a pointer to the default (no-op) layout if unset.
+  let customLayoutSlot = int(node.customLayoutIndex)
+  if customLayoutSlot > 0 and customLayoutSlot <= b.frame.customLayouts.len: addr(b.frame.customLayouts[customLayoutSlot - 1]) else: addr(b.defaultCustomLayout)
+
+proc nodeCustomChildLayout*(b: UiBuilder, node: ptr UiNode): ptr UiNodeCustomLayout {.inline.} =
+  ## Get the custom child layout for the given node, or a pointer to the default (no-op) layout if unset.
+  let customLayoutSlot = int(node.customChildLayoutIndex)
+  if customLayoutSlot > 0 and customLayoutSlot <= b.frame.customLayouts.len: addr(b.frame.customLayouts[customLayoutSlot - 1]) else: addr(b.defaultCustomLayout)
+
+proc setNodeText*(b: var UiBuilder, idx: int, value: UiNodeText) {.inline.} =
+  ## Set the text data for the node at idx.
+  b.ensureNodeText(b.frame.nodes[idx].addr) = value
+
+proc setNodeStyle*(b: var UiBuilder, idx: int, value: UiStyle) {.inline.} =
+  ## Set the style for the node at idx.
+  b.ensureNodeStyle(b.frame.nodes[idx].addr) = value
+
+proc setNodeStyleIndex*(b: var UiBuilder, idx: int, value: uint16) {.inline.} =
+  ## Set the style index for the node at idx, referencing a theme style slot directly.
+  b.frame.nodes[idx].styleIndex = value
+
+proc setNodeStyleIndex*(b: var UiBuilder, idx: int, value: int) {.inline.} =
+  ## Set the style index for the node at idx. Negative values are clamped to 0.
+  b.setNodeStyleIndex(idx, max(0, value).uint16)
+
+proc copyNodeStyleAtIndex*(b: var UiBuilder, idx: int, styleIndex: uint16) {.inline.} =
+  ## Copy a theme style into the node's own style slot by theme index.
+  let slot = int(styleIndex)
+  if slot <= 0 or slot > b.frame.styles.len:
+    return
+  b.ensureNodeStyle(b.frame.nodes[idx].addr) = b.frame.styles[slot - 1]
+
+proc copyNodeStyleAtIndex*(b: var UiBuilder, idx: int, styleIndex: int) {.inline.} =
+  ## Copy a theme style into the node's own style slot by theme index (int overload).
+  b.copyNodeStyleAtIndex(idx, max(0, styleIndex).uint16)
+
+proc setNodeGap*(b: var UiBuilder, idx: int, value: float32) {.inline.} =
+  ## Set the gap value for the node at idx.
+  b.ensureNodeGap(b.frame.nodes[idx].addr) = value
+
+proc setNodeAnchor*(b: var UiBuilder, idx: int, value: UiNodeAnchor) {.inline.} =
+  ## Set the anchor data for the node at idx.
+  b.ensureNodeAnchor(b.frame.nodes[idx].addr) = value
+
+proc setNodeTransform*(b: var UiBuilder, idx: int, value: UiNodeTransform) {.inline.} =
+  ## Set the transform for the node at idx.
+  b.ensureNodeTransform(b.frame.nodes[idx].addr) = value
+
+proc setNodeCustomCommands*(b: var UiBuilder, idx: int, value: ArrayView[UiRenderCommand]) {.inline.} =
+  ## Set the custom render commands for the node at idx.
+  b.ensureNodeCustomCommands(b.frame.nodes[idx].addr) = value
+
+proc setNodeCustomChildLayout*(b: var UiBuilder, idx: int, value: UiNodeCustomLayout) {.inline.} =
+  ## Set the custom child layout for the node at idx.
+  b.ensureNodeCustomChildLayout(b.frame.nodes[idx].addr) = value
+
+proc currentNodeText*(b: UiBuilder): ptr UiNodeText {.inline.} =
+  ## Get the text data for the current node.
+  b.nodeText(b.currentNode)
+
+proc currentNodeStyle*(b: UiBuilder): ptr UiStyle {.inline.} =
+  ## Get the style for the current node.
+  b.nodeStyle(b.currentNode)
+
+proc currentNodeGap*(b: UiBuilder): float32 {.inline.} =
+  ## Get the gap value for the current node.
+  b.nodeGap(b.currentNode)
+
+proc currentNodeAnchor*(b: UiBuilder): ptr UiNodeAnchor {.inline.} =
+  ## Get the anchor data for the current node.
+  b.nodeAnchor(b.currentNode)
+
+proc currentNodeTransform*(b: UiBuilder): ptr UiNodeTransform {.inline.} =
+  ## Get the transform for the current node.
+  b.nodeTransform(b.currentNode)
+
+proc currentNodeCustomCommands*(b: UiBuilder): ptr ArrayView[UiRenderCommand] {.inline.} =
+  ## Get the custom render commands for the current node.
+  b.nodeCustomCommands(b.currentNode)
+
+proc currentNodeCustomChildLayout*(b: UiBuilder): ptr UiNodeCustomLayout {.inline.} =
+  ## Get the custom child layout for the current node.
+  b.nodeCustomChildLayout(b.currentNode)
+
+proc traceEvent*(b: var UiBuilder, nodeId: UiNodeId, event: string) {.inline, raises: [].} =
+  ## Record an event string for the node with the given id. Events are cleared
+  ## at the beginning of each frame (see `beginUiFrame`). Recording is gated by
+  ## `traceMode`: nothing is recorded in `TraceNone`, only `traceNodeId` in
+  ## `TraceNodeId`, and all nodes in `TraceAll`.
+  case b.traceMode
+  of TraceNone:
+    return
+  of TraceNodeId:
+    if nodeId != b.traceNodeId:
+      return
+  of TraceAll:
+    discard
+  let key = uint64(nodeId)
+  b.eventTraces.mgetOrPut(key, @[]).add(event)
+
+proc traceEvent*(b: var UiBuilder, event: string): var UiBuilder {.discardable, inline, raises: [].} =
+  ## Record an event string for the current node. Returns the builder for chaining
+  ## (see `traceEvent`).
+  b.traceEvent(b.currentNode.id, event)
+  b
+
+proc eventTracesFor*(b: UiBuilder, nodeId: UiNodeId): seq[string] {.inline, raises: [].} =
+  ## Return the recorded event sequence for the node with the given id, or an empty seq.
+  let key = uint64(nodeId)
+  return b.eventTraces.getOrDefault(key, @[])
+
+proc currentNodeEventTraces*(b: UiBuilder): seq[string] {.inline, raises: [].} =
+  ## Return the recorded event sequence for the current node.
+  b.eventTracesFor(b.currentNode.id)
+
+proc setTraceMode*(b: var UiBuilder, mode: UiTraceMode): var UiBuilder {.discardable, inline, raises: [].} =
+  ## Set the trace mode. For `TraceNodeId`, also set `traceNodeId` via the
+  ## `nodeId` argument (defaults to none).
+  b.traceMode = mode
+  b
+
+proc setTraceMode*(b: var UiBuilder, mode: UiTraceMode, nodeId: UiNodeId): var UiBuilder {.discardable, inline, raises: [].} =
+  ## Set the trace mode and, for `TraceNodeId`, the specific node to trace.
+  b.traceMode = mode
+  b.traceNodeId = nodeId
+  b
+
+proc setCurrentNodeText*(b: var UiBuilder, value: UiNodeText) {.inline.} =
+  ## Set the text data for the current node.
+  b.ensureNodeText(b.currentNode) = value
+
+proc setCurrentNodeTextIndex*(b: var UiBuilder, value: uint16) {.inline.} =
+  ## Set the text index for the current node, referencing a theme text slot directly.
+  b.currentNode.textIndex = value
+
+proc setCurrentNodeTextIndex*(b: var UiBuilder, value: int) {.inline.} =
+  ## Set the text index for the current node. Negative values are clamped to 0.
+  b.currentNode.textIndex = max(0, value).uint16
+
+proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, textIndex: uint16) {.inline.} =
+  ## Copy a theme style into the current node's own style slot by theme index.
+  let slot = int(textIndex)
+  if slot <= 0 or slot > b.frame.texts.len:
+    return
+  if b.currentNode.textIndex.int < b.themeTextStyles.len:
+    b.currentNode.textIndex = 0
+  let dst = b.ensureNodeText(b.currentNode).addr
+  let source = b.frame.texts[slot - 1].addr
+  dst.fontSize = source.fontSize
+  dst.fontId = source.fontId
+  dst.textColor = source.textColor
+  dst.text = "".uiString
+  dst.measuredTextSizeCache = vec2(0)
+  dst.measuredTextDirty = false
+
+proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, textIndex: int) {.inline.} =
+  ## Copy a theme style into the current node's own style slot by theme index (int overload).
+  b.copyCurrentNodeTextAtIndex(max(0, textIndex).uint16)
+
+proc ensureThemeTextStyleSlot(b: var UiBuilder, styleIndex: uint16): var UiNodeText =
+  let slot = int(styleIndex)
+  if slot <= 0:
+    return b.defaultText
+  if b.themeTextStyles.len < slot:
+    let oldLen = b.themeTextStyles.len
+    b.themeTextStyles.setLen(slot)
+    for i in oldLen ..< b.themeTextStyles.len:
+      b.themeTextStyles[i] = b.defaultText
+  b.themeTextStyles[slot - 1]
+
+proc addThemeTextStyle*(b: var UiBuilder, text: UiNodeText): uint16 =
+  result = b.themeTextStyles.len.uint16 + 1
+  b.ensureThemeTextStyleSlot(result) = text
+
+proc themeTextStyle*(b: UiBuilder, textStyleIndex: uint16): ptr UiNodeText {.inline.} =
+  ## Get a pointer to a theme text style slot by index.
+  let slot = int(textStyleIndex)
+  if slot > 0 and slot <= b.themeTextStyles.len: addr(b.themeTextStyles[slot - 1]) else: addr(b.defaultText)
+
+proc themeTextStyle*(b: UiBuilder, textStyleIndex: int): ptr UiNodeText {.inline.} =
+  ## Get a pointer to a theme text style slot by index (int overload).
+  b.themeTextStyle(max(0, textStyleIndex).uint16)
+
+proc setThemeTextStyle*(b: var UiBuilder, textStyleIndex: uint16, value: UiNodeText): var UiBuilder {.discardable.} =
+  ## Set a theme text style slot by index. Also updates defaultText if setting the default slot.
+  b.ensureThemeTextStyleSlot(textStyleIndex) = value
+  if textStyleIndex == UiStyleIndexDefault:
+    b.defaultText = value
+  b
+
+proc setThemeTextStyle*(b: var UiBuilder, styleIndex: int, value: UiNodeText): var UiBuilder {.discardable.} =
+  ## Set a theme style slot by index (int overload).
+  b.setThemeTextStyle(max(0, styleIndex).uint16, value)
+
+proc setCurrentNodeStyle*(b: var UiBuilder, value: UiStyle) {.inline.} =
+  ## Set the style for the current node.
+  b.ensureNodeStyle(b.currentNode) = value
+
+proc setCurrentNodeStyleIndex*(b: var UiBuilder, value: uint16) {.inline.} =
+  ## Set the style index for the current node, referencing a theme style slot directly.
+  b.currentNode.styleIndex = value
+
+proc setCurrentNodeStyleIndex*(b: var UiBuilder, value: int) {.inline.} =
+  ## Set the style index for the current node. Negative values are clamped to 0.
+  b.currentNode.styleIndex = max(0, value).uint16
+
+proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: uint16) {.inline.} =
+  ## Copy a theme style into the current node's own style slot by theme index.
+  let slot = int(styleIndex)
+  if slot <= 0 or slot > b.frame.styles.len:
+    return
+  if b.currentNode.styleIndex.int < b.themeStyles.len:
+    b.currentNode.styleIndex = 0
+  b.ensureNodeStyle(b.currentNode) = b.frame.styles[slot - 1]
+
+proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: int) {.inline.} =
+  ## Copy a theme style into the current node's own style slot by theme index (int overload).
+  b.copyCurrentNodeStyleAtIndex(max(0, styleIndex).uint16)
+
+proc ensureThemeStyleSlot(b: var UiBuilder, styleIndex: uint16): var UiStyle =
+  let slot = int(styleIndex)
+  if slot <= 0:
+    return b.defaultStyle
+  if b.themeStyles.len < slot:
+    let oldLen = b.themeStyles.len
+    b.themeStyles.setLen(slot)
+    for i in oldLen ..< b.themeStyles.len:
+      b.themeStyles[i] = b.defaultStyle
+  b.themeStyles[slot - 1]
+
+proc themeStyle*(b: UiBuilder, styleIndex: uint16): ptr UiStyle {.inline.} =
+  ## Get a pointer to a theme style slot by index.
+  let slot = int(styleIndex)
+  if slot > 0 and slot <= b.themeStyles.len: addr(b.themeStyles[slot - 1]) else: addr(b.defaultStyle)
+
+proc themeStyle*(b: UiBuilder, styleIndex: int): ptr UiStyle {.inline.} =
+  ## Get a pointer to a theme style slot by index (int overload).
+  b.themeStyle(max(0, styleIndex).uint16)
+
+proc setThemeStyle*(b: var UiBuilder, styleIndex: uint16, value: UiStyle): var UiBuilder {.discardable.} =
+  ## Set a theme style slot by index. Also updates defaultStyle if setting the default slot.
+  b.ensureThemeStyleSlot(styleIndex) = value
+  if styleIndex == UiStyleIndexDefault:
+    b.defaultStyle = value
+  b
+
+proc setThemeStyle*(b: var UiBuilder, styleIndex: int, value: UiStyle): var UiBuilder {.discardable.} =
+  ## Set a theme style slot by index (int overload).
+  b.setThemeStyle(max(0, styleIndex).uint16, value)
+
+proc virtualizeNode*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Mark the current node so that, if it is absent from a future frame, it is
+  ## automatically promoted into a persistent virtual node (see `endUiFrame`).
+  b.currentNode.flags.incl VirtualizeNode
+  b
+
+proc virtualizeNode*(b: var UiBuilder, animations: seq[UiFieldAnimation]): var UiBuilder {.discardable.} =
+  ## Mark the current node to be virtualized (see `virtualizeNode()`) and record the
+  ## given per-field `animations` to attach to the resulting virtual node.
+  b.currentNode.flags.incl VirtualizeNode
+  b.virtualNodeAnimations[uint64(b.currentNode.id)] = animations
+  b
+
+proc styleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
+  ## Fluent setter: set the current node's style index to a theme slot.
+  b.setCurrentNodeStyleIndex(value)
+  b
+
+proc styleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
+  ## Fluent setter: set the current node's style index to a theme slot (int overload).
+  b.setCurrentNodeStyleIndex(value)
+  b
+
+proc copyStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme style into the current node's style slot.
+  b.copyCurrentNodeStyleAtIndex(value)
+  b
+
+proc copyStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme style into the current node's style slot (int overload).
+  b.copyCurrentNodeStyleAtIndex(value)
+  b
+
+proc textStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
+  ## Fluent setter: set the current node's text style index to a theme slot (int overload).
+  b.setCurrentNodeTextIndex(value)
+  b
+
+proc copyTextStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme text style into the current node's text slot.
+  b.copyCurrentNodeTextAtIndex(value)
+  b
+
+proc copyTextStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme text style into the current node's text slot (int overload).
+  b.copyCurrentNodeTextAtIndex(value)
+  b
+
+proc setCurrentNodeGap*(b: var UiBuilder, value: float32) {.inline.} =
+  ## Set the gap value for the current node.
+  b.ensureNodeGap(b.currentNode) = value
+
+proc setCurrentNodeAnchor*(b: var UiBuilder, value: UiNodeAnchor) {.inline.} =
+  ## Set the anchor data for the current node.
+  b.ensureNodeAnchor(b.currentNode) = value
+
+proc setCurrentNodeTransform*(b: var UiBuilder, value: UiNodeTransform) {.inline.} =
+  ## Set the transform for the current node.
+  b.ensureNodeTransform(b.currentNode) = value
+
+proc setCurrentNodeCustomCommands*(b: var UiBuilder, value: ArrayView[UiRenderCommand]) {.inline.} =
+  ## Set the custom render commands for the current node.
+  b.ensureNodeCustomCommands(b.currentNode) = value
+
+proc setCurrentNodeCustomChildLayout*(b: var UiBuilder, value: UiNodeCustomLayout) {.inline.} =
+  ## Set the custom child layout for the current node.
+  b.ensureNodeCustomChildLayout(b.currentNode) = value
+
+const
+  UiIdOffsetBasis = 1469598103934665603'u64
+  UiIdPrime = 1099511628211'u64
+  UiIdRootSeed = 0xD1CE_BA5E_1234_5678'u64
+  UiIdAutoSeed = 0x9E37_79B9_7F4A_7C15'u64
+
+func mixIdByte(hash: uint64, value: uint8): uint64 {.inline.} =
+  (hash xor value.uint64) * UiIdPrime
+
+func hashUint64(value: uint64): uint64 =
+  var hash = UiIdOffsetBasis
+  var v = value
+  for _ in 0 ..< 8:
+    hash = mixIdByte(hash, (v and 0xFF'u64).uint8)
+    v = v shr 8
+  hash
+
+func hashChars*(value: openArray[char]): uint64 =
+  ## Hash a char sequence using FNV-1a for deterministic node ID generation.
+  var hash = UiIdOffsetBasis
+  for ch in value:
+    hash = mixIdByte(hash, ch.uint8)
+  hash
+
+func combineIdHash(seed, part: uint64): uint64 {.inline.} =
+  var hash = (seed xor UiIdOffsetBasis) * UiIdPrime
+  hash = (hash xor part) * UiIdPrime
+  if hash == 0'u64:
+    return 1'u64
+  hash
+
+func toNodeId*(value: uint64): UiNodeId {.inline.} =
+  ## Convert a uint64 to a UiNodeId. Zero is remapped to 1 (the none node is 0).
+  UiNodeId(if value == 0'u64: 1'u64 else: value)
+
+func nodeIdValue*(value: UiNodeId): uint64 {.inline.} =
+  ## Extract the raw uint64 value from a UiNodeId.
+  uint64(value)
+
+func rootNodeId*(): UiNodeId {.inline.} =
+  ## Returns the deterministic ID of the root node (always created at frame start).
+  toNodeId(combineIdHash(UiIdRootSeed, hashChars("root")))
+
+iterator children*(b: UiBuilder, idx: int, frame: ptr UiFrame): int =
+  ## Iterate over the child indices of the node at idx in the given frame.
+  if idx >= 0 and idx < frame.nodes.len:
+    let tail = frame.nodes[idx].lastChild
+    if tail >= 0:
+      let start = int(frame.nodes[int(tail)].nextSibling)
+      var child = start
+      while true:
+        yield child
+        if child == int(tail):
+          break
+        child = int(frame.nodes[child].nextSibling)
+
+iterator children*(b: UiBuilder, node: ptr UiNode, frame: ptr UiFrame): int =
+  ## Iterate over the child indices of the node in the given frame.
+  let tail = node.lastChild
+  if tail >= 0:
+    let start = int(frame.nodes[int(tail)].nextSibling)
+    var child = start
+    while true:
+      yield child
+      if child == int(tail):
+        break
+      child = int(frame.nodes[child].nextSibling)
+
+iterator children*(b: UiBuilder, idx: int): int =
+  ## Iterate over the child indices of the node at idx in the current frame.
+  if idx >= 0 and idx < b.frame.nodes.len:
+    let tail = b.frame.nodes[idx].lastChild
+    if tail >= 0:
+      let start = int(b.frame.nodes[int(tail)].nextSibling)
+      var child = start
+      while true:
+        yield child
+        if child == int(tail):
+          break
+        child = int(b.frame.nodes[child].nextSibling)
+
+proc childCount*(b: UiBuilder, idx: int): int =
+  ## Return the number of children of the node at idx.
+  result = 0
+  for _ in b.children(idx):
+    result.inc
+
+proc firstChildIndex*(b: UiBuilder, idx: int): int {.inline.} =
+  ## Return the index of the first child of the node at idx, or -1 if it has no children.
+  if idx < 0 or idx >= b.frame.nodes.len:
+    return -1
+
+  let tail = b.frame.nodes[idx].lastChild
+  if tail < 0:
+    return -1
+
+  int(b.frame.nodes[int(tail)].nextSibling)
+
+proc hasLayout*(flags: UiFlags): bool {.inline.} =
+  ## Returns true if the flags contain either LayoutVertical or LayoutHorizontal.
+  LayoutVertical in flags or LayoutHorizontal in flags
+
+proc isAnchoredLayoutX*(node: UiNode): bool {.inline.} =
+  ## Returns true if the node uses anchored layout on the X axis.
+  AnchorX in node.flags
+
+proc isAnchoredLayoutY*(node: UiNode): bool {.inline.} =
+  ## Returns true if the node uses anchored layout on the Y axis.
+  AnchorY in node.flags
+
+proc isAnchoredLayout*(node: UiNode): bool {.inline.} =
+  ## Returns true if the node uses anchored layout on either axis.
+  isAnchoredLayoutX(node) or isAnchoredLayoutY(node)
+
+proc isHorizontalLayout*(flags: UiFlags): bool {.inline.} =
+  ## Returns true if the flags indicate a horizontal layout.
+  LayoutHorizontal in flags
+
+proc isVerticalLayout*(flags: UiFlags): bool {.inline.} =
+  ## Returns true if the flags indicate a vertical layout.
+  LayoutVertical in flags
+
+proc isReverseLayout*(flags: UiFlags): bool {.inline.} =
+  ## Returns true if the flags indicate reverse direction layout.
+  DirectionReverse in flags
+
+proc setNodeLayoutKind*(flags: var UiFlags, value: UiFlag) {.inline.} =
+  ## Set the layout kind flag, clearing both LayoutVertical and LayoutHorizontal first.
+  flags.excl LayoutVertical
+  flags.excl LayoutHorizontal
+  flags.incl value
+
+proc setNodeDirectionKind*(flags: var UiFlags, value: UiFlag) {.inline.} =
+  ## Set the direction kind flag, clearing DirectionReverse first.
+  flags.excl DirectionReverse
+  if value == DirectionReverse:
+    flags.incl DirectionReverse
+
+proc nextAutoNodeKey*(b: var UiBuilder, parentIndex: int): uint64 =
+  ## Return the next auto-generated child key for the given parent, incrementing its counter.
+  if parentIndex < 0 or parentIndex >= b.autoChildCounter.len:
+    return 1'u64
+
+  let current = b.autoChildCounter[parentIndex]
+  b.autoChildCounter[parentIndex] = current + 1
+  current.uint64 + 1'u64
+
+func noneIdScopeHash*(): uint64 {.inline.} =
+  ## Returns the base hash value used when no ID scope is active.
+  UiIdOffsetBasis
+
+func currentNodePathId*(b: UiBuilder): UiNodeId {.inline.} =
+  ## Returns the node ID at the top of the ID stack, or the root node ID if empty.
+  if b.nodeIdStack.len > 0:
+    b.nodeIdStack[^1]
+  else:
+    rootNodeId()
+
+func currentIdSeed*(b: UiBuilder): uint64 {.inline.} =
+  ## Compute the current ID seed by combining the node path ID with any active ID scope.
+  var seed = nodeIdValue(b.currentNodePathId())
+  if b.idScopeStack.len > 0:
+    seed = combineIdHash(seed, b.idScopeStack[^1])
+  seed
+
+proc computeChildNodeId(b: var UiBuilder, parentIndex: int, explicitKeyHash: uint64): UiNodeId =
+  let keyHash =
+    if explicitKeyHash != 0'u64:
+      explicitKeyHash
+    else:
+      combineIdHash(UiIdAutoSeed, hashUint64(b.nextAutoNodeKey(parentIndex)))
+  toNodeId(combineIdHash(b.currentIdSeed(), keyHash))
+
+proc generateId*(b: var UiBuilder): UiNodeId =
+  b.computeChildNodeId(b.stack[^1], 0)
+
+proc generateId*(b: var UiBuilder, value: uint64): UiNodeId =
+  b.computeChildNodeId(b.stack[^1], hashUint64(value))
+
+proc generateId*(b: var UiBuilder, value: string): UiNodeId =
+  b.computeChildNodeId(b.stack[^1], hashChars(value))
+
+proc pushId*(b: var UiBuilder, value: uint64): var UiBuilder {.discardable.} =
+  ## Push an ID scope by hashing the given uint64 value onto the scope stack.
+  let parentHash = if b.idScopeStack.len > 0: b.idScopeStack[^1] else: noneIdScopeHash()
+  b.idScopeStack.add combineIdHash(parentHash, hashUint64(value))
+  b
+
+proc pushId*(b: var UiBuilder, value: openArray[char]): var UiBuilder {.discardable.} =
+  ## Push an ID scope by hashing the given char array onto the scope stack.
+  let parentHash = if b.idScopeStack.len > 0: b.idScopeStack[^1] else: noneIdScopeHash()
+  b.idScopeStack.add combineIdHash(parentHash, hashChars(value))
+  b
+
+proc popId*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Pop the top ID scope from the stack.
+  if b.idScopeStack.len > 0:
+    discard b.idScopeStack.pop()
+  b
+
+proc clearFrameOutput(output: var UiFrameOutput) =
+  output.hoveredId = noneNodeId()
+  output.hoveredIndex = -1
+  output.scrolledId = noneNodeId()
+  output.scrolledIndex = -1
+  output.hoverBeganId = noneNodeId()
+  output.hoverEndedId = noneNodeId()
+  output.pressedId = noneNodeId()
+  output.pressedIndex = -1
+  output.heldId = noneNodeId()
+  output.heldIndex = -1
+  output.rightPressedId = noneNodeId()
+  output.rightPressedIndex = -1
+  output.clickedId = noneNodeId()
+  output.clickedIndex = -1
+  output.rightClickedId = noneNodeId()
+  output.rightClickedIndex = -1
+  output.commandLayers.setLen(0)
+  output.commands.setLen(0)
+
+proc initDefaultThemeStyles(): seq[UiStyle] =
+  result = newSeq[UiStyle](UiThemeStyleSlotCount)
+
+  let panelFill = UiColor(r: 0.14'f32, g: 0.16'f32, b: 0.20'f32, a: 1.0'f32)
+  let panelBorder = UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32)
+  let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
+  let softFill = UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.16'f32, a: 0.96'f32)
+
+  result[int(UiStyleIndexDefault) - 1] = UiStyle(
+  )
+  result[int(UiStyleIndexWindow) - 1] = UiStyle(
+    borderWidth: 1.0'f32,
+    cornerRadius: 6.0'f32,
+    fillColor: softFill,
+    borderColor: panelBorder,
+  )
+  result[int(UiStyleIndexWindowTitleBar) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 8.0'f32,
+    fillColor: UiColor(r: 0.18'f32, g: 0.22'f32, b: 0.30'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexWindowTitleBarCollapseHover) - 1] = UiStyle(
+    cornerRadius: 2.0'f32,
+    fillColor: UiColor(r: 0.28'f32, g: 0.32'f32, b: 0.40'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexWindowContent) - 1] = UiStyle(
+    paddingX: 0.0'f32,
+    paddingY: 0.0'f32,
+  )
+  result[int(UiStyleIndexWindowResizeHandle) - 1] = UiStyle(
+    cornerRadius: 2.0'f32,
+    fillColor: UiColor(r: 0.44'f32, g: 0.52'f32, b: 0.64'f32, a: 0.95'f32),
+  )
+  result[int(UiStyleIndexButton) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.22'f32, g: 0.25'f32, b: 0.30'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexButtonHover) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.90'f32, g: 0.35'f32, b: 0.42'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexCheckbox) - 1] = UiStyle(
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: panelFill,
+    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexCheckboxHover) - 1] = UiStyle(
+    borderWidth: 2.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.20'f32, g: 0.23'f32, b: 0.30'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.86'f32, g: 0.90'f32, b: 0.98'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexCheckboxMark) - 1] = UiStyle(
+    fillColor: accentWarm,
+  )
+  result[int(UiStyleIndexSlider) - 1] = UiStyle(
+  )
+  result[int(UiStyleIndexSliderTrack) - 1] = UiStyle(
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: panelFill,
+    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexSliderTrackHover) - 1] = UiStyle(
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.20'f32, g: 0.23'f32, b: 0.30'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexSliderFill) - 1] = UiStyle(
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.34'f32, g: 0.58'f32, b: 0.86'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.34'f32, g: 0.58'f32, b: 0.86'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexSliderHandle) - 1] = UiStyle(
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexScrollBar) - 1] = UiStyle(
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.92'f32),
+  )
+  result[int(UiStyleIndexScrollBarHandle) - 1] = UiStyle(
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.45'f32, g: 0.52'f32, b: 0.64'f32, a: 0.95'f32),
+  )
+  result[int(UiStyleIndexScrollBarHandleHover) - 1] = UiStyle(
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.62'f32, g: 0.70'f32, b: 0.84'f32, a: 0.98'f32),
+  )
+  result[int(UiStyleIndexTabBarHeader) - 1] = UiStyle(
+    paddingX: 4.0'f32,
+    paddingY: 4.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 6.0'f32,
+    fillColor: UiColor(r: 0.14'f32, g: 0.18'f32, b: 0.24'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.34'f32, g: 0.42'f32, b: 0.54'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarItem) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.20'f32, g: 0.24'f32, b: 0.30'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.42'f32, g: 0.48'f32, b: 0.58'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarItemActive) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.34'f32, g: 0.42'f32, b: 0.56'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.88'f32, g: 0.76'f32, b: 0.30'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarContent) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 6.0'f32,
+    fillColor: UiColor(r: 0.11'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.30'f32, g: 0.38'f32, b: 0.50'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTextField) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.12'f32, g: 0.15'f32, b: 0.20'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.40'f32, g: 0.46'f32, b: 0.58'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTextFieldFocused) - 1] = UiStyle(
+    paddingX: 6.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.15'f32, g: 0.18'f32, b: 0.25'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.60'f32, g: 0.70'f32, b: 0.90'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTextFieldHint) - 1] = UiStyle(
+  )
+  result[int(UiStyleIndexTextCursor) - 1] = UiStyle(
+    fillColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexMenu) - 1] = UiStyle(
+    paddingX: 4.0'f32,
+    paddingY: 4.0'f32,
+    borderWidth: 1.0'f32,
+    cornerRadius: 6.0'f32,
+    fillColor: UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.16'f32, a: 0.98'f32),
+    borderColor: UiColor(r: 0.32'f32, g: 0.38'f32, b: 0.48'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexMenuItem) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.0'f32),
+    borderColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.0'f32),
+  )
+  result[int(UiStyleIndexMenuItemHover) - 1] = UiStyle(
+    paddingX: 8.0'f32,
+    paddingY: 6.0'f32,
+    borderWidth: 0.0'f32,
+    cornerRadius: 4.0'f32,
+    fillColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
+    borderColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
+  )
+
+const UiStyleIndexDefaultText* = 1
+const UiStyleIndexSmallText* = 2
+const UiStyleIndexLargeText* = 3
+const UiStyleIndexExtraLargeText* = 4
+const UiStyleIndexButtonText* = 5
+const UiStyleIndexMenuItemHoverText* = 6
+const UiStyleIndexMenuItemText* = 7
+const
+  UiStyleIndexLabelText* = 8
+  UiStyleIndexLabel* = 8'u16
+const UiStyleIndexWindowText* = 9
+const UiStyleIndexWindowTitleBarText* = 10
+const UiStyleIndexWindowContentText* = 11
+const UiStyleIndexButtonHoverText* = 12
+const UiStyleIndexCheckboxText* = 13
+const UiStyleIndexCheckboxHoverText* = 14
+const UiStyleIndexCheckboxMarkText* = 15
+const UiStyleIndexSliderText* = 16
+const UiStyleIndexTabBarHeaderText* = 17
+const UiStyleIndexTabBarItemText* = 18
+const UiStyleIndexTabBarItemActiveText* = 19
+const UiStyleIndexTabBarContentText* = 20
+const UiStyleIndexTextFieldText* = 21
+const UiStyleIndexTextFieldFocusedText* = 22
+const UiStyleIndexTextFieldHintText* = 23
+const UiStyleIndexMaxText* = 23
+
+proc initDefaultThemeTextStyles(): seq[UiNodeText] =
+  result = newSeq[UiNodeText](UiStyleIndexMaxText)
+
+  let defaultText = UiColor(r: 0.92'f32, g: 0.92'f32, b: 0.92'f32, a: 1.0'f32)
+  let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
+
+  result[int(UiStyleIndexDefaultText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Default".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexSmallText) - 1] = UiNodeText(
+    fontSize: 12,
+    text: "Small".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexLargeText) - 1] = UiNodeText(
+    fontSize: 20,
+    text: "Large".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexExtraLargeText) - 1] = UiNodeText(
+    fontSize: 50,
+    text: "Extra Large".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexButtonText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Button".uiString,
+    textColor: UiColor(r: 0.96'f32, g: 0.96'f32, b: 0.98'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexMenuItemHoverText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Menu Item Hover".uiString,
+    textColor: UiColor(r: 0.98'f32, g: 0.98'f32, b: 0.99'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexMenuItemText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Menu Item".uiString,
+    textColor: UiColor(r: 0.94'f32, g: 0.95'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexLabelText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Label".uiString,
+    textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexWindowText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Window".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexWindowTitleBarText) - 1] = UiNodeText(
+    fontSize: 20,
+    text: "Window Title Bar".uiString,
+    textColor: UiColor(r: 0.95'f32, g: 0.96'f32, b: 0.99'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexWindowContentText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Window Content".uiString,
+    textColor: UiColor(r: 0.90'f32, g: 0.92'f32, b: 0.96'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexButtonHoverText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Button Hover".uiString,
+    textColor: UiColor(r: 0.96'f32, g: 0.96'f32, b: 0.98'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexCheckboxText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Checkbox".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexCheckboxHoverText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Checkbox Hover".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexCheckboxMarkText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Checkbox Mark".uiString,
+    textColor: accentWarm,
+  )
+  result[int(UiStyleIndexSliderText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Slider".uiString,
+    textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarHeaderText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Tab Bar Header".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexTabBarItemText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Tab Bar Item".uiString,
+    textColor: UiColor(r: 0.86'f32, g: 0.88'f32, b: 0.92'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarItemActiveText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Tab Bar Item Active".uiString,
+    textColor: UiColor(r: 0.98'f32, g: 0.98'f32, b: 0.98'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTabBarContentText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Tab Bar Content".uiString,
+    textColor: defaultText,
+  )
+  result[int(UiStyleIndexTextFieldText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Text Field".uiString,
+    textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTextFieldFocusedText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Text Field Focused".uiString,
+    textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+  )
+  result[int(UiStyleIndexTextFieldHintText) - 1] = UiNodeText(
+    fontSize: 16,
+    text: "Text Field Hint".uiString,
+    textColor: UiColor(r: 0.50'f32, g: 0.55'f32, b: 0.65'f32, a: 1.0'f32),
+  )
+
+proc rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =
+  ## Construct a UiColor from numeric values (0-1 range for float, 0-255 for int).
+  UiColor(r: r.float32, g: g.float32, b: b.float32, a: a.float32)
+
+func hasPerCornerRadii*(style: UiStyle): bool {.inline.} =
+  style.cornerRadii.topLeft != 0.0'f32 or
+    style.cornerRadii.topRight != 0.0'f32 or
+    style.cornerRadii.bottomRight != 0.0'f32 or
+    style.cornerRadii.bottomLeft != 0.0'f32
+
+func hasPerSideBorderWidths*(style: UiStyle): bool {.inline.} =
+  style.borderWidths.left != 0.0'f32 or
+    style.borderWidths.top != 0.0'f32 or
+    style.borderWidths.right != 0.0'f32 or
+    style.borderWidths.bottom != 0.0'f32
+
+func hasColor(color: UiColor): bool {.inline.} =
+  color.r != 0.0'f32 or color.g != 0.0'f32 or
+    color.b != 0.0'f32 or color.a != 0.0'f32
+
+func hasPerSideBorderColors*(style: UiStyle): bool {.inline.} =
+  style.borderColors.left.hasColor or
+    style.borderColors.top.hasColor or
+    style.borderColors.right.hasColor or
+    style.borderColors.bottom.hasColor
+
+func resolvedCornerRadii*(style: UiStyle): UiCornerRadii {.inline.} =
+  if style.hasPerCornerRadii: style.cornerRadii
+  else: uniformCornerRadii(style.cornerRadius)
+
+func resolvedBorderWidths*(style: UiStyle): UiBorderWidths {.inline.} =
+  if style.hasPerSideBorderWidths: style.borderWidths
+  else: uniformBorderWidths(style.borderWidth)
+
+func resolvedBorderColors*(style: UiStyle): UiBorderColors {.inline.} =
+  if style.hasPerSideBorderColors: style.borderColors
+  else: uniformBorderColors(style.borderColor)
+
+proc fmt1*(value: float32): string =
+  ## Format a float32 to 1 decimal place.
+  formatFloat(value.float64, ffDecimal, 1)
+
+proc fmt2*(value: float32): string =
+  ## Format a float32 to 2 decimal places.
+  formatFloat(value.float64, ffDecimal, 2)
+
+proc nodeDebugName*(node: UiNode): string =
+  ## Return the debug name of a node, or "<unnamed>" if debug names are disabled or empty.
+  when defined(nuiDebug):
+    if node.debugName.len <= 0:
+      return "<unnamed>"
+    result = node.debugName
+  else:
+    return "<unnamed>"
+
+template traceUiNode*(b: UiBuilder, eventName: string, idx: int): untyped =
+  ## Log node details (id, pos, size, flags) when debugLogUi is defined.
+  when defined(debugLogUi) and not defined(nimony):
+    if idx >= 0 and idx < b.frame.nodes.len:
+      let n = b.frame.nodes[idx].addr
+      debugLog(
+        eventName &
+        " idx=" & $idx &
+        " id=" & $nodeIdValue(n.id) &
+        " pos=(" & fmt1(n.pos.x) & "," & fmt1(n.pos.y) & ")" &
+        " size=(" & fmt1(n.size.x) & "," & fmt1(n.size.y) & ")" &
+        " flags=" & $n.flags
+      )
+
+proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMeshFn = nil,
+  textHeight = 16.0'f32): UiBuilder =
+  ## Create a new UiBuilder with default theme styles and the given text metrics.
+  let frameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
+  let previousFrameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
+  frameArenaPtr[] = initArena(3 * 1024 * 1024)
+  previousFrameArenaPtr[] = initArena(3 * 1024 * 1024)
+
+  result = UiBuilder(
+    frame: UiFrame(
+      arena: frameArenaPtr,
+      arenaCheckpoint: 0'u64,
+      nodeIdToIndex: initTable[uint64, int](),
+    ),
+    previousFrame: UiFrame(
+      arena: previousFrameArenaPtr,
+      arenaCheckpoint: 0'u64,
+      nodeIdToIndex: initTable[uint64, int](),
+    ),
+    themeStyles: initDefaultThemeStyles(),
+    themeTextStyles: initDefaultThemeTextStyles(),
+    animations: @[],
+    animationSpeed: 1.0'f32,
+    defaultText: UiNodeText(measuredTextDirty: true, fontSize: textHeight, textColor: UiColor(r: 0.92'f32, g: 0.92'f32, b: 0.92'f32, a: 1.0'f32)),
+    defaultStyle: UiStyle(),
+    defaultAnchor: UiNodeAnchor(),
+    defaultTransform: UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32)),
+    currentNode: sentinelNode.addr,
+    lastNode: sentinelNode.addr,
+  )
+  result.measureText = measureText
+  result.buildTextMesh = buildTextMesh
+  result.previousOutput.clearFrameOutput()
+  result.frameOutput.clearFrameOutput()
+  if result.themeStyles.len >= int(UiStyleIndexDefault):
+    result.defaultStyle = result.themeStyles[int(UiStyleIndexDefault) - 1]
+
+proc findNodeIndexById*(nodes: openArray[UiNode], id: UiNodeId, indexHint = -1): int =
+  ## Find a node's index by its ID in a node array. Uses indexHint for a fast local search first.
+  if id == noneNodeId():
+    return -1
+
+  prof("findNodeIndexById")
+  if indexHint > 0 and nodes.len > 1:
+    let clampedIndexHint = clamp(indexHint, 0, nodes.high)
+    # prof("fast")
+    if nodes[clampedIndexHint].id == id:
+      return clampedIndexHint
+
+    var left = clampedIndexHint - 1
+    var right = clampedIndexHint + 1
+    while left >= 0 or right < nodes.len:
+      if right < nodes.len and nodes[right].id == id:
+        return right
+      if left >= 0 and nodes[left].id == id:
+        return left
+      dec left
+      inc right
+
+    return -1
+
+  # prof("slow")
+  for i in 0 ..< nodes.len:
+    if nodes[i].id == id:
+      return i
+  return -1
+
+proc indexNode*(b: var UiBuilder, nodeId: UiNodeId = noneNodeId(), nodeIdx = -1): var UiBuilder {.discardable.} =
+  ## Register a node's ID-to-index mapping in the lookup table for the current frame.
+  let resolvedIdx =
+    if nodeIdx >= 0:
+      nodeIdx
+    elif b.stack.len > 0:
+      b.stack[^1]
+    else:
+      -1
+
+  if resolvedIdx < 0 or resolvedIdx >= b.frame.nodes.len:
+    return b
+
+  let resolvedId =
+    if nodeId != noneNodeId():
+      nodeId
+    else:
+      b.frame.nodes[resolvedIdx].id
+
+  if resolvedId != noneNodeId():
+    b.frame.nodeIdToIndex[nodeIdValue(resolvedId)] = resolvedIdx
+  b
+
+proc nodeIndex*(b: UiBuilder, nodeId: UiNodeId, indexHint: int = -1, usePreviousFrame = false): int =
+  ## Look up a node's index by its ID. Uses the lookup table first, falls back to linear search.
+  if nodeId == noneNodeId():
+    return -1
+
+  let key = nodeIdValue(nodeId)
+  if usePreviousFrame:
+    if b.previousFrame.nodeIdToIndex.hasKey(key):
+      return b.previousFrame.nodeIdToIndex.getOrQuit(key)
+
+    return findNodeIndexById(b.previousFrame.nodes, nodeId, indexHint)
+
+  if b.frame.nodeIdToIndex.hasKey(key):
+    return b.frame.nodeIdToIndex.getOrQuit(key)
+  findNodeIndexById(b.frame.nodes, nodeId, indexHint)
+
+proc previousNodeIndex*(b: UiBuilder, nodeId: UiNodeId, indexHint: int = -1): int {.inline.} =
+  ## Look up a node's index in the previous frame's node array.
+  prof("previousNodeIndex")
+  b.nodeIndex(nodeId, indexHint, usePreviousFrame = true)
+
+proc currentNodeIndex*(b: UiBuilder, nodeId: UiNodeId, indexHint: int = -1): int {.inline.} =
+  ## Look up a node's index in the current frame's node array.
+  prof("currentNodeIndex")
+  b.nodeIndex(nodeId, indexHint, usePreviousFrame = false)
+
+proc currentNodeIndex*(b: UiBuilder): int {.inline.} =
+  ## Index of the current node in the current frame.
+  b.stack[^1]
+
+proc pickHoveredIndex(b: var UiBuilder, idx: int, ox, oy, mx, my: float32, transformStack: var seq[UiAffine2], inverseStack: var seq[UiAffine2]): int =
+  let n = b.frame.nodes[idx].addr
+  let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
+  let nodeStyle = b.nodeStyle(n)
+  let contentOrigin = absPos + vec2(nodeStyle.paddingX, nodeStyle.paddingY)
+
+  if n.transformIndex >= 0:
+    let nodeTransform = b.nodeTransform(n)
+    let pivot = absPos + vec2(n.size.x * nodeTransform.pivot.x, n.size.y * nodeTransform.pivot.y)
+    let nextTransform = applyNodeRenderTransform(
+      transformStack[^1],
+      pivot,
+      nodeTransform.offset,
+      nodeTransform.rotation,
+      nodeTransform.scale,
+    )
+    transformStack.add nextTransform
+    inverseStack.add nextTransform.inverseAffine2()
+
+  var best = -1
+  let localMouse = inverseStack[^1] * vec2(mx, my)
+  if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x <= absPos.x + n.size.x and localMouse.y <= absPos.y + n.size.y:
+    best = idx
+
+  if best == -1 and MaskChildren in n.flags:
+    if n.transformIndex >= 0:
+      if transformStack.len > 1:
+        discard transformStack.pop()
+        discard inverseStack.pop()
+    return -1
+
+  if NoHover in n.flags:
+    best = -1
+
+  if NoChildHover in n.flags:
+    if n.transformIndex >= 0:
+      if transformStack.len > 1:
+        discard transformStack.pop()
+        discard inverseStack.pop()
+    return best
+
+  for childIdx in b.children(idx):
+    let childHit = b.pickHoveredIndex(childIdx, contentOrigin.x, contentOrigin.y, mx, my, transformStack, inverseStack)
+    if childHit >= 0:
+      best = childHit
+
+  if n.transformIndex >= 0:
+    if transformStack.len > 1:
+      discard transformStack.pop()
+      discard inverseStack.pop()
+
+  best
+
+proc pickScrolledIndex(b: var UiBuilder, idx: int, ox, oy, mx, my: float32, transformStack: var seq[UiAffine2], inverseStack: var seq[UiAffine2]): int =
+  let n = b.frame.nodes[idx].addr
+  let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
+  let nodeStyle = b.nodeStyle(n)
+  let contentOrigin = absPos + vec2(nodeStyle.paddingX, nodeStyle.paddingY)
+
+  if n.transformIndex >= 0:
+    let nodeTransform = b.nodeTransform(n)
+    let pivot = absPos + vec2(n.size.x * nodeTransform.pivot.x, n.size.y * nodeTransform.pivot.y)
+    let nextTransform = applyNodeRenderTransform(
+      transformStack[^1],
+      pivot,
+      nodeTransform.offset,
+      nodeTransform.rotation,
+      nodeTransform.scale,
+    )
+    transformStack.add nextTransform
+    inverseStack.add nextTransform.inverseAffine2()
+
+  var best = -1
+  if Scrollable in n.flags:
+    let localMouse = inverseStack[^1] * vec2(mx, my)
+    if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x <= absPos.x + n.size.x and localMouse.y <= absPos.y + n.size.y:
+      best = idx
+
+    if best == -1 and MaskChildren in n.flags:
+      if n.transformIndex >= 0:
+        if transformStack.len > 1:
+          discard transformStack.pop()
+          discard inverseStack.pop()
+      return -1
+
+  if NoChildHover in n.flags:
+    if n.transformIndex >= 0:
+      if transformStack.len > 1:
+        discard transformStack.pop()
+        discard inverseStack.pop()
+    return best
+
+  for childIdx in b.children(idx):
+    let childHit = b.pickScrolledIndex(childIdx, contentOrigin.x, contentOrigin.y, mx, my, transformStack, inverseStack)
+    if childHit >= 0:
+      best = childHit
+
+  if n.transformIndex >= 0:
+    if transformStack.len > 1:
+      discard transformStack.pop()
+      discard inverseStack.pop()
+
+  best
+
+proc computeFrameInteraction(b: var UiBuilder, input: UiInputSnapshot) =
+  if b.frame.nodes.len == 0:
+    return
+
+  var pickTransformStack: seq[UiAffine2] = @[identityAffine2()]
+  var pickInverseStack: seq[UiAffine2] = @[identityAffine2()]
+  let hoverIndex = b.pickHoveredIndex(0, 0, 0, input.mouse.x, input.mouse.y, pickTransformStack, pickInverseStack)
+  let hover =
+    if hoverIndex >= 0 and hoverIndex < b.frame.nodes.len:
+      b.frame.nodes[hoverIndex].id
+    else:
+      noneNodeId()
+  pickTransformStack = @[identityAffine2()]
+  pickInverseStack = @[identityAffine2()]
+  let scrolledIndex = b.pickScrolledIndex(0, 0, 0, input.mouse.x, input.mouse.y, pickTransformStack, pickInverseStack)
+  let scrolled =
+    if scrolledIndex >= 0 and scrolledIndex < b.frame.nodes.len:
+      b.frame.nodes[scrolledIndex].id
+    else:
+      noneNodeId()
+
+  b.frameOutput.hoveredId = hover
+  b.frameOutput.hoveredIndex = hoverIndex
+
+  # Middle-click drag to scroll. When the middle button is pressed while the
+  # cursor is over a scrollable node, record the start position; while held, the
+  # per-frame offset of the cursor from that start becomes the scroll speed.
+  if not b.middleDragActive and MouseMiddle in input.mousePressed and scrolledIndex >= 0:
+    b.middleDragActive = true
+    b.middleDragScrollStart = input.mouse
+    b.middleDragScroll = vec2(0.0'f32, 0.0'f32)
+    b.frameOutput.scrolledId = scrolled
+    b.frameOutput.scrolledIndex = scrolledIndex
+
+  if b.middleDragActive:
+    if MouseMiddle in input.mouseDown:
+      let offset = input.mouse - b.middleDragScrollStart
+      b.middleDragScroll = offset * 0.5
+    elif MouseMiddle in input.mouseReleased:
+      b.middleDragActive = false
+      b.middleDragScroll = vec2(0.0'f32, 0.0'f32)
+    if b.frameOutput.scrolledId == noneNodeId():
+      b.frameOutput.scrolledId = b.previousOutput.scrolledId
+      b.frameOutput.scrolledIndex = b.currentNodeIndex(b.frameOutput.scrolledId, b.frameOutput.scrolledIndex)
+  else:
+    b.middleDragScroll = vec2(0.0'f32, 0.0'f32)
+    b.frameOutput.scrolledId = scrolled
+    b.frameOutput.scrolledIndex = scrolledIndex
+
+  if hover != b.previousOutput.hoveredId:
+    if hover != noneNodeId():
+      b.frameOutput.hoverBeganId = hover
+    else:
+      b.frameOutput.hoverBeganId = noneNodeId()
+
+    if b.previousOutput.hoveredId != noneNodeId():
+      b.frameOutput.hoverEndedId = b.previousOutput.hoveredId
+    else:
+      b.frameOutput.hoverEndedId = noneNodeId()
+  else:
+    b.frameOutput.hoverBeganId = noneNodeId()
+    b.frameOutput.hoverEndedId = noneNodeId()
+
+  if MouseLeft in input.mousePressed:
+    b.frameOutput.heldId = hover
+    b.frameOutput.heldIndex = hoverIndex
+    b.frameOutput.pressedId = hover
+    b.frameOutput.pressedIndex = hoverIndex
+  elif MouseLeft in input.mouseDown:
+    b.frameOutput.heldId = b.previousOutput.heldId
+    b.frameOutput.heldIndex = b.currentNodeIndex(b.previousOutput.heldId)
+
+  if MouseRight in input.mousePressed:
+    b.frameOutput.rightPressedId = hover
+    b.frameOutput.rightPressedIndex = hoverIndex
+  elif MouseRight in input.mouseDown:
+    b.frameOutput.rightPressedId = b.previousOutput.rightPressedId
+    b.frameOutput.rightPressedIndex = b.currentNodeIndex(b.previousOutput.rightPressedId)
+
+  if MouseLeft in input.mouseReleased and
+      not (hover == noneNodeId()) and
+      hover == b.previousOutput.heldId:
+    b.frameOutput.clickedId = hover
+    b.frameOutput.clickedIndex = hoverIndex
+  else:
+    b.frameOutput.clickedId = noneNodeId()
+    b.frameOutput.clickedIndex = -1
+
+  if MouseRight in input.mouseReleased and
+      not (hover == noneNodeId()) and
+      hover == b.previousOutput.rightPressedId:
+    b.frameOutput.rightClickedId = hover
+    b.frameOutput.rightClickedIndex = hoverIndex
+  else:
+    b.frameOutput.rightClickedId = noneNodeId()
+    b.frameOutput.rightClickedIndex = -1
+
+proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.discardable.} =
+  ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
+  prof("beginUiFrame")
+  b.computeFrameInteraction(ctx.input)
+
+  for i in 0 ..< b.animations.len:
+    inc b.animations[i].unchangedFrames
+
+  swap(b.previousOutput, b.frameOutput)
+  swap(b.previousFrame, b.frame)
+
+  b.frameCtx = ctx
+  if b.frameCtx.animationTick < 0.0'f32:
+    b.frameCtx.animationTick = 0.0'f32
+  b.frameOutput.clearFrameOutput()
+  b.frame.arena[].restoreCheckpoint(b.frame.arenaCheckpoint)
+  b.eventTraces.clear()
+  b.frame.nodes.setLen(0)
+  b.frame.nodeIdToIndex.clear()
+  b.frame.duplicateNodeIds.clear()
+  b.frame.texts.setLen(0)
+  b.frame.styles.setLen(0)
+  if b.themeStyles.len >= int(UiStyleIndexDefault):
+    b.defaultStyle = b.themeStyles[int(UiStyleIndexDefault) - 1]
+  for style in b.themeStyles:
+    b.frame.styles.add style
+  if b.themeTextStyles.len >= int(UiStyleIndexDefaultText):
+    b.defaultText = b.themeTextStyles[int(UiStyleIndexDefaultText) - 1]
+  for text in b.themeTextStyles:
+    b.frame.texts.add text
+  b.frame.gaps.setLen(0)
+  b.frame.anchors.setLen(0)
+  b.frame.transforms.setLen(0)
+  b.frame.customCommands.setLen(0)
+  b.frame.customLayouts.setLen(0)
+  b.deferredNodes.setLen(0)
+  b.stack.setLen(0)
+  b.nodeIdStack.setLen(0)
+  b.idScopeStack.setLen(0)
+  b.autoChildCounter.setLen(0)
+  b.configuringAnimationStack.setLen(0)
+  b.animationTriggerStack.setLen(0)
+
+  let rootId = rootNodeId()
+
+  # Root is always created at frame start so layout can rely on viewport size immediately.
+  b.frame.nodes.add UiNode(
+    id: rootId,
+    flags: {},
+    pos: vec2(0.0'f32, 0.0'f32),
+    size: vec2(max(0.0'f32, ctx.viewportSize.x), max(0.0'f32, ctx.viewportSize.y)),
+    minSize: vec2(0.0'f32, 0.0'f32),
+    maxSize: vec2(1.0e9'f32, 1.0e9'f32),
+    cursor: vec2(0.0'f32, 0.0'f32),
+    contentExtent: vec2(0.0'f32, 0.0'f32),
+    lastChild: -1,
+    nextSibling: -1,
+    parent: -1,
+    renderParent: -1,
+    renderChildLast: -1,
+    renderSibling: -1,
+  )
+  b.currentNode = b.frame.nodes[^1].addr
+  b.currentParent = nil
+  b.autoChildCounter.add 0'u32
+  b.configuringAnimationStack.add false
+  b.animationTriggerStack.add true
+  b.stack.add 0
+  b.nodeIdStack.add rootId
+  discard b.deferPostProcess()
+  b
+
+proc beginUiFrame*(b: var UiBuilder, viewportW, viewportH: float32,
+  input: UiInputSnapshot = default(UiInputSnapshot), animationTick = 1.0'f32 / 60.0'f32): var UiBuilder {.discardable.} =
+  ## Convenience overload: start a new UI frame with explicit viewport dimensions and input.
+  let ctx = UiFrameContext(
+    viewportSize: vec2(viewportW, viewportH),
+    animationTick: animationTick,
+    input: input,
+    time: b.frameCtx.time + animationTick,
+  )
+  discard b.beginUiFrame(ctx)
+  b
+
+proc beginNodeWithId*(b: var UiBuilder, nodeId: UiNodeId): var UiBuilder {.discardable.} =
+  ## Begin a new node with an explicit ID. Links it as a child of the current node.
+  let parentIndex = if b.stack.len > 0: b.stack[^1] else: -1
+  let nodeIndex = b.frame.nodes.len
+  let inheritedLayoutIndex =
+    if parentIndex >= 0 and parentIndex < b.frame.nodes.len:
+      b.frame.nodes[parentIndex].layoutIndex
+    else:
+      -1'i32
+
+  if b.frame.nodeIdToIndex.hasKey(nodeIdValue(nodeId)):
+    b.frame.duplicateNodeIds.mgetOrPut(nodeIdValue(nodeId), @[]).add [nodeIndex, b.frame.nodeIdToIndex.getOrQuit(nodeIdValue(nodeId))]
+
+  b.frame.nodeIdToIndex[nodeIdValue(nodeId)] = nodeIndex
+
+  b.frame.nodes.add UiNode(
+    id: nodeId,
+    maxSize: vec2(1.0e9'f32, 1.0e9'f32),
+    lastChild: -1,
+    nextSibling: -1,
+    renderParent: -1,
+    renderChildLast: -1,
+    renderSibling: -1,
+    parent: parentIndex,
+    layoutIndex: inheritedLayoutIndex,
+  )
+  b.currentNode = b.frame.nodes[^1].addr
+
+  if parentIndex >= 0:
+    let parent = b.frame.nodes[parentIndex].addr
+    b.currentParent = parent
+    if parent.lastChild < 0:
+      parent.lastChild = nodeIndex.int32
+      b.currentNode.nextSibling = nodeIndex.int32
+    else:
+      let tail = int(parent.lastChild)
+      let head = int(b.frame.nodes[tail].nextSibling)
+      b.currentNode.nextSibling = head.int32
+      b.frame.nodes[tail].nextSibling = nodeIndex.int32
+      parent.lastChild = nodeIndex.int32
+    b.currentNode.pos = parent.cursor
+
+  b.autoChildCounter.add 0'u32
+  b.configuringAnimationStack.add false
+  b.animationTriggerStack.add true
+  b.stack.add nodeIndex
+  b.nodeIdStack.add nodeId
+  b.traceEvent(nodeId, "beginNode")
+  b
+
+proc beginNodeWithKeyHash(b: var UiBuilder, explicitKeyHash: uint64): var UiBuilder {.discardable.} =
+  let parentIndex = if b.stack.len > 0: b.stack[^1] else: -1
+  let nodeId = b.computeChildNodeId(parentIndex, explicitKeyHash)
+  b.beginNodeWithId(nodeId)
+
+proc beginNode*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Begin a new node with an auto-generated ID.
+  b.beginNodeWithKeyHash(0'u64)
+
+proc beginNodeId*(b: var UiBuilder, key: uint64): var UiBuilder {.discardable.} =
+  ## Begin a new node with a deterministic ID derived from the given uint64 key.
+  b.beginNodeWithKeyHash(hashUint64(key))
+
+proc beginNodeId*(b: var UiBuilder, key: string): var UiBuilder {.discardable.} =
+  ## Begin a new node with a deterministic ID derived from the given string key.
+  discard b.beginNodeWithKeyHash(hashChars(key))
+  when defined(nuiDebug):
+    b.currentNode.debugName = key
+  b
+
+proc debugName*(b: var UiBuilder, key: string) =
+  when defined(nuiDebug):
+    b.currentNode.debugName = key
+
+proc endNode*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## End the current node. Finalizes its size, updates parent layout, and pops the stack.
+  if b.stack.len > 0:
+    b.traceEvent(b.currentNode.id, "endNode")
+    let idx = b.stack[^1]
+    b.updateNodeFit(b.currentNode)
+    b.clampNodeSize(b.currentNode)
+    b.updateParentAfterChildEnd(b.currentNode)
+    b.traceUiNode("endNode", idx)
+
+    if NodeStorageParent in b.currentNode.flags:
+      assert b.storageParentStack.len > 0
+      assert b.storageParentStack[^1] == b.currentNode.id
+
+      discard b.storageParentStack.pop()
+
+    b.lastNode = b.currentNode
+    b.lastNodeIndex = idx
+
+    discard b.stack.pop()
+    if b.stack.len > 0:
+      b.currentNode = b.frame.nodes[b.stack[^1]].addr
+      if b.stack.len > 1:
+        b.currentParent = b.frame.nodes[b.stack[^2]].addr
+      else:
+        b.currentParent = nil
+    else:
+      b.currentNode = sentinelNode.addr
+      b.currentParent = nil
+
+    discard b.nodeIdStack.pop()
+  b
+
+proc flushDeferredNodes*(b: var UiBuilder) =
+  ## Execute all deferred build procs. Each proc adds children to its designated parent node.
+  prof("flushDeferredNodes")
+  # Process deferred node builds; each callback uses the parent stack to add children.
+  # New deferred entries added inside callbacks are picked up by the while loop.
+  let storageParentStack = b.storageParentStack
+
+  var deferredIdx = 0
+  while deferredIdx < b.deferredNodes.len:
+    let deferred = b.deferredNodes[deferredIdx]
+    inc deferredIdx
+    if deferred.buildProc != nil and deferred.nodeIdx >= 0 and deferred.nodeIdx < b.frame.nodes.len:
+      let prevStackLen = b.stack.len
+      let prevNodeIdStackLen = b.nodeIdStack.len
+      b.stack.add deferred.nodeIdx
+      b.nodeIdStack.add b.frame.nodes[deferred.nodeIdx].id
+      b.storageParentStack = deferred.storageParentStack
+      b.currentNode = b.frame.nodes[deferred.nodeIdx].addr
+      if b.currentNode.parent >= 0:
+        b.currentParent = b.frame.nodes[b.currentNode.parent].addr
+      else:
+        b.currentParent = nil
+      deferred.buildProc(b, deferred.nodeIdx, deferred.userData)
+      while b.stack.len > prevStackLen:
+        discard b.stack.pop()
+      while b.nodeIdStack.len > prevNodeIdStackLen:
+        discard b.nodeIdStack.pop()
+      discard b.postProcessChildren(deferred.nodeIdx)
+
+  if b.stack.len > 0:
+    b.currentNode = b.frame.nodes[b.stack[^1]].addr
+    if b.currentNode.parent >= 0:
+      b.currentParent = b.frame.nodes[b.currentNode.parent].addr
+    else:
+      b.currentParent = nil
+  else:
+    b.currentNode = sentinelNode.addr
+    b.currentParent = nil
+
+  b.storageParentStack = storageParentStack
+  b.deferredNodes.setLen(0)
+
+proc addVirtualNode*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode]): var UiBuilder {.discardable.} =
+  ## Buffer a subtree (or forest) of `UiNode`s to be inserted under `parent` at `endUiFrame`.
+  b.virtualNodes.add UiVirtualNode(parent: parent, nodes: nodes)
+  b
+
+proc addVirtualNode*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode], animations: seq[UiFieldAnimation]): var UiBuilder {.discardable.} =
+  ## Buffer a subtree (or forest) of `UiNode`s to be inserted under `parent` at
+  ## `endUiFrame`, carrying the given per-field `animations`.
+  b.virtualNodes.add UiVirtualNode(parent: parent, nodes: nodes, animations: animations)
+  b
+
+proc setAnimatedFieldValue(b: var UiBuilder, node: var UiNode, fieldOffset: UiNodeFloatFieldOffset, value: float32) {.inline.}
+
+proc syncVirtualNodeFromFrame*(b: var UiBuilder, v: var UiVirtualNode, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.}
+
+proc insertVirtualNodes*(b: var UiBuilder) =
+  ## Splice every buffered virtual node into the actual tree under its parent.
+  prof("insertVirtualNodes")
+  if b.virtualNodes.len == 0:
+    return
+
+  var finishedIndices: seq[int] = @[]
+  for vi, v in b.virtualNodes.mpairs:
+    if v.nodes.len == 0:
+      continue
+
+    let parentIdx = b.nodeIndex(v.parent)
+    let parentIndex = if parentIdx >= 0: parentIdx else: 0
+
+    # Capture the base indices for each side array, then append this virtual node's
+    # sub-data. Node indices are 1-based, so a value `t` maps to frame slot
+    # `base + t` (i.e. `base + t - 1` in the 0-based array).
+    let baseText = b.frame.texts.len
+    let baseStyle = b.frame.styles.len
+    let baseGap = b.frame.gaps.len
+    let baseAnchor = b.frame.anchors.len
+    let baseTransform = b.frame.transforms.len
+    let baseCommands = b.frame.customCommands.len
+    let baseLayouts = b.frame.customLayouts.len
+
+    b.frame.texts.add v.texts
+    b.frame.styles.add v.styles
+    b.frame.gaps.add v.gaps
+    b.frame.anchors.add v.anchors
+    b.frame.transforms.add v.transforms
+    b.frame.customCommands.add v.customCommands
+    b.frame.customLayouts.add v.customLayouts
+
+    let offset = b.frame.nodes.len
+    let startIdx = offset
+    let endIdx = offset + v.nodes.len - 1
+
+    # Append the virtual node list, remapping intra-subtree structural links by the
+    # append offset so the subtree's own parent/child/sibling chain stays consistent,
+    # and remapping the 1-based side-array indices into the frame's arrays.
+    for n in v.nodes:
+      var m = n
+      if m.parent >= 0:
+        m.parent += offset.int32
+      if m.lastChild >= 0:
+        m.lastChild += offset.int32
+      if m.nextSibling >= 0:
+        m.nextSibling += offset.int32
+      if m.renderParent >= 0:
+        m.renderParent += offset.int32
+      if m.renderChildLast >= 0:
+        m.renderChildLast += offset.int32
+      if m.renderSibling >= 0:
+        m.renderSibling += offset.int32
+      if m.textIndex != 0'u16:
+        m.textIndex = uint16(baseText + int(m.textIndex))
+      if m.styleIndex != 0'u16:
+        m.styleIndex = uint16(baseStyle + int(m.styleIndex))
+      if m.gapIndex != 0'u16:
+        m.gapIndex = uint16(baseGap + int(m.gapIndex))
+      if m.anchorIndex != 0'u16:
+        m.anchorIndex = uint16(baseAnchor + int(m.anchorIndex))
+      if m.transformIndex != 0'u16:
+        m.transformIndex = uint16(baseTransform + int(m.transformIndex))
+      if m.commandsIndex != 0'u16:
+        m.commandsIndex = uint16(baseCommands + int(m.commandsIndex))
+      if m.customLayoutIndex != 0'u16:
+        m.customLayoutIndex = uint16(baseLayouts + int(m.customLayoutIndex))
+      if m.customChildLayoutIndex != 0'u16:
+        m.customChildLayoutIndex = uint16(baseLayouts + int(m.customChildLayoutIndex))
+      b.frame.nodes.add m
+
+    # A node whose (remapped) parent falls outside the appended range is a forest
+    # root and is linked into the real parent as a new child.
+    for i in startIdx .. endIdx:
+      let p = b.frame.nodes[i].parent
+      if p < startIdx or p > endIdx:
+        b.frame.nodes[i].parent = parentIndex.int32
+        let parent = b.frame.nodes[parentIndex].addr
+        if parent.lastChild < 0:
+          parent.lastChild = i.int32
+          b.frame.nodes[i].nextSibling = i.int32
+        else:
+          let tail = int(parent.lastChild)
+          let head = int(b.frame.nodes[tail].nextSibling)
+          b.frame.nodes[i].nextSibling = head.int32
+          b.frame.nodes[tail].nextSibling = i.int32
+          parent.lastChild = i.int32
+
+    # Register the new nodes in the id->index table for interaction lookups.
+    for i in startIdx .. endIdx:
+      let id = b.frame.nodes[i].id
+      if id != noneNodeId():
+        b.frame.nodeIdToIndex[nodeIdValue(id)] = i
+
+    # Advance and apply any per-field animations on the now-inserted root node, then
+    # write the resulting float fields and side-array data back into the stored
+    # virtual node so it carries the updated values into the next frame.
+    if v.animations.len > 0:
+      let animationTick = max(0.0'f32, b.frameCtx.animationTick)
+      let animationSpeedScale = max(0.0'f32, b.animationSpeed)
+      for a in v.animations.mitems:
+        let blend = clamp(a.speed * animationSpeedScale * animationTick, 0.0'f32, 1.0'f32)
+        a.currentValue = a.currentValue + (a.targetValue - a.currentValue) * blend
+        if abs(a.targetValue - a.currentValue) <= 0.001'f32:
+          a.currentValue = a.targetValue
+        setAnimatedFieldValue(b, b.frame.nodes[startIdx], a.fieldOffset, a.currentValue)
+      syncVirtualNodeFromFrame(b, v, startIdx, baseStyle, baseGap, baseAnchor, baseTransform)
+      var allFinished = true
+      for a in v.animations:
+        if a.currentValue != a.targetValue:
+          allFinished = false
+          break
+      if allFinished:
+        finishedIndices.add(vi)
+
+  # Drop virtual nodes whose animations have all reached their target; their last
+  # inserted frame node remains, but they are no longer re-spliced on future frames.
+  # Removal runs afterwards (separate loop), highest index first so earlier indices
+  # stay valid, and does not allocate a copy of the whole virtual-node list.
+  if finishedIndices.len > 0:
+    for di in countdown(finishedIndices.high, 0):
+      let idx = finishedIndices[di]
+      for k in idx ..< b.virtualNodes.len - 1:
+        b.virtualNodes[k] = move(b.virtualNodes[k + 1])
+      b.virtualNodes.setLen(b.virtualNodes.len - 1)
+
+proc extractVirtualNode*(frame: var UiFrame, nodeIdx: int): UiVirtualNode =
+  ## Inverse of `insertVirtualNodes`: extract the subtree rooted at `nodeIdx` (all
+  ## descendants plus their referenced side-array data) from `frame` into a
+  ## self-contained `UiVirtualNode`. Structural links are rebased to the local node
+  ## list (any link leaving the subtree becomes -1), and `parent` is set to the
+  ## original parent's id so re-insertion restores the node's original placement.
+  result = UiVirtualNode()
+  if nodeIdx < 0 or nodeIdx >= frame.nodes.len:
+    return result
+
+  let origParent = frame.nodes[nodeIdx].parent
+  if origParent >= 0 and origParent < frame.nodes.len:
+    result.parent = frame.nodes[origParent].id
+
+  # Map original frame index -> local index in result.nodes.
+  var indexMap = initTable[int, int]()
+  var worklist = @[nodeIdx]
+  while worklist.len > 0:
+    let origIdx = worklist.pop()
+    if indexMap.hasKey(origIdx):
+      continue
+    let localIdx = result.nodes.len
+    indexMap[origIdx] = localIdx
+    result.nodes.add frame.nodes[origIdx]
+    result.nodes[^1].flags.incl VirtualNode
+    result.nodes[^1].flags.excl VirtualizeNode
+    let n = frame.nodes[origIdx]
+    if n.lastChild >= 0:
+      var child = int(frame.nodes[int(n.lastChild)].nextSibling)
+      let tail = int(n.lastChild)
+      while true:
+        worklist.add child
+        if child == tail:
+          break
+        child = int(frame.nodes[child].nextSibling)
+
+  # Rebase structural links into the local list; links outside the subtree -> -1.
+  for i in 0 ..< result.nodes.len:
+    var n = addr result.nodes[i]
+    n.parent = indexMap.getOrDefault(int(n.parent), -1).int32
+    n.lastChild = indexMap.getOrDefault(int(n.lastChild), -1).int32
+    n.nextSibling = indexMap.getOrDefault(int(n.nextSibling), -1).int32
+    n.renderParent = indexMap.getOrDefault(int(n.renderParent), -1).int32
+    n.renderChildLast = indexMap.getOrDefault(int(n.renderChildLast), -1).int32
+    n.renderSibling = indexMap.getOrDefault(int(n.renderSibling), -1).int32
+
+  # Gather referenced side-array data (deduplicated by original slot) and remap the
+  # nodes' 1-based indices into the local side arrays.
+  var
+    textMap = initTable[int, int]()
+    styleMap = initTable[int, int]()
+    gapMap = initTable[int, int]()
+    anchorMap = initTable[int, int]()
+    transformMap = initTable[int, int]()
+    commandMap = initTable[int, int]()
+    layoutMap = initTable[int, int]()
+  for i in 0 ..< result.nodes.len:
+    var n = addr result.nodes[i]
+    if n.textIndex != 0'u16:
+      let slot = int(n.textIndex) - 1
+      if not textMap.hasKey(slot):
+        textMap[slot] = result.texts.len
+        if slot < frame.texts.len:
+          result.texts.add frame.texts[slot]
+        else:
+          result.texts.add UiNodeText()
+      n.textIndex = uint16(textMap.getOrQuit(slot) + 1)
+    if n.styleIndex != 0'u16:
+      let slot = int(n.styleIndex) - 1
+      if not styleMap.hasKey(slot):
+        styleMap[slot] = result.styles.len
+        if slot < frame.styles.len:
+          result.styles.add frame.styles[slot]
+        else:
+          result.styles.add UiStyle()
+      n.styleIndex = uint16(styleMap.getOrQuit(slot) + 1)
+    if n.gapIndex != 0'u16:
+      let slot = int(n.gapIndex) - 1
+      if not gapMap.hasKey(slot):
+        gapMap[slot] = result.gaps.len
+        if slot < frame.gaps.len:
+          result.gaps.add frame.gaps[slot]
+        else:
+          result.gaps.add 0.0'f32
+      n.gapIndex = uint16(gapMap.getOrQuit(slot) + 1)
+    if n.anchorIndex != 0'u16:
+      let slot = int(n.anchorIndex) - 1
+      if not anchorMap.hasKey(slot):
+        anchorMap[slot] = result.anchors.len
+        if slot < frame.anchors.len:
+          result.anchors.add frame.anchors[slot]
+        else:
+          result.anchors.add UiNodeAnchor()
+      n.anchorIndex = uint16(anchorMap.getOrQuit(slot) + 1)
+    if n.transformIndex != 0'u16:
+      let slot = int(n.transformIndex) - 1
+      if not transformMap.hasKey(slot):
+        transformMap[slot] = result.transforms.len
+        if slot < frame.transforms.len:
+          result.transforms.add frame.transforms[slot]
+        else:
+          result.transforms.add UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32))
+      n.transformIndex = uint16(transformMap.getOrQuit(slot) + 1)
+    if n.commandsIndex != 0'u16:
+      let slot = int(n.commandsIndex) - 1
+      if not commandMap.hasKey(slot):
+        commandMap[slot] = result.customCommands.len
+        if slot < frame.customCommands.len:
+          var cmds = frame.customCommands[slot]
+          let cmdCount = cmds.len
+          # Deep-copy the command structs into persistent virtual-node storage, then
+          # repoint each command's vertex data into the virtual node's own vertex buffer
+          # so the commands stay valid after the source frame arena is reset.
+          let cmdStart = result.commandData.len
+          for i in 0 ..< cmdCount:
+            let c = cmds[i]
+            result.commandData.add c
+          # Copy all referenced vertex data first so the seq cannot reallocate out
+          # from under already-stored pointers, then patch the pointers afterwards.
+          var vtxBase = result.commandVertices.len
+          for i in 0 ..< cmdCount:
+            let vc = int(result.commandData[cmdStart + i].vertexCount)
+            if result.commandData[cmdStart + i].vertexData != nil and vc > 0:
+              for v in 0 ..< vc:
+                result.commandVertices.add result.commandData[cmdStart + i].vertexData[v]
+          for i in 0 ..< cmdCount:
+            let vc = int(result.commandData[cmdStart + i].vertexCount)
+            if result.commandData[cmdStart + i].vertexData != nil and vc > 0:
+              result.commandData[cmdStart + i].vertexData =
+                cast[nil ptr UncheckedArray[UiVertex]](addr result.commandVertices[vtxBase])
+              vtxBase += vc
+          if result.commandData.len > cmdStart:
+            let av = initArrayView(
+              cast[ptr UncheckedArray[UiRenderCommand]](addr result.commandData[cmdStart]),
+              result.commandData.len - cmdStart)
+            result.customCommands.add av
+          else:
+            result.customCommands.add default(ArrayView[UiRenderCommand])
+        else:
+          result.customCommands.add default(ArrayView[UiRenderCommand])
+      n.commandsIndex = uint16(commandMap.getOrQuit(slot) + 1)
+    if n.customLayoutIndex != 0'u16:
+      let slot = int(n.customLayoutIndex) - 1
+      if not layoutMap.hasKey(slot):
+        layoutMap[slot] = result.customLayouts.len
+        if slot < frame.customLayouts.len:
+          result.customLayouts.add frame.customLayouts[slot]
+        else:
+          result.customLayouts.add default(UiNodeCustomLayout)
+      n.customLayoutIndex = uint16(layoutMap.getOrQuit(slot) + 1)
+    if n.customChildLayoutIndex != 0'u16:
+      let slot = int(n.customChildLayoutIndex) - 1
+      if not layoutMap.hasKey(slot):
+        layoutMap[slot] = result.customLayouts.len
+        if slot < frame.customLayouts.len:
+          result.customLayouts.add frame.customLayouts[slot]
+        else:
+          result.customLayouts.add default(UiNodeCustomLayout)
+      n.customChildLayoutIndex = uint16(layoutMap.getOrQuit(slot) + 1)
+
+proc virtualNodeFromNode*(b: var UiBuilder, nodeIdx: int): UiVirtualNode =
+  ## Convenience wrapper around `extractVirtualNode` operating on the current frame.
+  extractVirtualNode(b.frame, nodeIdx)
+
+proc collectGarbage*(b: var UiBuilder) =
+  prof("collectGarbage")
+
+  var toRemove: seq[uint64] = @[]
+  block:
+    prof("mark")
+    for nodeId, storage in b.nodeStorage.pairs:
+      var parentAlive = false
+      for i in countdown(storage.parents.high, 0):
+        let parent = storage.parents[i]
+        if b.nodeStorage.hasKey(parent.uint64):
+          let parentStorage = b.nodeStorage.getOrQuit(parent.uint64).addr
+          if parentStorage.clearOldChildren and storage.lastAccess < parentStorage.lastAccess:
+            # don't keep alive even though parent is alive.
+            break
+        if b.frame.nodeIdToIndex.hasKey(nodeIdValue(parent)):
+          parentAlive = true
+          break
+      if parentAlive:
+        continue
+      if storage.lastAccess < b.frameCtx.input.frameIndex:
+        toRemove.add nodeId
+
+  block:
+    prof("sweep")
+    for id in toRemove:
+      b.nodeStorage.del(id)
+
+proc updateVirtualNodes(b: var UiBuilder) =
+  # Promote previous-frame nodes flagged VirtualizeNode that did not survive into the
+  # current frame into persistent virtual nodes, so they keep being rendered.
+  var virtualizedIds = initTable[uint64, int]()
+  for v in b.virtualNodes:
+    for n in v.nodes:
+      virtualizedIds[nodeIdValue(n.id)] = 1
+  for prevIdx in 0 ..< b.previousFrame.nodes.len:
+    let prevNode = b.previousFrame.nodes[prevIdx]
+    if VirtualizeNode in prevNode.flags:
+      let id = nodeIdValue(prevNode.id)
+      if b.currentNodeIndex(prevNode.id) < 0 and not virtualizedIds.hasKey(id):
+        virtualizedIds[id] = 1
+        var vn = extractVirtualNode(b.previousFrame, prevIdx)
+        if b.virtualNodeAnimations.hasKey(id):
+          vn.animations = b.virtualNodeAnimations.getOrQuit(id)
+          b.virtualNodeAnimations.del(id)
+        b.virtualNodes.add vn
+
+  # Drop any existing virtual nodes whose nodes are present in the current frame; a
+  # live node supersedes its virtual copy, and keeping both would render duplicates.
+  var liveVirtualIndices: seq[int] = @[]
+  for vi, v in b.virtualNodes:
+    for n in v.nodes:
+      if b.currentNodeIndex(n.id) >= 0:
+        liveVirtualIndices.add vi
+        break
+  if liveVirtualIndices.len > 0:
+    for di in countdown(liveVirtualIndices.high, 0):
+      let idx = liveVirtualIndices[di]
+      for k in idx ..< b.virtualNodes.len - 1:
+        b.virtualNodes[k] = move(b.virtualNodes[k + 1])
+      b.virtualNodes.setLen(b.virtualNodes.len - 1)
+
+  b.insertVirtualNodes()
+
+proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarbage: bool = true, buildMeshRenderCommands: bool = false) =
+  ## End the UI frame. Flushes deferred nodes, removes stale animations, and builds render commands.
+  prof("endUiFrame")
+  if b.frame.nodes.len == 0:
+    b.frameOutput.clearFrameOutput()
+    b.removeStaleAnimations()
+    return
+
+  discard b.endNode()
+  b.flushDeferredNodes()
+  b.removeStaleAnimations()
+  b.updateVirtualNodes()
+
+  b.frameOutput.clearFrameOutput()
+  if buildRenderCommands:
+    var clipStack = newSeq[UiClipRect]()
+    if buildMeshRenderCommands:
+      b.buildMeshRenderCommands(0, 0, 0, 0'i32, clipStack)
+    else:
+      b.buildRenderCommands(0, 0, 0, 0'i32, clipStack)
+
+    prof("concatRenderCommands")
+    var len = 0
+    for i in 0 ..< b.frameOutput.commandLayers.len:
+      len += b.frameOutput.commandLayers[i].len
+
+    b.frameOutput.commands = newSeqOfCap[UiRenderCommand](len)
+    for i in 0 ..< b.frameOutput.commandLayers.len:
+      b.frameOutput.commands.add(b.frameOutput.commandLayers[i])
+
+    when defined(nuiDebug):
+      # Highlight nodes that share a duplicate id by drawing a red outline around
+      # each of them on top of the frame's render commands.
+      if b.frame.duplicateNodeIds.len > 0:
+        let highlightColor = UiColor(r: 1.0'f32, g: 0.15'f32, b: 0.15'f32, a: 1.0'f32)
+        for _, indices in b.frame.duplicateNodeIds:
+          for i in 0 ..< indices.len:
+            let nodeIdx = indices[i]
+            if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+              continue
+            let n = b.frame.nodes[nodeIdx].addr
+            let absPos = b.absoluteNodePos(nodeIdx)
+            let (vertexData, vertexCount) = buildRectStrokeVertices(
+              b.frame.arena, absPos, n.size, highlightColor, 0.0'f32, 3.0'f32)
+            if vertexData != nil and vertexCount > 0:
+              b.frameOutput.commands.add(UiRenderCommand(
+                kind: CmdRawVertices,
+                nodeIndex: nodeIdx.int32,
+                vertexData: vertexData,
+                vertexCount: vertexCount.int32,
+              ))
+
+  if collectGarbage:
+    b.collectGarbage()
+
+proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId) =
+  ## Mark a node and all its ancestors as alive, preventing their storage from being garbage-collected.
+  if not b.frame.nodeIdToIndex.hasKey(nodeIdValue(nodeId)):
+    b.frame.nodeIdToIndex[nodeIdValue(nodeId)] = -1
+
+proc nodeStorageCount*(b: UiBuilder): int =
+  ## Return the number of active node storage entries.
+  b.nodeStorage.len
+
+proc pushRenderCommand*(b: var UiBuilder, layoutIndex: int32, command: sink UiRenderCommand, clipStack: seq[UiClipRect]) {.inline.} =
+  ## Add a render command to the appropriate layer in the frame output.
+  # todo: this breaks with texts right now
+  # case command.kind
+  # of CmdRectFill, CmdRectStroke, CmdCircleFill, CmdLine, CmdText, CmdImage:
+  #   if not clipStack.intersectsClipRect(command.pos, command.size):
+  #     return
+  # else:
+  #   discard
+  let layer = max(0, layoutIndex.int)
+  if layer >= b.frameOutput.commandLayers.len:
+    b.frameOutput.commandLayers.setLen(layer + 1)
+    b.frameOutput.commandLayers[layer] = newSeq[UiRenderCommand](2048)
+  b.frameOutput.commandLayers[layer].add(command)
+
+proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect], transformStack: var seq[UiAffine2]) =
+  prof("buildMeshRenderCommands")
+  let n = b.frame.nodes[idx].addr
+  let layoutIndex = if n.layoutIndex >= 0: n.layoutIndex else: inheritedLayoutIndex
+  let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
+  let absSize = n.size
+  let nodeStyle = b.nodeStyle(n)
+  let contentOrigin = absPos + vec2(nodeStyle.paddingX, nodeStyle.paddingY)
+  let contentSize = vec2(
+    max(0.0'f32, absSize.x - nodeStyle.paddingX * 2),
+    max(0.0'f32, absSize.y - nodeStyle.paddingY * 2),
+  )
+
+  if n.transformIndex >= 0:
+    let nodeTransform = b.nodeTransform(n)
+    let nextTransform = applyNodeRenderTransform(
+      transformStack[^1],
+      absPos + vec2(n.size.x * nodeTransform.pivot.x, n.size.y * nodeTransform.pivot.y),
+      nodeTransform.offset,
+      nodeTransform.rotation,
+      nodeTransform.scale,
+    )
+    transformStack.add nextTransform
+
+  let transform = transformStack[^1]
+
+  if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
+    let (vertexData, vertexCount) = if nodeStyle[].hasPerCornerRadii:
+      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor, nodeStyle.cornerRadii)
+    else:
+      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor, nodeStyle.cornerRadius)
+    if not transform.isIdentity():
+      for n in 0..<vertexCount:
+        vertexData[n].pos = transform * vertexData[n].pos
+    if vertexData != nil and vertexCount > 0:
+      b.pushRenderCommand(layoutIndex, UiRenderCommand(
+        kind: CmdRawVertices,
+        nodeIndex: idx.int32,
+        vertexData: vertexData,
+        vertexCount: vertexCount.int32,
+      ), clipStack)
+
+  let masksChildren = MaskChildren in n.flags
+  if masksChildren:
+    let clipAabb = transformedRectAabb(transform, contentOrigin, contentSize)
+    var clipRect = UiClipRect(x: clipAabb.pos.x, y: clipAabb.pos.y, w: clipAabb.size.x, h: clipAabb.size.y)
+    if clipStack.len > 0:
+      clipRect = intersectClipRect(clipStack[^1], clipRect)
+    clipStack.add clipRect
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdClipPush,
+      nodeIndex: idx.int32,
+      pos: clipAabb.pos,
+      size: clipAabb.size,
+    ), clipStack)
+
+  if DrawText in n.flags and n.textIndex > 0:
+    let nodeText = b.nodeText(idx)
+    let maxWidth = if WrapText in n.flags: contentSize.x else: -1.0'f32
+    let arrangement = b.getTextArrangement(nodeText, maxWidth)
+    if b.buildTextMesh != nil:
+      const textTransformEpsilon = 1e-5'f32
+      let snapTransformedText =
+        abs(transform.m00 - 1.0'f32) <= textTransformEpsilon and
+        abs(transform.m01) <= textTransformEpsilon and
+        abs(transform.m10) <= textTransformEpsilon and
+        abs(transform.m11 - 1.0'f32) <= textTransformEpsilon
+      let screenOffset = if snapTransformedText: vec2(transform.tx, transform.ty) else: vec2(0.0'f32)
+      let (vertexData, vertexCount) = b.buildTextMesh(
+        arrangement[], contentOrigin, screenOffset, nodeText.textColor, transform)
+      if vertexData != nil and vertexCount > 0:
+        b.pushRenderCommand(layoutIndex, UiRenderCommand(
+          kind: CmdRawVertices,
+          nodeIndex: idx.int32,
+          vertexData: vertexData,
+          vertexCount: vertexCount.int32,
+          imageId: 1.UiImageId,
+          samplerMode: TextureSamplerMode.Linear,
+        ), clipStack)
+
+  for cmd in b.nodeCustomCommands(n)[]:
+    var outCmd = cmd
+    if outCmd.nodeIndex < 0:
+      outCmd.nodeIndex = idx.int32
+    outCmd.pos += contentOrigin
+    outCmd.pos2 += contentOrigin
+    b.pushRenderCommand(layoutIndex, outCmd, clipStack)
+
+  for childIdx in b.children(idx):
+    if b.frame.nodes[childIdx].renderParent < 0:
+      b.buildMeshRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layoutIndex, clipStack, transformStack)
+
+  # Process renderChildLast chain first - these nodes render under this node.
+  let renderChildLast = n.renderChildLast
+  var rcIdx = renderChildLast
+  if rcIdx >= 0:
+    rcIdx = b.frame.nodes[rcIdx].renderSibling
+    while rcIdx >= 0 and rcIdx < b.frame.nodes.len:
+      let rcNode = b.frame.nodes[rcIdx].addr
+      let rcAbsPos = b.absoluteNodePos(rcIdx)
+      b.buildMeshRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layoutIndex, clipStack, transformStack)
+      rcIdx = rcNode.renderSibling
+      if rcIdx == renderChildLast:
+        break
+
+  if masksChildren:
+    if clipStack.len > 0:
+      discard clipStack.pop()
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdClipPop,
+      nodeIndex: idx.int32,
+    ), clipStack)
+
+  block:
+    let (vertexData, vertexCount) = if nodeStyle[].hasPerCornerRadii or nodeStyle[].hasPerSideBorderWidths or nodeStyle[].hasPerSideBorderColors:
+      buildRectStrokeVertices(b.frame.arena, absPos, absSize, nodeStyle[].resolvedBorderColors, nodeStyle[].resolvedCornerRadii, nodeStyle[].resolvedBorderWidths)
+    else:
+      buildRectStrokeVertices(b.frame.arena, absPos, absSize, nodeStyle[].borderColor, nodeStyle[].cornerRadius, nodeStyle[].borderWidth)
+    if not transform.isIdentity():
+      for n in 0..<vertexCount:
+        vertexData[n].pos = transform * vertexData[n].pos
+    if vertexData != nil and vertexCount > 0:
+      b.pushRenderCommand(layoutIndex, UiRenderCommand(
+        kind: CmdRawVertices,
+        nodeIndex: idx.int32,
+        vertexData: vertexData,
+        vertexCount: vertexCount.int32,
+      ), clipStack)
+
+  if n.transformIndex >= 0:
+    if transformStack.len > 1:
+      discard transformStack.pop()
+
+proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect]) =
+  var transformStack: seq[UiAffine2] = @[identityAffine2()]
+  b.buildMeshRenderCommands(idx, ox, oy, inheritedLayoutIndex, clipStack, transformStack)
+
+proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect]) =
+  prof("buildRenderCommands")
+  let n = b.frame.nodes[idx].addr
+  let layoutIndex = if n.layoutIndex >= 0: n.layoutIndex else: inheritedLayoutIndex
+  let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
+  let absSize = n.size
+  let nodeStyle = b.nodeStyle(n)
+  let contentOrigin = absPos + vec2(nodeStyle.paddingX, nodeStyle.paddingY)
+  let contentSize = vec2(
+    max(0.0'f32, absSize.x - nodeStyle.paddingX * 2),
+    max(0.0'f32, absSize.y - nodeStyle.paddingY * 2),
+  )
+
+  if n.transformIndex >= 0:
+    let nodeTransform = b.nodeTransform(n)
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdTransformPush,
+      nodeIndex: idx.int32,
+      transformOrigin: absPos,
+      pivot: absPos + vec2(n.size.x * nodeTransform.pivot.x, n.size.y * nodeTransform.pivot.y),
+      offset: nodeTransform.offset,
+      scale: nodeTransform.scale,
+      rotation: nodeTransform.rotation,
+    ), clipStack)
+
+  if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdRectFill,
+      nodeIndex: idx.int32,
+      color: nodeStyle.fillColor,
+      pos: absPos,
+      size: absSize,
+      radius: nodeStyle.cornerRadius,
+    ), clipStack)
+
+  let masksChildren = MaskChildren in n.flags
+  if masksChildren:
+    var clipRect = UiClipRect(x: contentOrigin.x, y: contentOrigin.y, w: contentSize.x, h: contentSize.y)
+    if clipStack.len > 0:
+      clipRect = intersectClipRect(clipStack[^1], clipRect)
+    clipStack.add clipRect
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdClipPush,
+      nodeIndex: idx.int32,
+      pos: contentOrigin,
+      size: contentSize,
+    ), clipStack)
+
+  if DrawText in n.flags and n.textIndex > 0:
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdText,
+      nodeIndex: idx.int32,
+      textIndex: n.textIndex,
+      pos: contentOrigin,
+      size: vec2(0.0'f32, 0.0'f32),
+    ), clipStack)
+
+  for cmd in b.nodeCustomCommands(n)[]:
+    var outCmd = cmd
+    if outCmd.nodeIndex < 0:
+      outCmd.nodeIndex = idx.int32
+    outCmd.pos += contentOrigin
+    outCmd.pos2 += contentOrigin
+    b.pushRenderCommand(layoutIndex, outCmd, clipStack)
+
+  for childIdx in b.children(idx):
+    if b.frame.nodes[childIdx].renderParent < 0:
+      b.buildRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layoutIndex, clipStack)
+
+  # Process renderChildLast chain first - these nodes render under this node.
+  let renderChildLast = n.renderChildLast
+  var rcIdx = renderChildLast
+  if rcIdx >= 0:
+    rcIdx = b.frame.nodes[rcIdx].renderSibling
+    while rcIdx >= 0 and rcIdx < b.frame.nodes.len:
+      let rcNode = b.frame.nodes[rcIdx].addr
+      let rcAbsPos = b.absoluteNodePos(rcIdx)
+      b.buildRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layoutIndex, clipStack)
+      rcIdx = rcNode.renderSibling
+      if rcIdx == renderChildLast:
+        break
+
+  if masksChildren:
+    if clipStack.len > 0:
+      discard clipStack.pop()
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdClipPop,
+      nodeIndex: idx.int32,
+    ), clipStack)
+
+  if nodeStyle.borderWidth > 0 and nodeStyle.borderColor.a > 0:
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdRectStroke,
+      nodeIndex: idx.int32,
+      color: nodeStyle.borderColor,
+      pos: absPos,
+      size: absSize,
+      radius: nodeStyle.cornerRadius,
+      thickness: nodeStyle.borderWidth,
+    ), clipStack)
+
+  if n.transformIndex >= 0:
+    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      kind: CmdTransformPop,
+      nodeIndex: idx.int32,
+    ), clipStack)
+
+proc removeStaleAnimations(b: var UiBuilder) =
+  var writeIdx = 0
+  for readIdx in 0 ..< b.animations.len:
+    if b.animations[readIdx].unchangedFrames < 2:
+      if writeIdx != readIdx:
+        b.animations[writeIdx] = move b.animations[readIdx]
+      inc writeIdx
+  b.animations.setLen(writeIdx)
+
+proc clampNodeSize*(b: var UiBuilder, n: ptr UiNode) {.inline.} =
+  ## Clamp the node's size between its minSize and maxSize constraints.
+  let minV = vec2(max(0.0'f32, n.minSize.x), max(0.0'f32, n.minSize.y))
+  let maxV = vec2(max(minV.x, n.maxSize.x), max(minV.y, n.maxSize.y))
+  n.size = clamp(n.size, minV, maxV)
+
+proc getAnimatedFieldValue(frame: UiFrame, node: UiNode, fieldOffset: UiNodeFloatFieldOffset): float32 {.inline.} =
+  proc layoutPtr(frame: UiFrame, node: UiNode): nil ptr UiStyle {.inline.} =
+    if node.styleIndex > 0: addr(frame.styles[node.styleIndex - 1]) else: nil
+
+  proc textPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeText {.inline.} =
+    if node.textIndex > 0: addr(frame.texts[node.textIndex - 1]) else: nil
+
+  proc gapPtr(frame: UiFrame, node: UiNode): nil ptr float32 {.inline.} =
+    if node.gapIndex > 0: addr(frame.gaps[node.gapIndex - 1]) else: nil
+
+  proc anchorPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeAnchor {.inline.} =
+    if node.anchorIndex > 0: addr(frame.anchors[node.anchorIndex - 1]) else: nil
+
+  proc transformPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeTransform {.inline.} =
+    if node.transformIndex > 0: addr(frame.transforms[node.transformIndex - 1]) else: nil
+
+  case fieldOffset
+  of UiNodePosXFieldOffset: node.pos.x
+  of UiNodePosYFieldOffset: node.pos.y
+  of UiNodeSizeXFieldOffset: node.size.x
+  of UiNodeSizeYFieldOffset: node.size.y
+  of UiNodeMinSizeXFieldOffset: node.minSize.x
+  of UiNodeMinSizeYFieldOffset: node.minSize.y
+  of UiNodeMaxSizeXFieldOffset: node.maxSize.x
+  of UiNodeMaxSizeYFieldOffset: node.maxSize.y
+  of UiNodeCursorXFieldOffset: node.cursor.x
+  of UiNodeCursorYFieldOffset: node.cursor.y
+  of UiNodeContentExtentXFieldOffset: node.contentExtent.x
+  of UiNodeContentExtentYFieldOffset: node.contentExtent.y
+  of UiNodeStylePaddingXFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.paddingX else: 0.0'f32
+  of UiNodeStylePaddingYFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.paddingY else: 0.0'f32
+  of UiNodeStyleBorderWidthFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.borderWidth else: 0.0'f32
+  of UiNodeStyleCornerRadiusFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.cornerRadius else: 0.0'f32
+  of UiNodeStyleFillColorRFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.fillColor.r else: 0.0'f32
+  of UiNodeStyleFillColorGFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.fillColor.g else: 0.0'f32
+  of UiNodeStyleFillColorBFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.fillColor.b else: 0.0'f32
+  of UiNodeStyleFillColorAFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.fillColor.a else: 0.0'f32
+  of UiNodeStyleBorderColorRFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.borderColor.r else: 0.0'f32
+  of UiNodeStyleBorderColorGFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.borderColor.g else: 0.0'f32
+  of UiNodeStyleBorderColorBFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.borderColor.b else: 0.0'f32
+  of UiNodeStyleBorderColorAFieldOffset:
+    let s = layoutPtr(frame, node); if s != nil: s.borderColor.a else: 0.0'f32
+  of UiNodeStyleTextColorRFieldOffset:
+    let s = textPtr(frame, node); if s != nil: s.textColor.r else: 0.0'f32
+  of UiNodeStyleTextColorGFieldOffset:
+    let s = textPtr(frame, node); if s != nil: s.textColor.g else: 0.0'f32
+  of UiNodeStyleTextColorBFieldOffset:
+    let s = textPtr(frame, node); if s != nil: s.textColor.b else: 0.0'f32
+  of UiNodeStyleTextColorAFieldOffset:
+    let s = textPtr(frame, node); if s != nil: s.textColor.a else: 0.0'f32
+  of UiNodeGapFieldOffset:
+    let g = gapPtr(frame, node); if g != nil: g[] else: 0.0'f32
+  of UiNodeAnchorTopLeftXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.topLeft.x else: 0.0'f32
+  of UiNodeAnchorTopLeftYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.topLeft.y else: 0.0'f32
+  of UiNodeAnchorBottomRightXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.bottomRight.x else: 0.0'f32
+  of UiNodeAnchorBottomRightYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.bottomRight.y else: 0.0'f32
+  of UiNodeAnchorTopLeftOffsetXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.topLeftOffset.x else: 0.0'f32
+  of UiNodeAnchorTopLeftOffsetYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.topLeftOffset.y else: 0.0'f32
+  of UiNodeAnchorBottomRightOffsetXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.bottomRightOffset.x else: 0.0'f32
+  of UiNodeAnchorBottomRightOffsetYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.bottomRightOffset.y else: 0.0'f32
+  of UiNodeAnchorPivotXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.pivot.x else: 0.0'f32
+  of UiNodeAnchorPivotYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.pivot.y else: 0.0'f32
+  of UiNodeAnchoredOffsetXFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.offset.x else: 0.0'f32
+  of UiNodeAnchoredOffsetYFieldOffset:
+    let a = anchorPtr(frame, node); if a != nil: a.offset.y else: 0.0'f32
+  of UiNodeTransformOffsetXFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.offset.x else: 0.0'f32
+  of UiNodeTransformOffsetYFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.offset.y else: 0.0'f32
+  of UiNodeTransformRotationFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.rotation else: 0.0'f32
+  of UiNodeTransformScaleXFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.scale.x else: 1.0'f32
+  of UiNodeTransformScaleYFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.scale.y else: 1.0'f32
+  of UiNodeTransformPivotXFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.pivot.x else: 0.5'f32
+  of UiNodeTransformPivotYFieldOffset:
+    let t = transformPtr(frame, node); if t != nil: t.pivot.y else: 0.5'f32
+
+proc setAnimatedFieldValue(b: var UiBuilder, node: var UiNode, fieldOffset: UiNodeFloatFieldOffset, value: float32) {.inline.} =
+  case fieldOffset
+  of UiNodePosXFieldOffset: node.pos.x = value
+  of UiNodePosYFieldOffset: node.pos.y = value
+  of UiNodeSizeXFieldOffset: node.size.x = value
+  of UiNodeSizeYFieldOffset: node.size.y = value
+  of UiNodeMinSizeXFieldOffset: node.minSize.x = value
+  of UiNodeMinSizeYFieldOffset: node.minSize.y = value
+  of UiNodeMaxSizeXFieldOffset: node.maxSize.x = value
+  of UiNodeMaxSizeYFieldOffset: node.maxSize.y = value
+  of UiNodeCursorXFieldOffset: node.cursor.x = value
+  of UiNodeCursorYFieldOffset: node.cursor.y = value
+  of UiNodeContentExtentXFieldOffset: node.contentExtent.x = value
+  of UiNodeContentExtentYFieldOffset: node.contentExtent.y = value
+  of UiNodeStylePaddingXFieldOffset: b.ensureNodeStyle(node.addr).paddingX = value
+  of UiNodeStylePaddingYFieldOffset: b.ensureNodeStyle(node.addr).paddingY = value
+  of UiNodeStyleBorderWidthFieldOffset: b.ensureNodeStyle(node.addr).borderWidth = value
+  of UiNodeStyleCornerRadiusFieldOffset: b.ensureNodeStyle(node.addr).cornerRadius = value
+  of UiNodeStyleFillColorRFieldOffset: b.ensureNodeStyle(node.addr).fillColor.r = value
+  of UiNodeStyleFillColorGFieldOffset: b.ensureNodeStyle(node.addr).fillColor.g = value
+  of UiNodeStyleFillColorBFieldOffset: b.ensureNodeStyle(node.addr).fillColor.b = value
+  of UiNodeStyleFillColorAFieldOffset: b.ensureNodeStyle(node.addr).fillColor.a = value
+  of UiNodeStyleBorderColorRFieldOffset: b.ensureNodeStyle(node.addr).borderColor.r = value
+  of UiNodeStyleBorderColorGFieldOffset: b.ensureNodeStyle(node.addr).borderColor.g = value
+  of UiNodeStyleBorderColorBFieldOffset: b.ensureNodeStyle(node.addr).borderColor.b = value
+  of UiNodeStyleBorderColorAFieldOffset: b.ensureNodeStyle(node.addr).borderColor.a = value
+  of UiNodeStyleTextColorRFieldOffset: b.ensureNodeText(node.addr).textColor.r = value
+  of UiNodeStyleTextColorGFieldOffset: b.ensureNodeText(node.addr).textColor.g = value
+  of UiNodeStyleTextColorBFieldOffset: b.ensureNodeText(node.addr).textColor.b = value
+  of UiNodeStyleTextColorAFieldOffset: b.ensureNodeText(node.addr).textColor.a = value
+  of UiNodeGapFieldOffset: b.ensureNodeGap(node.addr) = value
+  of UiNodeAnchorTopLeftXFieldOffset: b.ensureNodeAnchor(node.addr).topLeft.x = value
+  of UiNodeAnchorTopLeftYFieldOffset: b.ensureNodeAnchor(node.addr).topLeft.y = value
+  of UiNodeAnchorBottomRightXFieldOffset: b.ensureNodeAnchor(node.addr).bottomRight.x = value
+  of UiNodeAnchorBottomRightYFieldOffset: b.ensureNodeAnchor(node.addr).bottomRight.y = value
+  of UiNodeAnchorTopLeftOffsetXFieldOffset: b.ensureNodeAnchor(node.addr).topLeftOffset.x = value
+  of UiNodeAnchorTopLeftOffsetYFieldOffset: b.ensureNodeAnchor(node.addr).topLeftOffset.y = value
+  of UiNodeAnchorBottomRightOffsetXFieldOffset: b.ensureNodeAnchor(node.addr).bottomRightOffset.x = value
+  of UiNodeAnchorBottomRightOffsetYFieldOffset: b.ensureNodeAnchor(node.addr).bottomRightOffset.y = value
+  of UiNodeAnchorPivotXFieldOffset: b.ensureNodeAnchor(node.addr).pivot.x = value
+  of UiNodeAnchorPivotYFieldOffset: b.ensureNodeAnchor(node.addr).pivot.y = value
+  of UiNodeAnchoredOffsetXFieldOffset: b.ensureNodeAnchor(node.addr).offset.x = value
+  of UiNodeAnchoredOffsetYFieldOffset: b.ensureNodeAnchor(node.addr).offset.y = value
+  of UiNodeTransformOffsetXFieldOffset: b.ensureNodeTransform(node.addr).offset.x = value
+  of UiNodeTransformOffsetYFieldOffset: b.ensureNodeTransform(node.addr).offset.y = value
+  of UiNodeTransformRotationFieldOffset: b.ensureNodeTransform(node.addr).rotation = value
+  of UiNodeTransformScaleXFieldOffset: b.ensureNodeTransform(node.addr).scale.x = value
+  of UiNodeTransformScaleYFieldOffset: b.ensureNodeTransform(node.addr).scale.y = value
+  of UiNodeTransformPivotXFieldOffset: b.ensureNodeTransform(node.addr).pivot.x = value
+  of UiNodeTransformPivotYFieldOffset: b.ensureNodeTransform(node.addr).pivot.y = value
+
+proc syncVirtualNodeFromFrame*(b: var UiBuilder, v: var UiVirtualNode, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.} =
+  ## Copy the animated float fields and side-array data of the inserted frame node
+  ## back into the stored virtual node so it carries the updated values next frame.
+  if frameNodeIdx < 0 or frameNodeIdx >= b.frame.nodes.len:
+    return
+  let fn = b.frame.nodes[frameNodeIdx].addr
+  v.nodes[0].pos = fn.pos
+  v.nodes[0].size = fn.size
+  v.nodes[0].minSize = fn.minSize
+  v.nodes[0].maxSize = fn.maxSize
+  v.nodes[0].cursor = fn.cursor
+  v.nodes[0].contentExtent = fn.contentExtent
+  if fn.styleIndex != 0'u16:
+    let local = int(fn.styleIndex) - baseStyle
+    let slot = int(fn.styleIndex) - 1
+    if local >= 1:
+      if v.styles.len < local: v.styles.setLen(local)
+      v.styles[local - 1] = b.frame.styles[slot]
+      v.nodes[0].styleIndex = uint16(local)
+  if fn.gapIndex != 0'u16:
+    let local = int(fn.gapIndex) - baseGap
+    let slot = int(fn.gapIndex) - 1
+    if local >= 1:
+      if v.gaps.len < local: v.gaps.setLen(local)
+      v.gaps[local - 1] = b.frame.gaps[slot]
+      v.nodes[0].gapIndex = uint16(local)
+  if fn.anchorIndex != 0'u16:
+    let local = int(fn.anchorIndex) - baseAnchor
+    let slot = int(fn.anchorIndex) - 1
+    if local >= 1:
+      if v.anchors.len < local: v.anchors.setLen(local)
+      v.anchors[local - 1] = b.frame.anchors[slot]
+      v.nodes[0].anchorIndex = uint16(local)
+  if fn.transformIndex != 0'u16:
+    let local = int(fn.transformIndex) - baseTransform
+    let slot = int(fn.transformIndex) - 1
+    if local >= 1:
+      if v.transforms.len < local: v.transforms.setLen(local)
+      v.transforms[local - 1] = b.frame.transforms[slot]
+      v.nodes[0].transformIndex = uint16(local)
+
+proc findAnimationIndex(b: UiBuilder, nodeId: UiNodeId): int {.inline.} =
+  for i in 0 ..< b.animations.len:
+    if b.animations[i].nodeId == nodeId:
+      return i
+  -1
+
+proc resolveAnimationIndex(
+    b: var UiBuilder,
+    nodeId: UiNodeId,
+    allowCreate: bool,
+): int =
+  let idx = b.findAnimationIndex(nodeId)
+  if idx >= 0:
+    return idx
+
+  if not allowCreate:
+    return -1
+
+  b.animations.add UiAnimation(
+    nodeId: nodeId,
+    fields: @[],
+    unchangedFrames: 0,
+  )
+  b.animations.high
+
+proc nextFloatFieldOffset(baseFieldOffset: UiNodeFloatFieldOffset, componentIndex: int): UiNodeFloatFieldOffset {.inline.} =
+  cast[UiNodeFloatFieldOffset](ord(baseFieldOffset) + componentIndex * int(sizeof(float32)))
+
+proc findAnimationFieldIndex(anim: UiAnimation, fieldOffset: UiNodeFloatFieldOffset): int {.inline.} =
+  for i in 0 ..< anim.fields.len:
+    if anim.fields[i].fieldOffset == fieldOffset:
+      return i
+  -1
+
+proc animationCurrentValue(frame: UiFrame, anim: UiAnimation, node: UiNode, fieldOffset: UiNodeFloatFieldOffset): float32 {.inline.} =
+  let fieldIdx = findAnimationFieldIndex(anim, fieldOffset)
+  if fieldIdx >= 0:
+    return anim.fields[fieldIdx].currentValue
+  getAnimatedFieldValue(frame, node, fieldOffset)
+
+proc previousAnimationFieldStartValue(
+    frame: UiFrame,
+    anim: UiAnimation,
+    nodeId: UiNodeId,
+    fieldOffset: UiNodeFloatFieldOffset,
+): tuple[hasValue: bool, value: float32] {.inline.} =
+  let prevIdx = findNodeIndexById(frame.nodes, nodeId)
+  if prevIdx < 0:
+    return (false, 0.0'f32)
+
+  let _ = anim
+  (true, getAnimatedFieldValue(frame, frame.nodes[prevIdx], fieldOffset))
+
+proc applyAnimatedFieldTarget(
+    anim: var UiAnimation,
+    node: UiNode,
+    fieldOffset: UiNodeFloatFieldOffset,
+    targetValue: float32,
+    speed: float32,
+    touchedFrame: uint64,
+    initializeCurrentValue = false,
+    initialCurrentValue = 0.0'f32,
+): float32 =
+  var fieldIdx = findAnimationFieldIndex(anim, fieldOffset)
+
+  if fieldIdx < 0:
+    let startValue = if initializeCurrentValue: initialCurrentValue else: targetValue
+    anim.fields.add UiFieldAnimation(
+      # First observation should not introduce a one-frame lag.
+      currentValue: startValue,
+      targetValue: targetValue,
+      speed: max(0.0'f32, speed),
+      fieldOffset: fieldOffset,
+      touchedFrame: touchedFrame,
+    )
+    fieldIdx = anim.fields.high
+
+  let field = anim.fields[fieldIdx].addr
+  field.targetValue = targetValue
+  field.speed = max(0.0'f32, speed)
+  field.touchedFrame = touchedFrame
+
+  if field.speed <= 0.0'f32:
+    field.currentValue = targetValue
+
+  field.currentValue
+
+proc animateDelayed*(b: var UiBuilder, nodeIdx: int): var UiBuilder {.discardable.} =
+  ## Schedule animation application for the node at nodeIdx to run during flushDeferredNodes.
+  if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return b
+
+  b.deferredNodes.add UiDeferredNode(
+    nodeIdx: nodeIdx,
+    buildProc: deferredAnimationBuildProc,
+    userData: 0,
+  )
+  b
+
+proc animateDelayed*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Schedule animation application for the current node to run during flushDeferredNodes.
+  if b.stack.len <= 0:
+    return b
+  b.animateDelayed(b.stack[^1])
+
+proc absoluteNodePos*(b: UiBuilder, idx: int): Vec2 =
+  ## Returns the absolute position of the node at idx in the current frame.
+  result = vec2(0.0'f32, 0.0'f32)
+  var current = idx
+  while current >= 0 and current < b.frame.nodes.len:
+    let n = b.frame.nodes[current].addr
+    result += n.pos
+    let parentIdx = int(n.parent)
+    if parentIdx >= 0 and parentIdx < b.frame.nodes.len:
+      let parentNode = b.frame.nodes[parentIdx].addr
+      if parentNode.styleIndex > 0:
+        let si = int(parentNode.styleIndex) - 1
+        if si < b.frame.styles.len:
+          result += vec2(b.frame.styles[si].paddingX, b.frame.styles[si].paddingY)
+    current = parentIdx
+
+proc absoluteNodePosPrev*(b: var UiBuilder, nodeId: UiNodeId, indexHint: int = -1): Vec2 =
+  ## Returns the absolute position of the node in the previous frame
+  result = vec2(0.0'f32, 0.0'f32)
+  var current = b.previousNodeIndex(nodeId, indexHint)
+  while current >= 0 and current < b.previousFrame.nodes.len:
+    let n = b.previousFrame.nodes[current].addr
+    result += n.pos
+    let parentIdx = int(n.parent)
+    if parentIdx >= 0 and parentIdx < b.previousFrame.nodes.len:
+      let parentNode = b.previousFrame.nodes[parentIdx].addr
+      if parentNode.styleIndex > 0:
+        let si = int(parentNode.styleIndex) - 1
+        if si < b.previousFrame.styles.len:
+          result += vec2(b.previousFrame.styles[si].paddingX, b.previousFrame.styles[si].paddingY)
+    current = parentIdx
+
+proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int) =
+  prof("applyDeferredAnimationTracks")
+  if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return
+
+  var node = b.frame.nodes[nodeIdx].addr
+  let oldSize = node.size
+  let animIdx = b.findAnimationIndex(node.id)
+  if animIdx < 0:
+    return
+
+  let anim = b.animations[animIdx].addr
+
+  let prevIdx = b.previousNodeIndex(node.id, nodeIdx)
+  if prevIdx < 0:
+    return
+
+  # Detect parent change and compute recalculation for position fields.
+  var parentChanged = false
+  var newParentLocalOffset = vec2(0.0'f32, 0.0'f32)
+  let prevParentIdx = int(b.previousFrame.nodes[prevIdx].parent)
+  if node.parent >= 0 and prevParentIdx >= 0 and
+      node.parent < b.frame.nodes.len and prevParentIdx < b.previousFrame.nodes.len:
+    let curParentId = b.frame.nodes[node.parent].id
+    let prevParentId = b.previousFrame.nodes[prevParentIdx].id
+    if curParentId != prevParentId:
+      parentChanged = true
+      # Compute absolute position of node in previous frame.
+      let nodeAbsPrev = b.absoluteNodePosPrev(node.id, nodeIdx)
+      # Find new parent in the previous frame to compute its absolute position.
+      let newParentPrevIdx = b.previousNodeIndex(curParentId)
+      if newParentPrevIdx >= 0:
+        let newParentAbsPrev = b.absoluteNodePosPrev(curParentId, newParentPrevIdx)
+        # local = absolute(node) - absolute(newParent) - newParent.padding
+        let newParentPrevNode = b.previousFrame.nodes[newParentPrevIdx].addr
+        var newParentPadX = 0.0'f32
+        var newParentPadY = 0.0'f32
+        if newParentPrevNode.styleIndex > 0:
+          let si = int(newParentPrevNode.styleIndex) - 1
+          if si < b.previousFrame.styles.len:
+            newParentPadX = b.previousFrame.styles[si].paddingX
+            newParentPadY = b.previousFrame.styles[si].paddingY
+        newParentLocalOffset = vec2(
+          nodeAbsPrev.x - newParentAbsPrev.x - newParentPadX,
+          nodeAbsPrev.y - newParentAbsPrev.y - newParentPadY,
+        )
+      else:
+        # New parent didn't exist in previous frame; skip animation for pos fields.
+        parentChanged = false
+
+  var hasActiveField = false
+  let animationTick = max(0.0'f32, b.frameCtx.animationTick)
+  let animationSpeedScale = max(0.0'f32, b.animationSpeed)
+  let currentFrame = b.frameCtx.input.frameIndex
+  for i in 0 ..< anim.fields.len:
+    let field = anim.fields[i].addr
+    let nodeValue = getAnimatedFieldValue(b.frame, node[], field.fieldOffset)
+    if field.touchedFrame != currentFrame:
+      field.currentValue = nodeValue
+      field.targetValue = nodeValue
+      continue
+
+    var previousStart = getAnimatedFieldValue(b.previousFrame, b.previousFrame.nodes[prevIdx], field.fieldOffset)
+    if parentChanged:
+      case field.fieldOffset
+      of UiNodePosXFieldOffset:
+        previousStart = newParentLocalOffset.x
+      of UiNodePosYFieldOffset:
+        previousStart = newParentLocalOffset.y
+      else:
+        discard
+    let blend = clamp(field.speed * animationSpeedScale * animationTick, 0.0'f32, 1.0'f32)
+    field.currentValue = previousStart + (nodeValue - previousStart) * blend
+    field.targetValue = nodeValue
+    if abs(nodeValue - field.currentValue) <= 0.001'f32:
+      field.currentValue = nodeValue
+    else:
+      hasActiveField = true
+    setAnimatedFieldValue(b, node[], field.fieldOffset, field.currentValue)
+
+  if hasActiveField:
+    anim[].unchangedFrames = 0
+  b.clampNodeSize(node)
+  if oldSize != node.size:
+    discard b.postProcessChildren(nodeIdx)
+
+proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
+  let _ = userData
+  b.applyDeferredAnimationTracks(nodeIdx)
+
+proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
+  let _ = userData
+  discard b.postProcessChildren(nodeIdx)
+
+proc setAnimatedField(b: var UiBuilder, nodeIdx: int, fieldOffset: UiNodeFloatFieldOffset, targetValue: float32, speed = DefaultAnimationSpeed): float32 =
+  if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return targetValue
+
+  let node = b.frame.nodes[nodeIdx].addr
+  if not b.configuringAnimationStack[nodeIdx]:
+    return targetValue
+
+  let animIdx = b.resolveAnimationIndex(node.id, b.animationTriggerStack[nodeIdx])
+  if animIdx >= 0:
+    let anim = b.animations[animIdx].addr
+    let nodeValueBefore = animationCurrentValue(b.frame, anim[], node[], fieldOffset)
+    var initializeCurrentValue = false
+    var initialCurrentValue = nodeValueBefore
+    if findAnimationFieldIndex(anim[], fieldOffset) < 0:
+      let previousStart = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, fieldOffset)
+      if previousStart.hasValue:
+        initializeCurrentValue = true
+        initialCurrentValue = previousStart.value
+    let animatedValue = anim[].applyAnimatedFieldTarget(
+      node[],
+      fieldOffset,
+      targetValue,
+      speed,
+      b.frameCtx.input.frameIndex,
+      initializeCurrentValue,
+      initialCurrentValue,
+    )
+    when defined(debugLogUiAnimation):
+      let logLine = "ui.anim.set" &
+        " node='" & nodeDebugName(node[]) & "'" &
+        " id=" & $nodeIdValue(node.id) &
+        " field=" & $fieldOffset &
+        " nodeBefore=" & fmt2(nodeValueBefore) &
+        " target=" & fmt2(targetValue) &
+        " current=" & fmt2(animatedValue) &
+        " speed=" & fmt2(max(0.0'f32, speed))
+      debugLog(logLine)
+    return animatedValue
+
+  else:
+    when defined(debugLogUiAnimation):
+      let logLine = "ui.anim.set.skip" &
+        " node='" & nodeDebugName(node[]) & "'" &
+        " id=" & $nodeIdValue(node.id) &
+        " field=" & $fieldOffset &
+        " reason=no-animation-state" &
+        " target=" & fmt2(targetValue)
+      debugLog(logLine)
+    return targetValue
+
+proc setAnimatedField[T](
+    b: var UiBuilder,
+    nodeIdx: int,
+    firstFieldOffset: UiNodeFloatFieldOffset,
+    targetValue: T,
+    speed = DefaultAnimationSpeed,
+): T =
+  if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return targetValue
+
+  let node = b.frame.nodes[nodeIdx].addr
+  if not b.configuringAnimationStack[nodeIdx]:
+    return targetValue
+
+  let animIdx = b.resolveAnimationIndex(node.id, b.animationTriggerStack[nodeIdx])
+  if animIdx < 0:
+    return targetValue
+  let anim = b.animations[animIdx].addr
+
+  when T is Vec2:
+    let xOffset = nextFloatFieldOffset(firstFieldOffset, 0)
+    let yOffset = nextFloatFieldOffset(firstFieldOffset, 1)
+    let xCurrentBefore = animationCurrentValue(b.frame, anim[], node[], xOffset)
+    let yCurrentBefore = animationCurrentValue(b.frame, anim[], node[], yOffset)
+    var initX = false
+    var initY = false
+    var prevX = xCurrentBefore
+    var prevY = yCurrentBefore
+    if findAnimationFieldIndex(anim[], xOffset) < 0:
+      let previousX = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, xOffset)
+      if previousX.hasValue:
+        initX = true
+        prevX = previousX.value
+    if findAnimationFieldIndex(anim[], yOffset) < 0:
+      let previousY = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, yOffset)
+      if previousY.hasValue:
+        initY = true
+        prevY = previousY.value
+    result = vec2(
+      anim[].applyAnimatedFieldTarget(node[], xOffset, targetValue.x, speed, b.frameCtx.input.frameIndex, initX, prevX),
+      anim[].applyAnimatedFieldTarget(node[], yOffset, targetValue.y, speed, b.frameCtx.input.frameIndex, initY, prevY),
+    )
+  elif T is UiColor:
+    let rOffset = nextFloatFieldOffset(firstFieldOffset, 0)
+    let gOffset = nextFloatFieldOffset(firstFieldOffset, 1)
+    let bOffset = nextFloatFieldOffset(firstFieldOffset, 2)
+    let aOffset = nextFloatFieldOffset(firstFieldOffset, 3)
+    let rCurrentBefore = animationCurrentValue(b.frame, anim[], node[], rOffset)
+    let gCurrentBefore = animationCurrentValue(b.frame, anim[], node[], gOffset)
+    let bCurrentBefore = animationCurrentValue(b.frame, anim[], node[], bOffset)
+    let aCurrentBefore = animationCurrentValue(b.frame, anim[], node[], aOffset)
+    var initR = false
+    var initG = false
+    var initB = false
+    var initA = false
+    var prevR = rCurrentBefore
+    var prevG = gCurrentBefore
+    var prevB = bCurrentBefore
+    var prevA = aCurrentBefore
+    if findAnimationFieldIndex(anim[], rOffset) < 0:
+      let previousR = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, rOffset)
+      if previousR.hasValue:
+        initR = true
+        prevR = previousR.value
+    if findAnimationFieldIndex(anim[], gOffset) < 0:
+      let previousG = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, gOffset)
+      if previousG.hasValue:
+        initG = true
+        prevG = previousG.value
+    if findAnimationFieldIndex(anim[], bOffset) < 0:
+      let previousB = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, bOffset)
+      if previousB.hasValue:
+        initB = true
+        prevB = previousB.value
+    if findAnimationFieldIndex(anim[], aOffset) < 0:
+      let previousA = previousAnimationFieldStartValue(b.previousFrame, anim[], node.id, aOffset)
+      if previousA.hasValue:
+        initA = true
+        prevA = previousA.value
+    result = UiColor(
+      r: anim[].applyAnimatedFieldTarget(node[], rOffset, targetValue.r, speed, b.frameCtx.input.frameIndex, initR, prevR),
+      g: anim[].applyAnimatedFieldTarget(node[], gOffset, targetValue.g, speed, b.frameCtx.input.frameIndex, initG, prevG),
+      b: anim[].applyAnimatedFieldTarget(node[], bOffset, targetValue.b, speed, b.frameCtx.input.frameIndex, initB, prevB),
+      a: anim[].applyAnimatedFieldTarget(node[], aOffset, targetValue.a, speed, b.frameCtx.input.frameIndex, initA, prevA),
+    )
+  else:
+    {.error: "Unsupported animated composite type".}
+
+proc beginAnimation*(b: var UiBuilder, trigger = true) =
+  ## Begin an animation block. When trigger is true, new animation tracks are created on first use.
+  let idx = b.stack[^1]
+  b.configuringAnimationStack[idx] = true
+  b.animationTriggerStack[idx] = trigger
+
+proc endAnimation*(b: var UiBuilder) =
+  ## End an animation block. Steps all animation tracks toward their targets using the blend factor.
+  let idx = b.stack[^1]
+  let node = b.frame.nodes[idx].addr
+  let animIdx = b.findAnimationIndex(node.id)
+  if animIdx >= 0:
+    let anim = b.animations[animIdx].addr
+    var hasActiveField = false
+    when defined(debugLogUiAnimation):
+      let logLine = "ui.anim.end.begin" &
+        " node='" & nodeDebugName(node[]) & "'" &
+        " id=" & $nodeIdValue(node.id) &
+        " fields=" & $anim.fields.len
+      debugLog(logLine)
+    let animationTick = max(0.0'f32, b.frameCtx.animationTick)
+    let animationSpeedScale = max(0.0'f32, b.animationSpeed)
+    for i in 0 ..< anim.fields.len:
+      let field = anim.fields[i].addr
+      let nodeValue = getAnimatedFieldValue(b.frame, node[], field.fieldOffset)
+      let currentBefore = field.currentValue
+      let targetBefore {.used.} = field.targetValue
+      # If a non-animating field was changed externally this frame (layout/fill),
+      # keep that value instead of restoring a stale target.
+      if abs(nodeValue - field.currentValue) > 0.0001'f32:
+        field.currentValue = nodeValue
+        field.targetValue = nodeValue
+        if abs(field.currentValue - currentBefore) > 0.0001'f32:
+          hasActiveField = true
+        when defined(debugLogUiAnimation):
+          let logLine = "ui.anim.end.sync" &
+            " node='" & nodeDebugName(node[]) & "'" &
+            " id=" & $nodeIdValue(node.id) &
+            " field=" & $field.fieldOffset &
+            " nodeValue=" & fmt2(nodeValue) &
+            " currentBefore=" & fmt2(currentBefore) &
+            " targetBefore=" & fmt2(targetBefore) &
+            " currentAfter=" & fmt2(field.currentValue)
+          debugLog(logLine)
+        continue
+
+      let blend = clamp(field.speed * animationSpeedScale * animationTick, 0.0'f32, 1.0'f32)
+      field.currentValue = field.currentValue + (field.targetValue - field.currentValue) * blend
+      if abs(field.targetValue - field.currentValue) <= 0.001'f32:
+        field.currentValue = field.targetValue
+      else:
+        hasActiveField = true
+      setAnimatedFieldValue(b, node[], field.fieldOffset, field.currentValue)
+      when defined(debugLogUiAnimation):
+        let logLine = "ui.anim.end.step" &
+          " node='" & nodeDebugName(node[]) & "'" &
+          " id=" & $nodeIdValue(node.id) &
+          " field=" & $field.fieldOffset &
+          " nodeBefore=" & fmt2(nodeValue) &
+          " currentBefore=" & fmt2(currentBefore) &
+          " target=" & fmt2(targetBefore) &
+          " blend=" & fmt2(blend) &
+          " currentAfter=" & fmt2(field.currentValue)
+        debugLog(logLine)
+    if hasActiveField:
+      anim[].unchangedFrames = 0
+    b.clampNodeSize(node)
+
+  b.configuringAnimationStack[idx] = false
+  b.animationTriggerStack[idx] = true
+
+template animate*(b: var UiBuilder, body: untyped): untyped =
+  ## Shorthand for beginAnimation(true), body, endAnimation(). Animations are triggered.
+  b.beginAnimation(true)
+  body
+  b.endAnimation()
+
+template animate*(b: var UiBuilder, trigger: bool, body: untyped): untyped =
+  ## Shorthand for beginAnimation(trigger), body, endAnimation().
+  b.beginAnimation(trigger)
+  body
+  b.endAnimation()
+
+proc applyAnchoredLayoutToChildX(b: var UiBuilder, parentIdx, childIdx: int) =
+  if parentIdx < 0 or parentIdx >= b.frame.nodes.len:
+    return
+  if childIdx < 0 or childIdx >= b.frame.nodes.len:
+    return
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let child = b.frame.nodes[childIdx].addr
+  if not isAnchoredLayoutX(child[]):
+    return
+
+  let nodeAnchor = b.nodeAnchor(child)
+  let contentW = max(0.0'f32, parent.size.x - b.nodeStyle(parent).paddingX * 2)
+  let anchorTopLeft = clamp(nodeAnchor.topLeft, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+  let anchorBottomRight = clamp(nodeAnchor.bottomRight, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+  let anchorMinPx = contentW * anchorTopLeft.x + nodeAnchor.topLeftOffset.x
+  let anchorMaxPx = contentW * anchorBottomRight.x + nodeAnchor.bottomRightOffset.x
+  let pivot = clamp(nodeAnchor.pivot, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+
+  let anchorSpanX = max(0.0'f32, anchorMaxPx - anchorMinPx)
+  if anchorSpanX != 0:
+    child.size.x = anchorSpanX
+    if SizeXKnown in parent.flags:
+      child.flags.incl SizeXKnown
+    b.clampNodeSize(child)
+  child.pos.x = anchorMinPx - child.size.x * pivot.x
+
+proc applyAnchoredLayoutToChildY(b: var UiBuilder, parentIdx, childIdx: int) =
+  if parentIdx < 0 or parentIdx >= b.frame.nodes.len:
+    return
+  if childIdx < 0 or childIdx >= b.frame.nodes.len:
+    return
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let child = b.frame.nodes[childIdx].addr
+  if not isAnchoredLayoutY(child[]):
+    return
+
+  let nodeAnchor = b.nodeAnchor(child)
+  let contentH = max(0.0'f32, parent.size.y - b.nodeStyle(parent).paddingY * 2)
+  let anchorTopLeft = clamp(nodeAnchor.topLeft, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+  let anchorBottomRight = clamp(nodeAnchor.bottomRight, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+  let anchorMinPx = contentH * anchorTopLeft.y + nodeAnchor.topLeftOffset.y
+  let anchorMaxPx = contentH * anchorBottomRight.y + nodeAnchor.bottomRightOffset.y
+  let pivot = clamp(nodeAnchor.pivot, vec2(0.0'f32, 0.0'f32), vec2(1.0'f32, 1.0'f32))
+
+  let anchorSpanY = max(0.0'f32, anchorMaxPx - anchorMinPx)
+  if anchorSpanY != 0:
+    child.size.y = anchorSpanY
+    if SizeYKnown in parent.flags:
+      child.flags.incl SizeYKnown
+    b.clampNodeSize(child)
+  child.pos.y = anchorMinPx - child.size.y * pivot.y
+
+proc applyImmediateFillFromParent(b: var UiBuilder, idx: int) =
+  if idx < 0 or idx >= b.frame.nodes.len:
+    return
+
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return
+
+  let p = b.frame.nodes[parentIdx].addr
+  let n = b.frame.nodes[idx].addr
+  let nodeStyle = b.nodeStyle(p)
+  let contentW = max(0.0'f32, p.size.x - nodeStyle.paddingX * 2)
+  let contentH = max(0.0'f32, p.size.y - nodeStyle.paddingY * 2)
+  let reverseX = isReverseLayout(p.flags) and isHorizontalLayout(p.flags)
+  let reverseY = isReverseLayout(p.flags) and isVerticalLayout(p.flags)
+  let remainingW =
+    if reverseX:
+      max(0.0'f32, n.pos.x)
+    else:
+      max(0.0'f32, contentW - n.pos.x)
+  let remainingH =
+    if reverseY:
+      max(0.0'f32, n.pos.y)
+    else:
+      max(0.0'f32, contentH - n.pos.y)
+
+  if FillX in n.flags:
+    n.size.x = remainingW
+    if SizeXKnown in p.flags:
+      n.flags.incl SizeXKnown
+  if FillY in n.flags:
+    n.size.y = remainingH
+    if SizeYKnown in p.flags:
+      n.flags.incl SizeYKnown
+
+  b.clampNodeSize(n)
+
+proc contentSize*(b: var UiBuilder, n: ptr UiNode): Vec2 {.raises: [].} =
+  ## Compute the total content size of a node including text, padding, and child content extent.
+  let textSize = b.cachedMeasuredTextSize(n)
+  result = vec2()
+
+  let nodeStyle = b.nodeStyle(n)
+  result.x = max(textSize.x + nodeStyle.paddingX * 2, n.contentExtent.x + nodeStyle.paddingX * 2)
+  result.y = max(textSize.y + nodeStyle.paddingY * 2, n.contentExtent.y + nodeStyle.paddingY * 2)
+
+proc updateNodeFit*(b: var UiBuilder, n: ptr UiNode) =
+  ## Resize the node to fit its text and child content if FitX/Y flags are set.
+  if FitX in n.flags or FitY in n.flags:
+    let textSize = b.cachedMeasuredTextSize(n)
+
+    if FitX in n.flags:
+      let nodeStyle = b.nodeStyle(n)
+      n.size.x = max(textSize.x + nodeStyle.paddingX * 2, n.contentExtent.x + nodeStyle.paddingX * 2)
+
+    if FitY in n.flags:
+      let nodeStyle = b.nodeStyle(n)
+      n.size.y = max(textSize.y + nodeStyle.paddingY * 2, n.contentExtent.y + nodeStyle.paddingY * 2)
+
+  b.clampNodeSize(n)
+
+proc updateNodeFit*(b: var UiBuilder, idx: int) =
+  ## Resize the node at idx to fit its content if FitX/Y flags are set.
+  b.updateNodeFit(b.frame.nodes[idx].addr)
+
+proc updateParentAfterChildEnd(b: var UiBuilder, child: ptr UiNode) =
+  let parentIdx = child.parent
+  if parentIdx < 0:
+    return
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let parentFitXEnabled = FitX in parent.flags
+  let parentFitYEnabled = FitY in parent.flags
+
+  if AlignCenter in child.flags:
+    parent.flags.incl PostProcessChildren
+  if parentFitXEnabled and (FillX in child.flags or AlignCenter in child.flags or isAnchoredLayoutX(child[])):
+    parent.flags.incl PostProcessChildren
+  if parentFitYEnabled and (FillY in child.flags or AlignCenter in child.flags or isAnchoredLayoutY(child[])):
+    parent.flags.incl PostProcessChildren
+
+  if isReverseLayout(parent.flags):
+    if isHorizontalLayout(parent.flags) and parentFitXEnabled and not (FillX in child.flags):
+      parent.flags.incl PostProcessChildren
+    if isVerticalLayout(parent.flags) and parentFitYEnabled and not (FillY in child.flags):
+      parent.flags.incl PostProcessChildren
+    if isHorizontalLayout(parent.flags) and FillX in child.flags:
+      parent.flags.incl PostProcessChildren
+    if isVerticalLayout(parent.flags) and FillY in child.flags:
+      parent.flags.incl PostProcessChildren
+
+  if isReverseLayout(parent.flags):
+    if isVerticalLayout(parent.flags):
+      let newCursor = max(0.0'f32, parent.cursor.y - child.size.y)
+      child.pos.y = newCursor
+      parent.cursor.y = max(0.0'f32, newCursor - b.nodeGap(parent))
+    elif isHorizontalLayout(parent.flags):
+      let newCursor = max(0.0'f32, parent.cursor.x - child.size.x)
+      child.pos.x = newCursor
+      parent.cursor.x = max(0.0'f32, newCursor - b.nodeGap(parent))
+    else:
+      discard
+
+  let childEndX = child.pos.x + child.size.x
+  let childEndY = child.pos.y + child.size.y
+  if isReverseLayout(parent.flags) and isHorizontalLayout(parent.flags) and parentFitXEnabled:
+    if parent.contentExtent.x > 0:
+      parent.contentExtent.x += b.nodeGap(parent)
+    parent.contentExtent.x += child.size.x
+  else:
+    parent.contentExtent.x = max(parent.contentExtent.x, childEndX)
+
+  if isReverseLayout(parent.flags) and isVerticalLayout(parent.flags) and parentFitYEnabled:
+    if parent.contentExtent.y > 0:
+      parent.contentExtent.y += b.nodeGap(parent)
+    parent.contentExtent.y += child.size.y
+  else:
+    parent.contentExtent.y = max(parent.contentExtent.y, childEndY)
+
+  if not isReverseLayout(parent.flags):
+    if isVerticalLayout(parent.flags):
+      parent.cursor.y = max(parent.cursor.y, childEndY + b.nodeGap(parent))
+    elif isHorizontalLayout(parent.flags):
+      parent.cursor.x = max(parent.cursor.x, childEndX + b.nodeGap(parent))
+    else:
+      discard
+
+  b.updateNodeFit(parent)
+
+  if PostProcessChildren in b.currentNode.flags:
+    parent.flags.incl PostProcessChildren
+
+proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardable.} =
+  ## Run layout post-processing on the node at idx: applies fill, align, anchored layout, and reverse layout.
+  if idx < 0 or idx >= b.frame.nodes.len:
+    return b
+
+  let n = b.frame.nodes[idx].addr
+  profd("layout " & n[].nodeDebugName())
+  n.flags.incl IsPostProcessing
+  n.flags.incl PostProcessChildren
+  for i in 0..1:
+    if PostProcessChildren notin n.flags:
+      break
+    n.flags.excl PostProcessChildren
+
+    when defined(nuiDebug):
+      inc n.postProcessCounter
+
+    let nodeStyle = b.nodeStyle(n)
+    let customLayoutParent = n.customLayoutIndex > 0
+    var hasAnchoredChildren = false
+
+    if customLayoutParent:
+      let cl = b.frame.customLayouts[n.customLayoutIndex - 1]
+      cl.layoutProc(b, idx, cl.userData)
+    else:
+      let contentW = max(0.0'f32, n.size.x - nodeStyle.paddingX * 2)
+      let contentH = max(0.0'f32, n.size.y - nodeStyle.paddingY * 2)
+      var remainingW = contentW
+      var remainingH = contentH
+
+      prof("builtinLayouts")
+      for childIdx in b.children(idx):
+        let child = b.frame.nodes[childIdx].addr
+        let oldSize = child.size
+        let anchoredX = isAnchoredLayoutX(child[])
+        let anchoredY = isAnchoredLayoutY(child[])
+        if anchoredX:
+          hasAnchoredChildren = true
+          b.applyAnchoredLayoutToChildX(idx, childIdx)
+        if anchoredY:
+          hasAnchoredChildren = true
+          b.applyAnchoredLayoutToChildY(idx, childIdx)
+
+        var changedSize = false
+
+        if FillX in child.flags and not anchoredX:
+          if FitX in child.flags:
+            child.size.x = max(remainingW, b.contentSize(child).x)
+          else:
+            child.size.x = remainingW
+          if SizeXKnown in n.flags:
+            child.flags.incl SizeXKnown
+          changedSize = true
+        if FillY in child.flags and not anchoredY:
+          if FitY in child.flags:
+            child.size.y = max(remainingH, b.contentSize(child).y)
+          else:
+            child.size.y = remainingH
+          if SizeYKnown in n.flags:
+            child.flags.incl SizeYKnown
+          changedSize = true
+
+        if changedSize:
+          b.clampNodeSize(child)
+
+        if AlignCenter in child.flags:
+          if isVerticalLayout(n.flags):
+            if not anchoredX:
+              child.pos.x = max(0.0'f32, (contentW - child.size.x) * 0.5'f32)
+          elif isHorizontalLayout(n.flags):
+            if not anchoredY:
+              child.pos.y = max(0.0'f32, (contentH - child.size.y) * 0.5'f32)
+          elif not hasLayout(n.flags):
+            if not anchoredX:
+              child.pos.x = max(0.0'f32, (contentW - child.size.x) * 0.5'f32)
+            if not anchoredY:
+              child.pos.y = max(0.0'f32, (contentH - child.size.y) * 0.5'f32)
+          else:
+            discard
+
+        if oldSize != child.size:
+          child.flags.incl SizeDirty
+
+        if isHorizontalLayout(n.flags):
+          remainingW -= child.size.x + b.nodeGap(n)
+        if isVerticalLayout(n.flags):
+          remainingH -= child.size.y + b.nodeGap(n)
+
+      if isReverseLayout(n.flags):
+        if isVerticalLayout(n.flags):
+          var cursor = contentH
+          for childIdx in b.children(idx):
+            let child = b.frame.nodes[childIdx].addr
+            if isAnchoredLayoutY(child[]):
+              continue
+            cursor = max(0.0'f32, cursor - child.size.y)
+            let old = child.pos.y
+            child.pos.y = cursor
+            if child.pos.y != old and FillY in child.flags:
+              n.flags.incl PostProcessChildren
+            cursor = max(0.0'f32, cursor - b.nodeGap(n))
+            n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+            n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+        elif isHorizontalLayout(n.flags):
+          var cursor = contentW
+          for childIdx in b.children(idx):
+            let child = b.frame.nodes[childIdx].addr
+            if isAnchoredLayoutX(child[]):
+              continue
+            cursor = max(0.0'f32, cursor - child.size.x)
+            let old = child.pos.x
+            child.pos.x = cursor
+            if child.pos.x != old and FillX in child.flags:
+              n.flags.incl PostProcessChildren
+            cursor = max(0.0'f32, cursor - b.nodeGap(n))
+            n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+            n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+        else:
+          discard
+      else:
+        if isVerticalLayout(n.flags):
+          var cursor = 0.0'f32
+          for childIdx in b.children(idx):
+            let child = b.frame.nodes[childIdx].addr
+            if isAnchoredLayoutY(child[]):
+              continue
+            let old = child.pos.y
+            child.pos.y = cursor
+            if child.pos.y != old and FillY in child.flags:
+              n.flags.incl PostProcessChildren
+            cursor = max(0.0'f32, child.pos.y + child.size.y + b.nodeGap(n))
+        elif isHorizontalLayout(n.flags):
+          var cursor = 0.0'f32
+          for childIdx in b.children(idx):
+            let child = b.frame.nodes[childIdx].addr
+            if isAnchoredLayoutX(child[]):
+              continue
+            let old = child.pos.x
+            child.pos.x = cursor
+            if child.pos.x != old and FillX in child.flags:
+              n.flags.incl PostProcessChildren
+            cursor = max(0.0'f32, child.pos.x + child.size.x + b.nodeGap(n))
+        else:
+          discard
+
+    let oldContentSize = n.contentExtent
+    var childSizeChanged = false
+    for childIdx in b.children(idx):
+      let child = b.frame.nodes[childIdx].addr
+      if SizeDirty in child.flags or PostProcessChildren in child.flags:
+        child.flags.excl SizeDirty
+        let oldSize = child.size
+        discard b.postProcessChildren(childIdx)
+        if oldSize != child.size:
+          childSizeChanged = true
+      n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+      n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+
+    if childSizeChanged:
+      n.flags.incl PostProcessChildren
+
+    if oldContentSize != n.contentExtent or (WrapText in n.flags and SizeXKnown in n.flags):
+      let oldSize = n.size
+      b.updateNodeFit(n)
+      if oldSize != n.size:
+        let parentIdx = n.parent
+        if parentIdx >= 0:
+          let parent = b.frame.nodes[parentIdx].addr
+          if IsPostProcessing in parent.flags:
+            parent.flags.incl PostProcessChildren
+
+  n.flags.excl IsPostProcessing
+  b
+
+proc initCursorForLayout*(frame: UiFrame, n: ptr UiNode) =
+  ## Initialize the layout cursor to the content origin (or end for reverse layouts).
+  if isReverseLayout(n.flags):
+    let paddingX = if n.styleIndex > 0: frame.styles[n.styleIndex - 1].paddingX else: 0.0'f32
+    let paddingY = if n.styleIndex > 0: frame.styles[n.styleIndex - 1].paddingY else: 0.0'f32
+    let contentW = max(0.0'f32, n.size.x - paddingX * 2)
+    let contentH = max(0.0'f32, n.size.y - paddingY * 2)
+    if isHorizontalLayout(n.flags):
+      n.cursor = vec2(contentW, 0.0'f32)
+    elif isVerticalLayout(n.flags):
+      n.cursor = vec2(0.0'f32, contentH)
+    elif not hasLayout(n.flags):
+      n.cursor = vec2(contentW, contentH)
+    else:
+      discard
+
+proc markParentForPostProcess(b: var UiBuilder) =
+  if b.stack.len <= 0:
+    return
+  let parentIdx = b.currentNode.parent
+  if parentIdx >= 0:
+    b.frame.nodes[parentIdx].flags.incl PostProcessChildren
+
+proc markForPostProcess*(b: var UiBuilder) =
+  b.currentNode.flags.incl PostProcessChildren
+
+proc alignCenter*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Center the current node within its parent's content area. Marks parent for post-processing.
+  b.currentNode.flags.incl AlignCenter
+  b.markParentForPostProcess()
+  b
+
+proc noHover*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Disable hover detection for the current node.
+  b.currentNode.flags.incl NoHover
+  b
+
+proc noChildHover*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Disable hover detection for the current nodes children.
+  b.currentNode.flags.incl NoChildHover
+  b
+
+proc fill*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Make the current node fill its parent on both axes.
+  let idx = b.stack[^1]
+  if value:
+    b.currentNode.flags.incl FillX
+    b.currentNode.flags.incl FillY
+    b.applyImmediateFillFromParent(idx)
+  else:
+    b.currentNode.flags.excl FillX
+    b.currentNode.flags.excl FillY
+  b
+
+proc fillX*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Make the current node fill its parent on the X axis.
+  let idx = b.stack[^1]
+  if value:
+    b.currentNode.flags.incl FillX
+    b.applyImmediateFillFromParent(idx)
+  else:
+    b.currentNode.flags.excl FillX
+  b
+
+proc fillY*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Make the current node fill its parent on the Y axis.
+  let idx = b.stack[^1]
+  if value:
+    b.currentNode.flags.incl FillY
+    b.applyImmediateFillFromParent(idx)
+  else:
+    b.currentNode.flags.excl FillY
+  b
+
+proc fitX*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Make the current node's width automatically size to its text and child content.
+  if value:
+    b.currentNode.flags.incl FitX
+    b.updateNodeFit(b.currentNode)
+  else:
+    b.currentNode.flags.excl FitX
+  b
+
+proc fitY*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Make the current node's height automatically size to its text and child content.
+  if value:
+    b.currentNode.flags.incl FitY
+    b.updateNodeFit(b.currentNode)
+  else:
+    b.currentNode.flags.excl FitY
+  b
+
+proc fit*(b: var UiBuilder, x = true, y = true): var UiBuilder {.discardable.} =
+  ## Make the current node automatically size to its content on the specified axes.
+  if x:
+    b.currentNode.flags.incl FitX
+  else:
+    b.currentNode.flags.excl FitX
+  if y:
+    b.currentNode.flags.incl FitY
+  else:
+    b.currentNode.flags.excl FitY
+  b.updateNodeFit(b.currentNode)
+  b
+
+proc updateFit*(b: var UiBuilder, value = 1.0'f32): var UiBuilder {.discardable.} =
+  ## Re-run size-to-content calculation on the current node.
+  b.updateNodeFit(b.currentNode)
+  b
+
+proc sizeToParentX*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Size the current node's width to match its parent's content area.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+      return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.x = parent.minSize.x - nodeStyle.paddingX * 2
+  b.currentNode.maxSize.x = parent.maxSize.x - nodeStyle.paddingX * 2
+  let parentHasFillX = FillX in parent.flags
+  let parentHasFitX = FitX in parent.flags
+  if parentHasFillX:
+    discard b.fillX()
+  if parentHasFitX:
+    discard b.fitX()
+  if not parentHasFillX and not parentHasFitX:
+    b.currentNode.size.x = parent.size.x - nodeStyle.paddingX * 2
+    if SizeXKnown in parent.flags:
+      b.currentNode.flags.incl SizeXKnown
+  b
+
+proc sizeToParentXAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Animated version of sizeToParentX. Smoothly transitions the node's width to match its parent.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.x = b.setAnimatedField(idx, UiNodeMinSizeXFieldOffset, parent.minSize.x - nodeStyle.paddingX * 2)
+  b.currentNode.maxSize.x = b.setAnimatedField(idx, UiNodeMaxSizeXFieldOffset, parent.maxSize.x - nodeStyle.paddingX * 2)
+  let parentHasFillX = FillX in parent.flags
+  let parentHasFitX = FitX in parent.flags
+  if parentHasFillX:
+    discard b.fillX()
+  if parentHasFitX:
+    discard b.fitX()
+  if not parentHasFillX and not parentHasFitX:
+    b.currentNode.size.x = b.setAnimatedField(idx, UiNodeSizeXFieldOffset, parent.size.x - nodeStyle.paddingX * 2)
+  b
+
+proc sizeToParentY*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Size the current node's height to match its parent's content area.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.y = parent.minSize.y - nodeStyle.paddingY * 2
+  b.currentNode.maxSize.y = parent.maxSize.y - nodeStyle.paddingY * 2
+  let parentHasFillY = FillY in parent.flags
+  let parentHasFitY = FitY in parent.flags
+  if parentHasFillY:
+    discard b.fillY()
+  if parentHasFitY:
+    discard b.fitY()
+  if not parentHasFillY and not parentHasFitY:
+    b.currentNode.size.y = parent.size.y - nodeStyle.paddingY * 2
+    if SizeYKnown in parent.flags:
+      b.currentNode.flags.incl SizeYKnown
+  b
+
+proc sizeToParentYAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Animated version of sizeToParentY. Smoothly transitions the node's height to match its parent.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.y = b.setAnimatedField(idx, UiNodeMinSizeYFieldOffset, parent.minSize.y - nodeStyle.paddingY * 2)
+  b.currentNode.maxSize.y = b.setAnimatedField(idx, UiNodeMaxSizeYFieldOffset, parent.maxSize.y - nodeStyle.paddingY * 2)
+  let parentHasFillY = FillY in parent.flags
+  let parentHasFitY = FitY in parent.flags
+  if parentHasFillY:
+    discard b.fillY()
+  if parentHasFitY:
+    discard b.fitY()
+  if not parentHasFillY and not parentHasFitY:
+    b.currentNode.size.y = b.setAnimatedField(idx, UiNodeSizeYFieldOffset, parent.size.y - nodeStyle.paddingY * 2)
+  b
+
+proc sizeToParent*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Size the current node to match its parent's content area on both axes.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.x = parent.minSize.x - nodeStyle.paddingX * 2
+  b.currentNode.maxSize.x = parent.maxSize.x - nodeStyle.paddingX * 2
+  b.currentNode.minSize.y = parent.minSize.y - nodeStyle.paddingY * 2
+  b.currentNode.maxSize.y = parent.maxSize.y - nodeStyle.paddingY * 2
+  let parentHasFillX = FillX in parent.flags
+  let parentHasFillY = FillY in parent.flags
+  let parentHasFitX = FitX in parent.flags
+  let parentHasFitY = FitY in parent.flags
+  if parentHasFillX:
+    discard b.fillX()
+  if parentHasFillY:
+    discard b.fillY()
+  if parentHasFitX:
+    discard b.fitX()
+  if parentHasFitY:
+    discard b.fitY()
+  if not parentHasFillX and not parentHasFitX:
+    b.currentNode.size.x = parent.size.x - nodeStyle.paddingX * 2
+  if not parentHasFillY and not parentHasFitY:
+    b.currentNode.size.y = parent.size.y - nodeStyle.paddingY * 2
+  b
+
+proc sizeToParentAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Animated version of sizeToParent. Smoothly transitions the node's size to match its parent.
+  let idx = b.stack[^1]
+  let parentIdx = b.frame.nodes[idx].parent
+  if parentIdx < 0:
+    return b
+
+  let parent = b.frame.nodes[parentIdx].addr
+  let nodeStyle = b.nodeStyle(parent)
+  b.currentNode.minSize.x = b.setAnimatedField(idx, UiNodeMinSizeXFieldOffset, parent.minSize.x - nodeStyle.paddingX * 2)
+  b.currentNode.maxSize.x = b.setAnimatedField(idx, UiNodeMaxSizeXFieldOffset, parent.maxSize.x - nodeStyle.paddingX * 2)
+  b.currentNode.minSize.y = b.setAnimatedField(idx, UiNodeMinSizeYFieldOffset, parent.minSize.y - nodeStyle.paddingY * 2)
+  b.currentNode.maxSize.y = b.setAnimatedField(idx, UiNodeMaxSizeYFieldOffset, parent.maxSize.y - nodeStyle.paddingY * 2)
+  let parentHasFillX = FillX in parent.flags
+  let parentHasFillY = FillY in parent.flags
+  let parentHasFitX = FitX in parent.flags
+  let parentHasFitY = FitY in parent.flags
+  if parentHasFillX:
+    discard b.fillX()
+  if parentHasFillY:
+    discard b.fillY()
+  if parentHasFitX:
+    discard b.fitX()
+  if parentHasFitY:
+    discard b.fitY()
+  if not parentHasFillX and not parentHasFitX:
+    b.currentNode.size.x = b.setAnimatedField(idx, UiNodeSizeXFieldOffset, parent.size.x - nodeStyle.paddingX * 2)
+  if not parentHasFillY and not parentHasFitY:
+    b.currentNode.size.y = b.setAnimatedField(idx, UiNodeSizeYFieldOffset, parent.size.y - nodeStyle.paddingY * 2)
+  b
+
+proc fillBackground*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Enable background fill rendering for the current node using its fillColor.
+  b.currentNode.flags.incl FillBackground
+  b
+
+proc maskChildren*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Clip all children to the current node's content area.
+  b.currentNode.flags.incl MaskChildren
+  b
+
+proc customRenderCommands*(b: var UiBuilder, commands: ArrayView[UiRenderCommand]): var UiBuilder {.discardable.} =
+  ## Attach custom render commands to the current node (from an ArrayView).
+  b.ensureNodeCustomCommands(b.currentNode) = commands
+  b
+
+proc customRenderCommands*(b: var UiBuilder, commands: openArray[UiRenderCommand]): var UiBuilder {.discardable.} =
+  ## Attach custom render commands to the current node (from an openArray).
+  b.ensureNodeCustomCommands(b.currentNode) = initArrayView(commands)
+  b
+
+proc backgroundColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Set the current node's fill color and enable background rendering.
+  b.currentNode.flags.incl FillBackground
+  b.ensureNodeStyle(b.currentNode).fillColor = value
+  b
+
+proc backgroundColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Animated version of backgroundColor. Smoothly transitions the fill color.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl FillBackground
+  b.ensureNodeStyle(b.currentNode).fillColor = b.setAnimatedField(idx, UiNodeStyleFillColorRFieldOffset, value)
+  b
+
+proc textColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Set the current node's text color.
+  b.ensureNodeText(b.currentNode).textColor = value
+  b
+
+proc textColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Animated version of textColor. Smoothly transitions the text color.
+  let idx = b.stack[^1]
+  b.ensureNodeText(b.currentNode).textColor = b.setAnimatedField(idx, UiNodeStyleTextColorRFieldOffset, value)
+  b
+
+proc borderColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Set the current node's border color.
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.borderColor = value
+  style.borderColors = default(UiBorderColors)
+  b
+
+proc borderColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Animated version of borderColor. Smoothly transitions the border color.
+  let idx = b.stack[^1]
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.borderColor = b.setAnimatedField(idx, UiNodeStyleBorderColorRFieldOffset, value)
+  style.borderColors = default(UiBorderColors)
+  b
+
+proc borderColors*(b: var UiBuilder, left, top, right, bottom: UiColor): var UiBuilder {.discardable.} =
+  ## Set independent colors for the left, top, right, and bottom borders.
+  b.ensureNodeStyle(b.currentNode).borderColors = UiBorderColors(
+    left: left, top: top, right: right, bottom: bottom)
+  b
+
+proc borderWidth*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the current node's border width. Negative values are clamped to 0.
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.borderWidth = max(0.0'f32, value)
+  style.borderWidths = default(UiBorderWidths)
+  b
+
+proc borderWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of borderWidth. Smoothly transitions the border width.
+  let idx = b.stack[^1]
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.borderWidth = b.setAnimatedField(idx, UiNodeStyleBorderWidthFieldOffset, max(0.0'f32, value))
+  style.borderWidths = default(UiBorderWidths)
+  b
+
+proc borderWidths*(b: var UiBuilder, left, top, right, bottom: float32): var UiBuilder {.discardable.} =
+  ## Set independent widths for the left, top, right, and bottom borders.
+  b.ensureNodeStyle(b.currentNode).borderWidths = UiBorderWidths(
+    left: max(0.0'f32, left),
+    top: max(0.0'f32, top),
+    right: max(0.0'f32, right),
+    bottom: max(0.0'f32, bottom),
+  )
+  b
+
+proc cornerRadius*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the current node's corner radius. Negative values are clamped to 0.
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.cornerRadius = max(0.0'f32, value)
+  style.cornerRadii = default(UiCornerRadii)
+  b
+
+proc cornerRadiusAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of cornerRadius. Smoothly transitions the corner radius.
+  let idx = b.stack[^1]
+  let style = b.ensureNodeStyle(b.currentNode).addr
+  style.cornerRadius = b.setAnimatedField(idx, UiNodeStyleCornerRadiusFieldOffset, max(0.0'f32, value))
+  style.cornerRadii = default(UiCornerRadii)
+  b
+
+proc cornerRadii*(b: var UiBuilder, topLeft, topRight, bottomRight, bottomLeft: float32): var UiBuilder {.discardable.} =
+  ## Set independent radii for the four corners, clockwise from top-left.
+  b.ensureNodeStyle(b.currentNode).cornerRadii = UiCornerRadii(
+    topLeft: max(0.0'f32, topLeft),
+    topRight: max(0.0'f32, topRight),
+    bottomRight: max(0.0'f32, bottomRight),
+    bottomLeft: max(0.0'f32, bottomLeft),
+  )
+  b
+
+proc text*(b: var UiBuilder, value: string): var UiBuilder {.discardable.} =
+  ## Set the current node's text content. Enables DrawText and triggers size-to-content recalculation.
+  b.currentNode.flags.incl DrawText
+  var t = addr(b.ensureNodeText(b.currentNode))
+  if t.text.value != value:
+    t.text = value.uiString
+    t.measuredTextDirty = true
+  b.updateNodeFit(b.currentNode)
+  b
+
+proc wrapText*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
+  ## Enable or disable wrapping text to the current node's content width.
+  if value:
+    b.currentNode.flags.incl WrapText
+  else:
+    b.currentNode.flags.excl WrapText
+  if b.currentNode.textIndex > 0:
+    b.nodeText(b.currentNode).measuredTextDirty = true
+    b.updateNodeFit(b.currentNode)
+  b
+
+proc fontSize*(b: var UiBuilder, size: float32): var UiBuilder {.discardable.} =
+  ## Set the current node's font size. Triggers text measurement and size-to-content recalculation.
+  b.currentNode.flags.incl DrawText
+  var t = addr(b.ensureNodeText(b.currentNode))
+  if t.fontSize != size:
+    t.fontSize = size
+    t.measuredTextDirty = true
+    b.updateNodeFit(b.currentNode)
+  b
+
+proc fontId*(b: var UiBuilder, fontId: UiFontId): var UiBuilder {.discardable.} =
+  ## Set the current node's font. Triggers text measurement and size-to-content recalculation.
+  var t = addr(b.ensureNodeText(b.currentNode))
+  if t.fontId != fontId:
+    t.fontId = fontId
+    t.measuredTextDirty = true
+    b.updateNodeFit(b.currentNode)
+  b
+
+proc minSize*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Set the minimum size constraint for the current node. Clamps the current size immediately.
+  let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
+  b.currentNode.minSize = target
+  if b.currentNode.maxSize.x < b.currentNode.minSize.x:
+    b.currentNode.maxSize.x = b.currentNode.minSize.x
+  if b.currentNode.maxSize.y < b.currentNode.minSize.y:
+    b.currentNode.maxSize.y = b.currentNode.minSize.y
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc minSizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Animated version of minSize. Smoothly transitions the minimum size constraint.
+  let idx = b.stack[^1]
+  let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
+  b.currentNode.minSize = b.setAnimatedField(idx, UiNodeMinSizeXFieldOffset, target)
+  if b.currentNode.maxSize.x < b.currentNode.minSize.x:
+    b.currentNode.maxSize.x = b.currentNode.minSize.x
+  if b.currentNode.maxSize.y < b.currentNode.minSize.y:
+    b.currentNode.maxSize.y = b.currentNode.minSize.y
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc maxSize*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Set the maximum size constraint for the current node. Clamps the current size immediately.
+  let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
+  b.currentNode.maxSize = target
+  if b.currentNode.maxSize.x < b.currentNode.minSize.x:
+    b.currentNode.maxSize.x = b.currentNode.minSize.x
+  if b.currentNode.maxSize.y < b.currentNode.minSize.y:
+    b.currentNode.maxSize.y = b.currentNode.minSize.y
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc maxSizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Animated version of maxSize. Smoothly transitions the maximum size constraint.
+  let idx = b.stack[^1]
+  let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
+  b.currentNode.maxSize = b.setAnimatedField(idx, UiNodeMaxSizeXFieldOffset, target)
+  if b.currentNode.maxSize.x < b.currentNode.minSize.x:
+    b.currentNode.maxSize.x = b.currentNode.minSize.x
+  if b.currentNode.maxSize.y < b.currentNode.minSize.y:
+    b.currentNode.maxSize.y = b.currentNode.minSize.y
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc minWidth*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the minimum width constraint for the current node.
+  discard b.minSize(value, b.currentNode.minSize.y)
+  b
+
+proc minWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of minWidth.
+  discard b.minSizeAnim(value, b.currentNode.minSize.y)
+  b
+
+proc minHeight*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the minimum height constraint for the current node.
+  discard b.minSize(b.currentNode.minSize.x, value)
+  b
+
+proc minHeightAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of minHeight.
+  discard b.minSizeAnim(b.currentNode.minSize.x, value)
+  b
+
+proc maxWidth*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the maximum width constraint for the current node.
+  discard b.maxSize(value, b.currentNode.maxSize.y)
+  b
+
+proc maxWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of maxWidth.
+  discard b.maxSizeAnim(value, b.currentNode.maxSize.y)
+  b
+
+proc maxHeight*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the maximum height constraint for the current node.
+  discard b.maxSize(b.currentNode.maxSize.x, value)
+  b
+
+proc maxHeightAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of maxHeight.
+  discard b.maxSizeAnim(b.currentNode.maxSize.x, value)
+  b
+
+proc anchorBlend*(b: var UiBuilder, blend = true): var UiBuilder {.discardable.} =
+  ## Enable or disable anchored layout on both axes for the current node.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  if blend:
+    b.currentNode.flags.incl AnchorX
+    b.currentNode.flags.incl AnchorY
+  else:
+    b.currentNode.flags.excl AnchorX
+    b.currentNode.flags.excl AnchorY
+  b.markParentForPostProcess()
+  b
+
+proc anchorBlendX*(b: var UiBuilder, blend = true): var UiBuilder {.discardable.} =
+  ## Enable or disable anchored layout on the X axis for the current node.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  if blend:
+    b.currentNode.flags.incl AnchorX
+  else:
+    b.currentNode.flags.excl AnchorX
+  b.markParentForPostProcess()
+  b
+
+proc anchorBlendY*(b: var UiBuilder, blend = true): var UiBuilder {.discardable.} =
+  ## Enable or disable anchored layout on the Y axis for the current node.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  if blend:
+    b.currentNode.flags.incl AnchorY
+  else:
+    b.currentNode.flags.excl AnchorY
+  b.markParentForPostProcess()
+  b
+
+proc anchors*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {.discardable.} =
+  ## Set anchor positions (0-1 range) for both axes. Enables anchored layout.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft = topLeft
+  nodeAnchor.bottomRight = bottomRight
+  b.markParentForPostProcess()
+  b
+
+proc anchorsAnim*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of anchors. Smoothly transitions anchor positions.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft = b.setAnimatedField(idx, UiNodeAnchorTopLeftXFieldOffset, topLeft)
+  nodeAnchor.bottomRight = b.setAnimatedField(idx, UiNodeAnchorBottomRightXFieldOffset, bottomRight)
+  b.markParentForPostProcess()
+  b
+
+proc anchorsX*(b: var UiBuilder, topLeftX, bottomRightX: float32): var UiBuilder {.discardable.} =
+  ## Set X-axis anchor positions. Enables anchored layout on X.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft.x = topLeftX
+  nodeAnchor.bottomRight.x = bottomRightX
+  b.markParentForPostProcess()
+  b
+
+proc anchorsXAnim*(b: var UiBuilder, topLeftX, bottomRightX: float32): var UiBuilder {.discardable.} =
+  ## Animated version of anchorsX. Smoothly transitions X-axis anchor positions.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft.x = b.setAnimatedField(idx, UiNodeAnchorTopLeftXFieldOffset, topLeftX)
+  nodeAnchor.bottomRight.x = b.setAnimatedField(idx, UiNodeAnchorBottomRightXFieldOffset, bottomRightX)
+  b.markParentForPostProcess()
+  b
+
+proc anchorsY*(b: var UiBuilder, topLeftY, bottomRightY: float32): var UiBuilder {.discardable.} =
+  ## Set Y-axis anchor positions. Enables anchored layout on Y.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft.y = topLeftY
+  nodeAnchor.bottomRight.y = bottomRightY
+  b.markParentForPostProcess()
+  b
+
+proc anchorsYAnim*(b: var UiBuilder, topLeftY, bottomRightY: float32): var UiBuilder {.discardable.} =
+  ## Animated version of anchorsY. Smoothly transitions Y-axis anchor positions.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeft.y = b.setAnimatedField(idx, UiNodeAnchorTopLeftYFieldOffset, topLeftY)
+  nodeAnchor.bottomRight.y = b.setAnimatedField(idx, UiNodeAnchorBottomRightYFieldOffset, bottomRightY)
+  b.markParentForPostProcess()
+  b
+
+proc anchors*(b: var UiBuilder, topLeftX, topLeftY, bottomRightX, bottomRightY: float32): var UiBuilder {.discardable.} =
+  ## Set anchor positions for both axes from individual floats.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  discard b.anchors(vec2(topLeftX, topLeftY), vec2(bottomRightX, bottomRightY))
+  b
+
+proc anchorsAnim*(b: var UiBuilder, topLeftX, topLeftY, bottomRightX, bottomRightY: float32): var UiBuilder {.discardable.} =
+  ## Animated version of anchors (float overload). Smoothly transitions anchor positions.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  discard b.anchorsAnim(vec2(topLeftX, topLeftY), vec2(bottomRightX, bottomRightY))
+  b
+
+proc finishAnchors*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Apply anchored layout to the current node relative to its parent.
+  ## Must be called after configuring anchor properties (anchors, offsets, pivot) for them to take effect.
+  let childIdx = b.stack[^1]
+  let parentIdx = b.frame.nodes[childIdx].parent
+  if parentIdx < 0:
+    return b
+  b.applyAnchoredLayoutToChildX(parentIdx, childIdx)
+  b.applyAnchoredLayoutToChildY(parentIdx, childIdx)
+  b
+
+proc offsets*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {.discardable.} =
+  ## Set pixel offsets for anchored layout. Enables anchored layout on both axes.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset = topLeft
+  nodeAnchor.bottomRightOffset = bottomRight
+  b.markParentForPostProcess()
+  b
+
+proc offsetsAnim*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of offsets. Smoothly transitions pixel offsets.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset = b.setAnimatedField(idx, UiNodeAnchorTopLeftOffsetXFieldOffset, topLeft)
+  nodeAnchor.bottomRightOffset = b.setAnimatedField(idx, UiNodeAnchorBottomRightOffsetXFieldOffset, bottomRight)
+  b.markParentForPostProcess()
+  b
+
+proc offsetsX*(b: var UiBuilder, left, right: float32): var UiBuilder {.discardable.} =
+  ## Set X-axis pixel offsets for anchored layout.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset.x = left
+  nodeAnchor.bottomRightOffset.x = right
+  b.markParentForPostProcess()
+  b
+
+proc offsetsXAnim*(b: var UiBuilder, left, right: float32): var UiBuilder {.discardable.} =
+  ## Animated version of offsetsX. Smoothly transitions X-axis pixel offsets.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset.x = b.setAnimatedField(idx, UiNodeAnchorTopLeftOffsetXFieldOffset, left)
+  nodeAnchor.bottomRightOffset.x = b.setAnimatedField(idx, UiNodeAnchorBottomRightOffsetXFieldOffset, right)
+  b.markParentForPostProcess()
+  b
+
+proc offsetsY*(b: var UiBuilder, top, bottom: float32): var UiBuilder {.discardable.} =
+  ## Set Y-axis pixel offsets for anchored layout.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset.y = top
+  nodeAnchor.bottomRightOffset.y = bottom
+  b.markParentForPostProcess()
+  b
+
+proc offsetsYAnim*(b: var UiBuilder, top, bottom: float32): var UiBuilder {.discardable.} =
+  ## Animated version of offsetsY. Smoothly transitions Y-axis pixel offsets.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorY
+  let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
+  nodeAnchor.topLeftOffset.y = b.setAnimatedField(idx, UiNodeAnchorTopLeftOffsetYFieldOffset, top)
+  nodeAnchor.bottomRightOffset.y = b.setAnimatedField(idx, UiNodeAnchorBottomRightOffsetYFieldOffset, bottom)
+  b.markParentForPostProcess()
+  b
+
+proc offsets*(b: var UiBuilder, left, top, right, bottom: float32): var UiBuilder {.discardable.} =
+  ## Set pixel offsets for anchored layout from individual floats.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  discard b.offsets(vec2(left, top), vec2(right, bottom))
+  b
+
+proc offsetsAnim*(b: var UiBuilder, left, top, right, bottom: float32): var UiBuilder {.discardable.} =
+  ## Animated version of offsets (float overload). Smoothly transitions pixel offsets.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  discard b.offsetsAnim(vec2(left, top), vec2(right, bottom))
+  b
+
+proc pivot*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Set the anchor pivot point (0-1 range). Enables anchored layout.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  b.ensureNodeAnchor(b.currentNode).pivot = value
+  b.markParentForPostProcess()
+  b
+
+proc pivotAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of pivot. Smoothly transitions the anchor pivot point.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  b.currentNode.flags.incl AnchorY
+  b.ensureNodeAnchor(b.currentNode).pivot = b.setAnimatedField(idx, UiNodeAnchorPivotXFieldOffset, value)
+  b.markParentForPostProcess()
+  b
+
+proc pivotX*(b: var UiBuilder, x: float32): var UiBuilder {.discardable.} =
+  ## Set the X component of the anchor pivot point.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorX
+  b.ensureNodeAnchor(b.currentNode).pivot.x = x
+  b.markParentForPostProcess()
+  b
+
+proc pivotXAnim*(b: var UiBuilder, x: float32): var UiBuilder {.discardable.} =
+  ## Animated version of pivotX.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorX
+  b.ensureNodeAnchor(b.currentNode).pivot.x = b.setAnimatedField(idx, UiNodeAnchorPivotXFieldOffset, x)
+  b.markParentForPostProcess()
+  b
+
+proc pivotY*(b: var UiBuilder, y: float32): var UiBuilder {.discardable.} =
+  ## Set the Y component of the anchor pivot point.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  b.currentNode.flags.incl AnchorY
+  b.ensureNodeAnchor(b.currentNode).pivot.y = y
+  b.markParentForPostProcess()
+  b
+
+proc pivotYAnim*(b: var UiBuilder, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of pivotY.
+  ## Call `finishAnchors` after configuring anchor properties for them to take effect.
+  let idx = b.stack[^1]
+  b.currentNode.flags.incl AnchorY
+  b.ensureNodeAnchor(b.currentNode).pivot.y = b.setAnimatedField(idx, UiNodeAnchorPivotYFieldOffset, y)
+  b.markParentForPostProcess()
+  b
+
+proc pivot*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Set the anchor pivot point from individual floats.
+  discard b.pivot(vec2(x, y))
+  b
+
+proc pivotAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of pivot (float overload).
+  discard b.pivotAnim(vec2(x, y))
+  b
+
+proc position*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Set the position of the current node, relative to its parent's content origin.
+  b.currentNode.pos = vec2(x, y)
+  b
+
+proc positionAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of position. Position is relative to parent. Smoothly transitions the node's position.
+  let idx = b.stack[^1]
+  b.currentNode.pos = b.setAnimatedField(idx, UiNodePosXFieldOffset, vec2(x, y))
+  b
+
+proc animatePos*(b: var UiBuilder, speed = DefaultAnimationSpeed): var UiBuilder {.discardable.} =
+  ## Enable animation for the current node's position (relative to parent) using its previously set value as the start.
+  let previousX = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodePosXFieldOffset)
+  let previousY = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodePosYFieldOffset)
+  if previousX.hasValue and previousY.hasValue:
+    let animIdx = b.resolveAnimationIndex(b.currentNode.id, true)
+    let anim = b.animations[animIdx].addr
+    let initializeX = findAnimationFieldIndex(anim[], UiNodePosXFieldOffset) < 0 and previousX.hasValue
+    let initializeY = findAnimationFieldIndex(anim[], UiNodePosYFieldOffset) < 0 and previousY.hasValue
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodePosXFieldOffset, b.currentNode.pos.x, speed, b.frameCtx.input.frameIndex, initializeX, previousX.value)
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodePosYFieldOffset, b.currentNode.pos.y, speed, b.frameCtx.input.frameIndex, initializeY, previousY.value)
+  b
+
+proc position*(b: var UiBuilder, pos: Vec2): var UiBuilder {.discardable.} =
+  ## Set the position of the current node, relative to its parent's content origin (Vec2 overload).
+  discard b.position(pos.x, pos.y)
+  b
+
+proc positionAnim*(b: var UiBuilder, pos: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of position (Vec2 overload). Position is relative to parent.
+  discard b.positionAnim(pos.x, pos.y)
+  b
+
+proc transformOffset*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Set the transform offset applied to the current node after layout.
+  b.ensureNodeTransform(b.currentNode).offset = value
+  b
+
+proc transformOffsetAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of transformOffset. Smoothly transitions the offset.
+  let idx = b.stack[^1]
+  b.ensureNodeTransform(b.currentNode).offset = b.setAnimatedField(idx, UiNodeTransformOffsetXFieldOffset, value)
+  b
+
+proc transformOffset*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Set the transform offset from individual floats.
+  discard b.transformOffset(vec2(x, y))
+  b
+
+proc transformOffsetAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of transformOffset (float overload).
+  discard b.transformOffsetAnim(vec2(x, y))
+  b
+
+proc transformRotation*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the rotation (in radians) of the current node's transform.
+  b.ensureNodeTransform(b.currentNode).rotation = value
+  b
+
+proc transformRotationAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of transformRotation. Smoothly transitions the rotation.
+  let idx = b.stack[^1]
+  b.ensureNodeTransform(b.currentNode).rotation = b.setAnimatedField(idx, UiNodeTransformRotationFieldOffset, value)
+  b
+
+proc transformScale*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Set the scale of the current node's transform.
+  b.ensureNodeTransform(b.currentNode).scale = value
+  b
+
+proc transformScaleAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of transformScale. Smoothly transitions the scale.
+  let idx = b.stack[^1]
+  b.ensureNodeTransform(b.currentNode).scale = b.setAnimatedField(idx, UiNodeTransformScaleXFieldOffset, value)
+  b
+
+proc transformScale*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Set the scale from individual floats.
+  discard b.transformScale(vec2(x, y))
+  b
+
+proc transformScaleAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of transformScale (float overload).
+  discard b.transformScaleAnim(vec2(x, y))
+  b
+
+proc transformScale*(b: var UiBuilder, uniform: float32): var UiBuilder {.discardable.} =
+  ## Set a uniform scale on both axes.
+  discard b.transformScale(vec2(uniform, uniform))
+  b
+
+proc transformScaleAnim*(b: var UiBuilder, uniform: float32): var UiBuilder {.discardable.} =
+  ## Animated version of transformScale (uniform overload).
+  discard b.transformScaleAnim(vec2(uniform, uniform))
+  b
+
+proc transformPivot*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Set the pivot point for the transform (0-1 range, default 0.5,0.5).
+  b.ensureNodeTransform(b.currentNode).pivot = value
+  b
+
+proc transformPivotAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of transformPivot. Smoothly transitions the pivot point.
+  let idx = b.stack[^1]
+  b.ensureNodeTransform(b.currentNode).pivot = b.setAnimatedField(idx, UiNodeTransformPivotXFieldOffset, value)
+  b
+
+proc transformPivot*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Set the transform pivot point from individual floats.
+  discard b.transformPivot(vec2(x, y))
+  b
+
+proc transformPivotAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
+  ## Animated version of transformPivot (float overload).
+  discard b.transformPivotAnim(vec2(x, y))
+  b
+
+proc width*(b: var UiBuilder, w: float32): var UiBuilder {.discardable.} =
+  ## Set the width of the current node. Clamps to min/max size constraints.
+  b.currentNode.size.x = w
+  b.currentNode.flags.incl SizeXKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc widthAnim*(b: var UiBuilder, w: float32): var UiBuilder {.discardable.} =
+  ## Animated version of width. Smoothly transitions the node's width.
+  let idx = b.stack[^1]
+  b.currentNode.size.x = b.setAnimatedField(idx, UiNodeSizeXFieldOffset, w)
+  b.currentNode.flags.incl SizeXKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc height*(b: var UiBuilder, h: float32): var UiBuilder {.discardable.} =
+  ## Set the height of the current node. Clamps to min/max size constraints.
+  b.currentNode.size.y = h
+  b.currentNode.flags.incl SizeYKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc heightAnim*(b: var UiBuilder, h: float32): var UiBuilder {.discardable.} =
+  ## Animated version of height. Smoothly transitions the node's height.
+  let idx = b.stack[^1]
+  b.currentNode.size.y = b.setAnimatedField(idx, UiNodeSizeYFieldOffset, h)
+  b.currentNode.flags.incl SizeYKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc size*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Set the size of the current node. Clamps to min/max size constraints.
+  b.currentNode.size = vec2(w, h)
+  b.currentNode.flags.incl SizeXKnown
+  b.currentNode.flags.incl SizeYKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc sizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
+  ## Animated version of size. Smoothly transitions the node's size.
+  let idx = b.stack[^1]
+  b.currentNode.size = b.setAnimatedField(idx, UiNodeSizeXFieldOffset, vec2(w, h))
+  b.currentNode.flags.incl SizeXKnown
+  b.currentNode.flags.incl SizeYKnown
+  b.clampNodeSize(b.currentNode)
+  b
+
+proc animateSize*(b: var UiBuilder, speed = DefaultAnimationSpeed): var UiBuilder {.discardable.} =
+  ## Enable animation for the current node's size using its previously set value as the start.
+  let previousX = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodeSizeXFieldOffset)
+  let previousY = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodeSizeYFieldOffset)
+  if previousX.hasValue and previousY.hasValue:
+    let animIdx = b.resolveAnimationIndex(b.currentNode.id, true)
+    let anim = b.animations[animIdx].addr
+    let initializeX = findAnimationFieldIndex(anim[], UiNodeSizeXFieldOffset) < 0 and previousX.hasValue
+    let initializeY = findAnimationFieldIndex(anim[], UiNodeSizeYFieldOffset) < 0 and previousY.hasValue
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodeSizeXFieldOffset, b.currentNode.size.x, speed, b.frameCtx.input.frameIndex, initializeX, previousX.value)
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodeSizeYFieldOffset, b.currentNode.size.y, speed, b.frameCtx.input.frameIndex, initializeY, previousY.value)
+  b
+
+proc animateWidth*(b: var UiBuilder, speed = DefaultAnimationSpeed): var UiBuilder {.discardable.} =
+  ## Enable animation for the current node's width using its previously set value as the start.
+  let previousX = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodeSizeXFieldOffset)
+  if previousX.hasValue:
+    let animIdx = b.resolveAnimationIndex(b.currentNode.id, true)
+    let anim = b.animations[animIdx].addr
+    let initializeX = findAnimationFieldIndex(anim[], UiNodeSizeXFieldOffset) < 0 and previousX.hasValue
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodeSizeXFieldOffset, b.currentNode.size.x, speed, b.frameCtx.input.frameIndex, initializeX, previousX.value)
+  b
+
+proc animateHeight*(b: var UiBuilder, speed = DefaultAnimationSpeed): var UiBuilder {.discardable.} =
+  ## Enable animation for the current node's height using its previously set value as the start.
+  let previousY = previousAnimationFieldStartValue(b.previousFrame, UiAnimation(), b.currentNode.id, UiNodeSizeYFieldOffset)
+  if previousY.hasValue:
+    let animIdx = b.resolveAnimationIndex(b.currentNode.id, true)
+    let anim = b.animations[animIdx].addr
+    let initializeY = findAnimationFieldIndex(anim[], UiNodeSizeYFieldOffset) < 0 and previousY.hasValue
+    discard anim[].applyAnimatedFieldTarget(b.currentNode[], UiNodeSizeYFieldOffset, b.currentNode.size.y, speed, b.frameCtx.input.frameIndex, initializeY, previousY.value)
+  b
+
+proc size*(b: var UiBuilder, wh: Vec2): var UiBuilder {.discardable.} =
+  ## Set the size of the current node (Vec2 overload).
+  discard b.size(wh.x, wh.y)
+  b
+
+proc sizeAnim*(b: var UiBuilder, wh: Vec2): var UiBuilder {.discardable.} =
+  ## Animated version of size (Vec2 overload).
+  discard b.sizeAnim(wh.x, wh.y)
+  b
+
+proc padding*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set uniform padding on all sides. Triggers size-to-content and layout cursor update.
+  let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
+  nodeStyle.paddingX = value
+  nodeStyle.paddingY = value
+  b.updateNodeFit(b.currentNode)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc paddingAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of padding. Smoothly transitions the padding value.
+  let idx = b.stack[^1]
+  let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
+  nodeStyle.paddingX = b.setAnimatedField(idx, UiNodeStylePaddingXFieldOffset, value)
+  nodeStyle.paddingY = b.setAnimatedField(idx, UiNodeStylePaddingYFieldOffset, value)
+  b.updateNodeFit(b.currentNode)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc gap*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set the spacing between child nodes in a layout.
+  b.ensureNodeGap(b.currentNode) = value
+  b
+
+proc gapAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animated version of gap. Smoothly transitions the gap value.
+  let idx = b.stack[^1]
+  b.ensureNodeGap(b.currentNode) = b.setAnimatedField(idx, UiNodeGapFieldOffset, value)
+  b
+
+proc layout*(b: var UiBuilder, value: UiFlag): var UiBuilder {.discardable.} =
+  ## Set the layout kind for the current node (LayoutVertical or LayoutHorizontal).
+  b.currentNode.flags.setNodeLayoutKind(value)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc customLayout*(b: var UiBuilder, layoutProc: UiCustomLayoutProc, userData: int = 0): var UiBuilder {.discardable.} =
+  ## Assign a custom layout callback for the current node.
+  let cl = b.ensureNodeCustomLayout(b.currentNode).addr
+  cl.layoutProc = layoutProc
+  cl.userData = userData
+  b.currentNode.flags.incl PostProcessChildren
+  b
+
+proc deferBuild*(b: var UiBuilder, buildProc: UiDeferredBuildProc, userData: int = 0): var UiBuilder {.discardable.} =
+  ## Schedule a build callback to run during flushDeferredNodes for the current node.
+  if b.stack.len == 0:
+    return b
+  let idx = b.stack[^1]
+  b.deferredNodes.add default(UiDeferredNode)
+  b.deferredNodes[^1].nodeIdx = idx
+  b.deferredNodes[^1].buildProc = buildProc
+  b.deferredNodes[^1].userData = userData
+  b.deferredNodes[^1].storageParentStack = b.storageParentStack
+  b
+
+proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Schedule postProcessChildren to run during flushDeferredNodes for the current node.
+  b.deferBuild(deferredPostProcessBuildProc)
+
+proc forwardLayout*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Set the current node's layout direction to forward (default).
+  b.currentNode.flags.excl DirectionReverse
+  b
+
+proc reverseLayout*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Set the current node's layout direction to reverse.
+  b.currentNode.flags.setNodeDirectionKind(DirectionReverse)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc layoutIndex*(b: var UiBuilder, value: int32): var UiBuilder {.discardable.} =
+  ## Set the render command layer index for the current node.
+  b.currentNode.layoutIndex = value
+  b
+
+proc measuredTextSize*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): Vec2 =
+  ## Measure the pixel size of the text using the frame's measureText callback.
+  if text.text.value.len == 0:
+    return vec2(0.0'f32, 0.0'f32)
+  let arrangement = b.getTextArrangement(text, maxWidth)
+  return arrangement.size
+
+proc cachedMeasuredTextSize*(b: var UiBuilder, node: ptr UiNode): Vec2 {.raises: [].} =
+  ## Return the cached measured text size for a node, re-measuring only if the text is dirty.
+  let textSlot = int(node.textIndex)
+  if textSlot <= 0 or textSlot > b.frame.texts.len:
+    return vec2(0)
+
+  let nodeText = addr(b.frame.texts[textSlot - 1])
+
+  if nodeText.text.value.len == 0:
+    nodeText.measuredTextSizeCache = vec2(0.0'f32, 0.0'f32)
+    nodeText.measuredTextDirty = false
+    return nodeText.measuredTextSizeCache
+
+  if WrapText in node.flags and b.currentParent != nil:
+    if SizeXKnown notin node.flags or node.size.x <= 0:
+      b.traceEvent(node.id, "skip measure parent size unknown")
+      return vec2(0)
+
+  if nodeText.measuredTextDirty:
+    try:
+      let nodeStyle = b.nodeStyle(node)
+      let maxWidth =
+        if WrapText in node.flags:
+          max(0.0'f32, node.size.x - nodeStyle.paddingX * 2)
+        else:
+          -1.0'f32
+      nodeText.measuredTextSizeCache = b.measuredTextSize(nodeText, maxWidth)
+      b.traceEvent(node.id, "measure size")
+      nodeText.measuredTextDirty = false
+    except:
+      nodeText.measuredTextDirty = false
+
+  nodeText.measuredTextSizeCache
+
+proc isHovered(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) is currently hovered by the mouse.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.hoveredId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isHovered(frame, c, includeChildren):
+      return true
+  return false
+
+proc isClicked(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) was clicked this frame.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.clickedId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isClicked(frame, c, includeChildren):
+      return true
+  return false
+
+proc isRightClicked(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) was right clicked this frame.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.rightClickedId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isRightClicked(frame, c, includeChildren):
+      return true
+  return false
+
+proc isHeld(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) was pressed this frame.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.heldId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isHeld(frame, c, includeChildren):
+      return true
+  return false
+
+proc isPressed(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) was pressed this frame.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.pressedId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isPressed(frame, c, includeChildren):
+      return true
+  return false
+
+proc wasHovered*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was hovered.
+  if nodeId == b.previousOutput.hoveredId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isHovered(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasHovered*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was hovered.
+  return b.wasHovered(n.id, includeChildren, indexHint)
+
+proc wasHovered*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was hovered.
+  return b.wasHovered(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasHovered*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was hovered.
+  return b.wasHovered(b.frame.nodes[idx].addr, includeChildren, idx)
+
+proc wasHeld*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was pressed.
+  if nodeId == b.previousOutput.heldId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isHeld(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasHeld*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was pressed.
+  return b.wasHeld(n.id, includeChildren, indexHint)
+
+proc wasHeld*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was pressed.
+  return b.wasHeld(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasHeld*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was pressed.
+  return b.wasHeld(b.frame.nodes[idx].addr, includeChildren, idx)
+
+proc wasPressed*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was pressed.
+  if nodeId == b.previousOutput.pressedId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isPressed(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasPressed*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was pressed.
+  return b.wasPressed(n.id, includeChildren, indexHint)
+
+proc wasPressed*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was pressed.
+  return b.wasPressed(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasPressed*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was pressed.
+  return b.wasPressed(b.frame.nodes[idx].addr, includeChildren, idx)
+
+proc wasClicked*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was clicked.
+  if nodeId == b.previousOutput.clickedId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isClicked(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasClicked*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was clicked.
+  return b.wasClicked(n.id, includeChildren, indexHint)
+
+proc wasClicked*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was clicked.
+  return b.wasClicked(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasClicked*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was clicked.
+  return b.wasClicked(b.frame.nodes[idx].addr, includeChildren, idx)
+
+proc wasRightClicked*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was right clicked.
+  if nodeId == b.previousOutput.rightClickedId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isRightClicked(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasRightClicked*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was right clicked.
+  return b.wasRightClicked(n.id, includeChildren, indexHint)
+
+proc wasRightClicked*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was right clicked.
+  return b.wasRightClicked(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasRightClicked*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was right-clicked.
+  return b.wasRightClicked(b.frame.nodes[idx].addr, includeChildren, idx)
+
+template node*(b: var UiBuilder, body: untyped): untyped =
+  ## Create an anonymous child node, execute body in its context, then close it.
+  block:
+    prof("node")
+    discard b.beginNode()
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+proc beginAttach*(b: var UiBuilder, parentIdx: int): bool =
+  ## Pushes the existing node at parentIdx as the current node. Use `endAttach` to pop it and restore the previous current node.
+  if parentIdx >= 0 and parentIdx < b.frame.nodes.len:
+    b.stack.add parentIdx
+    b.nodeIdStack.add b.frame.nodes[parentIdx].id
+    b.currentNode = b.frame.nodes[parentIdx].addr
+    if b.currentNode.parent >= 0:
+      b.currentParent = b.frame.nodes[b.currentNode.parent].addr
+    else:
+      b.currentParent = nil
+    return true
+  return false
+
+proc endAttach*(b: var UiBuilder) =
+  ## Restores the previous current node.
+  discard b.stack.pop()
+  discard b.nodeIdStack.pop()
+  b.currentNode = b.frame.nodes[b.stack[^1]].addr
+  if b.currentNode.parent >= 0:
+    b.currentParent = b.frame.nodes[b.currentNode.parent].addr
+  else:
+    b.currentParent = nil
+
+template withParent*(b: var UiBuilder, parentIdx: int, body: untyped): untyped =
+  ## Execute body with parentIdx as the current parent. Restores the previous parent afterwards.
+  block:
+    let attached = b.beginAttach(parentIdx)
+    try:
+      body
+    finally:
+      if attached:
+        b.endAttach()
+
+template withParent*(b: var UiBuilder, parentId: UiNodeId, body: untyped): untyped =
+  ## Execute body with the node identified by parentId as the current parent.
+  let parentIdx = b.currentNodeIndex(parentId)
+  b.withParent(parentIdx):
+    body
+
+template withLast*(b: var UiBuilder, body: untyped): untyped =
+  ## Execute body with the node last ended node as the current parent.
+  b.withParent(b.lastNodeIndex):
+    body
+
+proc renderUnder*(b: var UiBuilder, parentIdx: int) =
+  ## Cause the current node to render under the node at parentIdx.
+  ## The node is added to the parent's render child chain (renderChildLast/renderSibling linked list).
+  if parentIdx < 0 or parentIdx >= b.frame.nodes.len:
+    return
+  if b.stack.len <= 0:
+    return
+  let currentIdx = b.stack[^1]
+  if currentIdx < 0 or currentIdx >= b.frame.nodes.len:
+    return
+  var currentNode = b.frame.nodes[currentIdx].addr
+  currentNode.renderParent = parentIdx.int32
+  var parentNode = b.frame.nodes[parentIdx].addr
+  if parentNode.renderChildLast >= 0:
+    currentNode.renderSibling = b.frame.nodes[parentNode.renderChildLast].renderSibling
+    b.frame.nodes[parentNode.renderChildLast].renderSibling = currentIdx.int32
+  else:
+    currentNode.renderSibling = currentIdx.int32
+  parentNode.renderChildLast = currentIdx.int32
+
+template nodeWithId*(b: var UiBuilder, id: UiNodeId, body: untyped): untyped =
+  ## Create a child node with a deterministic ID derived from the string key.
+  block:
+    prof("node")
+    discard b.beginNodeWithId(id)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template node*(b: var UiBuilder, key: string, body: untyped): untyped =
+  ## Create a child node with a deterministic ID derived from the string key.
+  block:
+    prof("node")
+    discard b.beginNodeId(key)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template node*(b: var UiBuilder, key: uint64, body: untyped): untyped =
+  ## Create a child node with a deterministic ID derived from the uint64 key.
+  block:
+    prof("node")
+    discard b.beginNodeId(key)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutVertical*(b: var UiBuilder, body: untyped): untyped =
+  ## Create an anonymous vertical layout node.
+  block:
+    prof("layoutVertical")
+    discard b.beginNode().layout(LayoutVertical)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutHorizontal*(b: var UiBuilder, body: untyped): untyped =
+  ## Create an anonymous horizontal layout node.
+  block:
+    prof("layoutHorizontal")
+    discard b.beginNode().layout(LayoutHorizontal)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutVerticalReverse*(b: var UiBuilder, body: untyped): untyped =
+  ## Create an anonymous vertical reverse layout node.
+  block:
+    prof("layoutVerticalReverse")
+    discard b.beginNode().layout(LayoutVertical).reverseLayout()
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutHorizontalReverse*(b: var UiBuilder, body: untyped): untyped =
+  ## Create an anonymous horizontal reverse layout node.
+  block:
+    prof("layoutHorizontalReverse")
+    discard b.beginNode().layout(LayoutHorizontal).reverseLayout()
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutVertical*(b: var UiBuilder, key: string, body: untyped): untyped =
+  ## Create a vertical layout node with a deterministic ID from the string key.
+  block:
+    prof("layoutVertical")
+    discard b.beginNodeId(key).layout(LayoutVertical)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutHorizontal*(b: var UiBuilder, key: string, body: untyped): untyped =
+  ## Create a horizontal layout node with a deterministic ID from the string key.
+  block:
+    prof("layoutHorizontal")
+    discard b.beginNodeId(key).layout(LayoutHorizontal)
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutVerticalReverse*(b: var UiBuilder, key: string, body: untyped): untyped =
+  ## Create a vertical reverse layout node with a deterministic ID from the string key.
+  block:
+    prof("layoutVerticalReverse")
+    discard b.beginNodeId(key).layout(LayoutVertical).reverseLayout()
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()
+
+template layoutHorizontalReverse*(b: var UiBuilder, key: string, body: untyped): untyped =
+  ## Create a horizontal reverse layout node with a deterministic ID from the string key.
+  block:
+    prof("layoutHorizontalReverse")
+    discard b.beginNodeId(key).layout(LayoutHorizontal).reverseLayout()
+    when not defined(nimony) and defined(nuiDebug):
+      let info = instantiationInfo(-1, fullPaths = true)
+      b.currentNode.debugSourceFile = info.filename
+      b.currentNode.debugSourceLine = info.line.int32
+      b.currentNode.debugSourceColumn = info.column.int32
+    body
+    discard b.endNode()

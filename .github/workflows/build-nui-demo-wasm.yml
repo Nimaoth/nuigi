@@ -1,0 +1,94 @@
+name: Build nui-demo (wasm) and deploy to GitHub Pages
+
+on:
+  # Runs on pushes targeting the default branch
+  push:
+    branches: ["main"]
+
+  # Allows you to run this workflow manually from the Actions tab
+  workflow_dispatch:
+
+# Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment, skipping runs queued between the run
+# in-progress and latest queued. Do NOT cancel in-progress runs.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-and-deploy:
+    name: Build nui-demo (wasm) on Windows
+    runs-on: windows-2022
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4.1.7
+
+      - name: Install Nim (nightly)
+        uses: iffy/install-nim@v5
+        with:
+          version: nightly:https://github.com/nim-lang/nightlies/releases/tag/2025-10-31-version-2-2-ab00c56904e3126ad826bb520d243513a139436a
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache nimble modules / emsdk / nimcache
+        id: cache
+        uses: actions/cache@v3
+        with:
+          path: |
+            deps
+            nimcache
+            emsdk
+          key: ${{ runner.os }}-nui-demo-wasm-${{ hashFiles('atlas.lock') }}
+
+      - name: Download emscripten
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        run: git clone https://github.com/emscripten-core/emsdk.git
+
+      - name: Install emscripten
+        run: |
+          ./emsdk/emsdk.ps1 install 4.0.10
+          ./emsdk/emsdk.ps1 activate 4.0.10
+
+      - name: Install Ninja (used by the SDL3 wasm build)
+        run: |
+          Invoke-WebRequest -Uri "https://github.com/ninja-build/ninja/releases/download/v1.12.1/ninja-win.zip" -OutFile ninja-win.zip
+          New-Item -ItemType Directory -Force -Path "ninja-win" | Out-Null
+          Expand-Archive -Force -Path ninja-win.zip -DestinationPath "ninja-win"
+
+      # - name: Install project dependencies (atlas)
+      #   run: |
+      #     atlas rep
+      #     atlas install
+
+      # 1) Build the build.nim tool itself (produces build.exe)
+      - name: Compile build.nim
+        run: nim c -o:build.exe build.nim
+
+      # 2) Build the nui-demo as wasm (html + js + wasm) via the build tool.
+      #    EMSDK is read by build.nim to activate the emscripten environment.
+      - name: Build nui-demo with wasm
+        env:
+          EMSDK: ${{ github.workspace }}/emsdk
+        run: ./emsdk/emsdk.ps1 activate 4.0.10; ./build.exe nui-demo --wasm
+
+      # 3) Collect the wasm artifacts for GitHub Pages
+      - name: Stage GitHub Pages artifact
+        run: |
+          New-Item -ItemType Directory -Force -Path pages | Out-Null
+          Copy-Item build/nui-demo.html pages/
+          Copy-Item build/nui-demo.js   pages/
+          Copy-Item build/nui-demo.wasm pages/
+
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: pages
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
