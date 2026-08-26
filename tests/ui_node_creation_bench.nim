@@ -168,7 +168,7 @@ proc runSliderBench() =
   benchReused(b, "slider"):
     for i in 0 ..< NumNodes:
       var v = 0.5'f32
-      discard b.slider("x", v, 0.0'f32, 1.0'f32)
+      discard b.slider(v, 0.0'f32, 1.0'f32)
 
 when isMainModule:
   echo "UiNode creation benchmark (" & $NumNodes & " nodes per frame, " & $WarmupIters & " warmup, " & $BenchIters & " iterations, b reused, 16ms frame budget)"

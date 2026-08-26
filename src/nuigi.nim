@@ -283,8 +283,10 @@ type
     hoverEndedId*: UiNodeId
     pressedId*: UiNodeId
     heldId*: UiNodeId
+    draggedId*: UiNodeId
     pressedIndex*: int
     heldIndex*: int
+    draggedIndex*: int
     rightPressedId*: UiNodeId
     rightPressedIndex*: int
     clickedId*: UiNodeId
@@ -1421,6 +1423,8 @@ proc clearFrameOutput(output: var UiFrameOutput) =
   output.pressedIndex = -1
   output.heldId = noneNodeId()
   output.heldIndex = -1
+  output.draggedId = noneNodeId()
+  output.draggedIndex = -1
   output.rightPressedId = noneNodeId()
   output.rightPressedIndex = -1
   output.clickedId = noneNodeId()
@@ -1464,19 +1468,19 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     fillColor: UiColor(r: 0.44'f32, g: 0.52'f32, b: 0.64'f32, a: 0.95'f32),
   )
   result[int(UiStyleIndexButton) - 1] = UiStyle(
-    paddingX: 6.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 0.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: UiColor(r: 0.22'f32, g: 0.25'f32, b: 0.30'f32, a: 1.0'f32),
     borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexButtonHover) - 1] = UiStyle(
-    paddingX: 6.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 0.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.90'f32, g: 0.35'f32, b: 0.42'f32, a: 1.0'f32),
+    fillColor: UiColor(r: 0.30'f32, g: 0.35'f32, b: 0.42'f32, a: 1.0'f32),
     borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexCheckbox) - 1] = UiStyle(
@@ -1539,7 +1543,7 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
   )
   result[int(UiStyleIndexTabBarItem) - 1] = UiStyle(
     paddingX: 6.0'f32,
-    paddingY: 6.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: UiColor(r: 0.20'f32, g: 0.24'f32, b: 0.30'f32, a: 1.0'f32),
@@ -1547,7 +1551,7 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
   )
   result[int(UiStyleIndexTabBarItemActive) - 1] = UiStyle(
     paddingX: 6.0'f32,
-    paddingY: 6.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: UiColor(r: 0.34'f32, g: 0.42'f32, b: 0.56'f32, a: 1.0'f32),
@@ -1688,17 +1692,17 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
 
   result[int(UiStyleIndexDefaultText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Default".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexSmallText) - 1] = UiNodeText(
-    fontSize: 12,
+    fontSize: 10,
     text: "Small".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexLargeText) - 1] = UiNodeText(
-    fontSize: 20,
+    fontSize: 18,
     text: "Large".uiString,
     textColor: defaultText,
   )
@@ -1708,112 +1712,112 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
     textColor: defaultText,
   )
   result[int(UiStyleIndexButtonText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Button".uiString,
     textColor: UiColor(r: 0.96'f32, g: 0.96'f32, b: 0.98'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexMenuItemHoverText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Menu Item Hover".uiString,
     textColor: UiColor(r: 0.98'f32, g: 0.98'f32, b: 0.99'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexMenuItemText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Menu Item".uiString,
     textColor: UiColor(r: 0.94'f32, g: 0.95'f32, b: 0.97'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexLabelText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Label".uiString,
     textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexWindowText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Window".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexWindowTitleBarText) - 1] = UiNodeText(
-    fontSize: 20,
+    fontSize: 16,
     text: "Window Title Bar".uiString,
     textColor: UiColor(r: 0.95'f32, g: 0.96'f32, b: 0.99'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexWindowContentText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Window Content".uiString,
     textColor: UiColor(r: 0.90'f32, g: 0.92'f32, b: 0.96'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexButtonHoverText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Button Hover".uiString,
     textColor: UiColor(r: 0.96'f32, g: 0.96'f32, b: 0.98'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexCheckboxText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Checkbox".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexCheckboxHoverText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Checkbox Hover".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexCheckboxMarkText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Checkbox Mark".uiString,
     textColor: accentWarm,
   )
   result[int(UiStyleIndexSliderText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Slider".uiString,
     textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexTabBarHeaderText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Tab Bar Header".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexTabBarItemText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Tab Bar Item".uiString,
     textColor: UiColor(r: 0.86'f32, g: 0.88'f32, b: 0.92'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexTabBarItemActiveText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Tab Bar Item Active".uiString,
     textColor: UiColor(r: 0.98'f32, g: 0.98'f32, b: 0.98'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexTabBarContentText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Tab Bar Content".uiString,
     textColor: defaultText,
   )
   result[int(UiStyleIndexTextFieldText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Text Field".uiString,
     textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexTextFieldFocusedText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Text Field Focused".uiString,
     textColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexTextFieldHintText) - 1] = UiNodeText(
-    fontSize: 16,
+    fontSize: 14,
     text: "Text Field Hint".uiString,
     textColor: UiColor(r: 0.50'f32, g: 0.55'f32, b: 0.65'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexHeadingText) - 1] = UiNodeText(
-    fontSize: 22,
+    fontSize: 18,
     text: "Heading".uiString,
     textColor: UiColor(r: 0.96'f32, g: 0.92'f32, b: 0.78'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexMutedText) - 1] = UiNodeText(
-    fontSize: 14,
+    fontSize: 12,
     text: "Muted".uiString,
     textColor: UiColor(r: 0.84'f32, g: 0.88'f32, b: 0.94'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexHeaderText) - 1] = UiNodeText(
-    fontSize: 14,
+    fontSize: 12,
     text: "Header".uiString,
     textColor: UiColor(r: 0.96'f32, g: 0.90'f32, b: 0.55'f32, a: 1.0'f32),
   )
@@ -2189,6 +2193,20 @@ proc computeFrameInteraction(b: var UiBuilder, input: UiInputSnapshot) =
   elif MouseRight in input.mouseDown:
     b.frameOutput.rightPressedId = b.previousOutput.rightPressedId
     b.frameOutput.rightPressedIndex = b.currentNodeIndex(b.previousOutput.rightPressedId)
+
+  # Dragging starts when a node is held down and the mouse moves. The drag id is
+  # reported both while the movement happens and on the release frame so callers
+  # can distinguish a real drag from a click that happened in the exact same spot.
+  if b.frameOutput.heldId != noneNodeId():
+    if input.mouseDelta.x != 0.0'f32 or input.mouseDelta.y != 0.0'f32:
+      b.frameOutput.draggedId = b.frameOutput.heldId
+      b.frameOutput.draggedIndex = b.currentNodeIndex(b.frameOutput.heldId)
+    elif b.previousOutput.draggedId != noneNodeId():
+      b.frameOutput.draggedId = b.previousOutput.draggedId
+      b.frameOutput.draggedIndex = b.currentNodeIndex(b.previousOutput.draggedId)
+  elif MouseLeft in input.mouseReleased and b.previousOutput.draggedId != noneNodeId():
+    b.frameOutput.draggedId = b.previousOutput.draggedId
+    b.frameOutput.draggedIndex = b.currentNodeIndex(b.previousOutput.draggedId)
 
   if MouseLeft in input.mouseReleased and
       not (hover == noneNodeId()) and
@@ -4426,6 +4444,11 @@ proc maskChildren*(b: var UiBuilder): var UiBuilder {.discardable.} =
   b.currentNode.flags.incl MaskChildren
   b
 
+proc scrollable*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Current node should react to scroll events.
+  b.currentNode.flags.incl Scrollable
+  b
+
 proc customRenderCommands*(b: var UiBuilder, commands: ArrayView[UiRenderCommand]): var UiBuilder {.discardable.} =
   ## Attach custom render commands to the current node (from an ArrayView).
   b.ensureNodeCustomCommands(b.currentNode) = commands
@@ -5278,6 +5301,18 @@ proc isRightClicked(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren:
       return true
   return false
 
+proc isDragged(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx (in the given frame) was dragged this frame.
+  let n = frame.nodes[idx].addr
+  if n.id == b.previousOutput.draggedId:
+    return true
+  if not includeChildren:
+    return false
+  for c in b.children(idx, frame):
+    if b.isDragged(frame, c, includeChildren):
+      return true
+  return false
+
 proc isHeld(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
   ## Check if the node at idx (in the given frame) was pressed this frame.
   let n = frame.nodes[idx].addr
@@ -5385,6 +5420,27 @@ proc wasClicked*(b: UiBuilder, includeChildren: bool = false): bool =
 proc wasClicked*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
   ## Check if the node at idx was clicked.
   return b.wasClicked(b.frame.nodes[idx].addr, includeChildren, idx)
+
+proc wasDragged*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was dragged (held and moved).
+  if nodeId == b.previousOutput.draggedId:
+    return true
+  let prevIndex = b.previousNodeIndex(nodeId, indexHint)
+  if prevIndex >= 0:
+    return b.isDragged(b.previousFrame.addr, prevIndex, includeChildren)
+  return false
+
+proc wasDragged*(b: UiBuilder, n: ptr UiNode, includeChildren: bool = false, indexHint: int = -1): bool =
+  ## Check if the given node was dragged.
+  return b.wasDragged(n.id, includeChildren, indexHint)
+
+proc wasDragged*(b: UiBuilder, includeChildren: bool = false): bool =
+  ## Check if the current node was dragged.
+  return b.wasDragged(b.currentNode, includeChildren, b.currentNodeIndex)
+
+proc wasDragged*(b: UiBuilder, idx: int, includeChildren: bool = false): bool =
+  ## Check if the node at idx was dragged.
+  return b.wasDragged(b.frame.nodes[idx].addr, includeChildren, idx)
 
 proc wasRightClicked*(b: UiBuilder, nodeId: UiNodeId, includeChildren: bool = false, indexHint: int = -1): bool =
   ## Check if the given node was right clicked.

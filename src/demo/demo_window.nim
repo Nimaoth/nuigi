@@ -115,8 +115,10 @@ proc buildAnchorExamples*(b: var UiBuilder) =
         anchorDemoMode = (anchorDemoMode + 1) mod anchorModeLabels.len
       b.withLast:
         discard b.alignCenter()
-      discard b.slider("Parent width", anchorDemoParentWidth, 180.0'f32, 420.0'f32, 0.0'f32)
-      discard b.slider("Parent height", anchorDemoParentHeight, 120.0'f32, 400.0'f32, 0.0'f32)
+      var anchorSize = vec2(anchorDemoParentWidth, anchorDemoParentHeight)
+      discard b.dragFloat2(anchorSize, 0, 0.0'f32, 420.0'f32, dfCustom, @["W", "H"])
+      anchorDemoParentWidth = anchorSize.x
+      anchorDemoParentHeight = anchorSize.y
 
     b.node("anchor-stage"):
       b.animate:
@@ -240,8 +242,10 @@ proc buildGapPaddingExamples*(b: var UiBuilder) =
 
     b.layoutHorizontal("gap-pad-controls"):
       discard b.fillX().fitY().gap(8)
-      discard b.slider("gap", gapDemoGap, 0.0'f32, 48.0'f32, 12)
-      discard b.slider("padding", gapDemoPadding, 0.0'f32, 40.0'f32, 10)
+      var gapPad = vec2(gapDemoGap, gapDemoPadding)
+      discard b.dragFloat2(gapPad, 0, 0.0'f32, 48.0'f32, dfCustom, @["G", "P"])
+      gapDemoGap = gapPad.x
+      gapDemoPadding = gapPad.y
 
     b.node("gap-pad-stage"):
       discard b.width(360).fitY().padding(gapDemoPadding).gap(gapDemoGap)
@@ -301,20 +305,24 @@ proc buildStyleExamples*(b: var UiBuilder) =
       b.label("borderWidths (left / top / right / bottom)"): discard b.fontSize(13)
       b.layoutHorizontal:
         discard b.fillX().fitY().gap(8)
-        discard b.slider("L", styleDemoBorderWL, 0.0'f32, 20.0'f32, 4)
-        discard b.slider("T", styleDemoBorderWT, 0.0'f32, 20.0'f32, 4)
-        discard b.slider("R", styleDemoBorderWR, 0.0'f32, 20.0'f32, 4)
-        discard b.slider("B", styleDemoBorderWB, 0.0'f32, 20.0'f32, 4)
+      var borderTmp = vec4(styleDemoBorderWL, styleDemoBorderWT, styleDemoBorderWR, styleDemoBorderWB)
+      discard b.dragFloat4(borderTmp, 4, 0.0'f32, 20.0'f32, dfNoLabel)
+      styleDemoBorderWL = borderTmp.x
+      styleDemoBorderWT = borderTmp.y
+      styleDemoBorderWR = borderTmp.z
+      styleDemoBorderWB = borderTmp.w
 
     b.layoutVertical("style-radii"):
       discard b.fillX().fitY().gap(4)
       b.label("cornerRadii (topLeft / topRight / bottomRight / bottomLeft)"): discard b.fontSize(13)
       b.layoutHorizontal:
         discard b.fillX().fitY().gap(8)
-        discard b.slider("TL", styleDemoRadiusTL, 0.0'f32, 60.0'f32, 12)
-        discard b.slider("TR", styleDemoRadiusTR, 0.0'f32, 60.0'f32, 12)
-        discard b.slider("BR", styleDemoRadiusBR, 0.0'f32, 60.0'f32, 12)
-        discard b.slider("BL", styleDemoRadiusBL, 0.0'f32, 60.0'f32, 12)
+      var radiusTmp = vec4(styleDemoRadiusTL, styleDemoRadiusTR, styleDemoRadiusBR, styleDemoRadiusBL)
+      discard b.dragFloat4(radiusTmp, 12, 0.0'f32, 60.0'f32, dfNoLabel)
+      styleDemoRadiusTL = radiusTmp.x
+      styleDemoRadiusTR = radiusTmp.y
+      styleDemoRadiusBR = radiusTmp.z
+      styleDemoRadiusBL = radiusTmp.w
 
     b.layoutVertical("style-colors"):
       discard b.fillX().fitY().gap(4)
@@ -431,7 +439,10 @@ proc buildTextStyleExamples*(b: var UiBuilder) =
 
       b.layoutHorizontal:
         discard b.fillX().fitY().gap(8)
-        discard b.slider("fontSize", textDemoSize, 8.0'f32, 64.0'f32, 18)
+        b.layoutHorizontal:
+          discard b.fitX().fitY().gap(2)
+          b.label("fontSize")
+          discard b.dragFloat(textDemoSize, 18, 8.0'f32, 64.0'f32)
 
       b.node("text-font"):
         discard b.fit().gap(4)
@@ -521,7 +532,10 @@ proc buildAnimationExamples*(b: var UiBuilder) =
       if b.button("Toggle show"):
         animDemoShow = not animDemoShow
       var animationSpeed = b.animationSpeed
-      discard b.slider("Animation speed", animationSpeed, 0.0'f32, 4.0'f32, 1.0'f32)
+      b.layoutHorizontal:
+        discard b.fitX().fitY().gap(2)
+        b.label("Animation speed")
+        discard b.dragFloat(animationSpeed, 1.0'f32, 0.0'f32, 4.0'f32)
       b.animationSpeed = animationSpeed
 
     b.layoutHorizontal:
@@ -604,12 +618,22 @@ proc buildTransformExamples*(b: var UiBuilder) =
 
     b.node("transform-controls"):
       discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap).flexGaps(8, 8)
-      discard b.slider("offset X", transformDemoX, -60.0'f32, 60.0'f32, 0)
-      discard b.slider("offset Y", transformDemoY, -60.0'f32, 60.0'f32, 0)
-      discard b.slider("rotation", transformDemoRot, -3.14159'f32, 3.14159'f32, 0)
-      discard b.slider("scale", transformDemoScale, 0.25'f32, 2.5'f32, 1)
-      discard b.slider("pivot X", transformDemoPivotX, 0.0'f32, 1.0'f32, 0.5)
-      discard b.slider("pivot Y", transformDemoPivotY, 0.0'f32, 1.0'f32, 0.5)
+      var transformPos = vec2(transformDemoX, transformDemoY)
+      discard b.dragFloat2(transformPos, 0, -60.0'f32, 60.0'f32, dfXYZW)
+      transformDemoX = transformPos.x
+      transformDemoY = transformPos.y
+      b.layoutHorizontal:
+        discard b.fitX().fitY().gap(2)
+        b.label("rotation")
+        discard b.dragFloat(transformDemoRot, 0, -3.14159'f32, 3.14159'f32)
+      b.layoutHorizontal:
+        discard b.fitX().fitY().gap(2)
+        b.label("scale")
+        discard b.dragFloat(transformDemoScale, 1, 0.25'f32, 2.5'f32)
+      var transformPivot = vec2(transformDemoPivotX, transformDemoPivotY)
+      discard b.dragFloat2(transformPivot, 0.5, 0.0'f32, 1.0'f32, dfXYZW)
+      transformDemoPivotX = transformPivot.x
+      transformDemoPivotY = transformPivot.y
       if b.checkbox("animate", transformDemoAnimate): discard
       if b.button("Randomize"):
         transformDemoX = rand(120.0'f32).float32 - 60.0'f32
@@ -678,6 +702,11 @@ proc buildTransformExamples*(b: var UiBuilder) =
 var awClicked = 0
 var awChecked = false
 var awSlider = 0.5'f32
+var awDrag = 0.5'f32
+var awDragFree = 2.0'f32
+var awVec2 = vec2(0.5'f32, 0.5'f32)
+var awVec3 = vec3(0.5'f32, 0.5'f32, 0.5'f32)
+var awVec4 = vec4(0.5'f32, 0.5'f32, 0.5'f32, 1.0'f32)
 var awColor = rgba(0.40, 0.66, 0.92, 1.0)
 var awDropdown = 0
 var awDropdownOptions = ["Apple", "Banana", "Cherry", "Date"]
@@ -730,7 +759,22 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
         if b.checkbox("Enabled", awChecked): discard
       labelCell("slider")
       widgetCell:
-        discard b.slider("value", awSlider, 0.0'f32, 1.0'f32, 0.5'f32)
+        discard b.slider(awSlider, 0.0'f32, 1.0'f32, 0.5'f32)
+      labelCell("dragFloat")
+      widgetCell:
+        discard b.dragFloat(awDrag, 0.5'f32, 0.0'f32, 1.0'f32)
+      labelCell("dragFloat (free)")
+      widgetCell:
+        discard b.dragFloat(awDragFree, 2.0'f32)
+      labelCell("dragFloat2")
+      widgetCell:
+        discard b.dragFloat2(awVec2, 0.5'f32, 0.0'f32, 1.0'f32, dfXYZW)
+      labelCell("dragFloat3")
+      widgetCell:
+        discard b.dragFloat3(awVec3, 0.5'f32, 0.0'f32, 1.0'f32, dfXYZW)
+      labelCell("dragFloat4")
+      widgetCell:
+        discard b.dragFloat4(awVec4, 0.5'f32, 0.0'f32, 1.0'f32, dfRGBA)
       labelCell("colorPicker")
       widgetCell:
         b.node("color-host"):
@@ -822,7 +866,10 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     var count = cvItemCount.float32
-    discard b.slider("Virtual list item count", count, 1.0'f32, 1_000_000.0'f32, 200)
+    b.layoutHorizontal:
+      discard b.fitX().fitY().gap(2)
+      b.label("Virtual list item count")
+      discard b.dragFloat(count, 200, 1.0'f32, 1_000_000.0'f32)
     cvItemCount = count.int
 
     b.tableLayout([tableColumnProportional(1), tableColumnProportional(2)], 8.0, 4.0):
@@ -969,7 +1016,7 @@ proc buildLayoutExamples*(b: var UiBuilder) =
         settingRow("Music"):
           if b.checkbox("", layoutDemoMusic): discard
         settingRow("Volume"):
-          discard b.slider("", layoutDemoVolume, 0.0'f32, 1.0'f32, 0.7'f32)
+          discard b.dragFloat(layoutDemoVolume, 0.7'f32, 0.0'f32, 1.0'f32)
         settingRow("VSync"):
           if b.checkbox("", layoutDemoVsync): discard
         settingRow("Fullscreen"):
@@ -1093,7 +1140,10 @@ proc buildSubpixelExamples*(b: var UiBuilder) =
     if previousIndex != -1:
       offset = b.previousFrame.nodes[previousIndex].pos.x
       absolutePosition = b.absoluteNodePosPrev(parentId)
-    discard b.slider("Offset", offset, 0.0'f32, 1.0'f32, 0.5)
+    b.layoutHorizontal:
+      discard b.fitX().fitY().gap(2)
+      b.label("Offset")
+      discard b.dragFloat(offset, 0.5, 0.0'f32, 1.0'f32)
 
     b.nodeWithId(parentId):
       discard b.fitX().fitY()
@@ -1389,7 +1439,10 @@ proc buildDemoUi*(b: var UiBuilder) =
             discard
           do:
             var f = b.defaultText.fontSize
-            discard b.slider("Font Size", f, 2.0'f32, 100.0'f32, 11)
+            b.layoutHorizontal:
+              discard b.fitX().fitY().gap(2)
+              b.label("Font Size")
+              discard b.dragFloat(f, 11, 2.0'f32, 100.0'f32)
             b.defaultText.fontSize = f
 
           b.menuItem:

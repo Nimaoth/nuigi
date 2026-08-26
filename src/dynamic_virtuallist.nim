@@ -138,6 +138,7 @@ proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: in
   storage.scrollOffsetY = clamp(storage.scrollOffsetY, 0.0'f32, scrollRange)
   if storage.scrollOffsetY != unclampedScrollOffset:
     storage.scrollVelocityY = 0.0'f32
+  storage.scrollOffsetY = (storage.scrollOffsetY + 0.5).int64.float32
 
   let thumbMinHeight = 20.0'f32
   if storage.scrollbarThumbIndex >= 0 and storage.scrollbarTrackIndex >= 0 and
@@ -230,7 +231,7 @@ proc dynamicVirtualList*(b: var UiBuilder,
         storage.scrollOffsetY += storage.scrollVelocityY * frameTime
 
       storage.scrollVelocityY = storage.scrollVelocityY / (1.0'f32 + scrollDamping * frameTime)
-      if abs(storage.scrollVelocityY) <= 0.5'f32:
+      if abs(storage.scrollVelocityY) <= 1'f32:
         storage.scrollVelocityY = 0.0'f32
 
       discard b.deferBuild(dynamicVirtualListDeferredBuild)

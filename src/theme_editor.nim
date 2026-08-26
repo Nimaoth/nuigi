@@ -38,29 +38,13 @@ func themeStyleName(styleIndex: int): string =
       return name
   "Style " & $styleIndex
 
-proc editFloatSlider(b: var UiBuilder, labelText: string, value: var float32, minValue, maxValue: float32) =
-  discard b.pushId(labelText)
-  discard b.slider(labelText, value, minValue, maxValue, value)
-  discard b.popId()
-
-proc editFloatRow4(b: var UiBuilder,
-    rowId: string,
-    aLabel: string, aValue: var float32, aMin, aMax: float32,
-    bLabel: string, bValue: var float32, bMin, bMax: float32,
-    cLabel: string, cValue: var float32, cMin, cMax: float32,
-    dLabel: string, dValue: var float32, dMin, dMax: float32) =
-  b.layoutHorizontal(rowId):
-    discard b.fillX().fitY().gap(8)
-    editFloatSlider(b, aLabel, aValue, aMin, aMax)
-    editFloatSlider(b, bLabel, bValue, bMin, bMax)
-    editFloatSlider(b, cLabel, cValue, cMin, cMax)
-    editFloatSlider(b, dLabel, dValue, dMin, dMax)
-
 proc labeledColorPicker(b: var UiBuilder, labelText: string, value: var UiColor) =
   discard b.pushId(labelText)
-  b.layoutHorizontal("theme-editor-labeled-color-picker"):
+  b.layoutHorizontal:
+    b.debugName("theme-editor-labeled-color-picker")
     discard b.fitX().fitY().gap(4)
-    b.node("theme-editor-labeled-color-picker-label"):
+    b.node:
+      b.debugName("theme-editor-labeled-color-picker-label")
       discard b.fitX().fitY().alignCenter()
       discard b.text(labelText)
       discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
@@ -92,63 +76,87 @@ proc buildThemeStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nim
   discard b.gap(6)
   discard b.fillBackground()
   discard b.backgroundColor(rowBackground)
-  discard b.borderWidth(if isHighlighted: 2.0'f32 else: 1.0'f32)
+  discard b.borderWidth(if isHighlighted: 2.0'f32 else: 0.0'f32)
   discard b.borderColor(if isHighlighted: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0) else: b.themeStyle(UiStyleIndexStage)[].borderColor)
-  discard b.cornerRadius(6)
 
-  b.node("theme-editor-style-title"):
-    discard b.fitX().fitY()
-    discard b.text($styleIndex & ". " & styleName)
-    discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
-
-  b.layoutHorizontal("theme-editor-style-preview-row"):
+  b.layoutHorizontal:
+    b.debugName("theme-editor-style-preview-row")
     discard b.fillX().fitY().gap(12)
 
+    b.node:
+      b.debugName("theme-editor-style-title")
+      discard b.fitX().fitY().alignCenter()
+      discard b.text($styleIndex & ". " & styleName)
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
+
     discard b.setThemeStyle(styleIndex, styleValue)
-    b.node("theme-editor-style-preview"):
+    b.node:
+      b.debugName("theme-editor-style-preview")
       discard b.styleIndex(styleIndex)
-      discard b.fillX().fitY()
+      discard b.fillX().fitY().alignCenter()
       discard b.fillBackground()
       discard b.text("Preview Text")
 
-  editFloatRow4(
-    b,
-    "theme-editor-style-layout-row",
-    "paddingX", styleValue.paddingX, 0.0'f32, 32.0'f32,
-    "paddingY", styleValue.paddingY, 0.0'f32, 32.0'f32,
-    "borderWidth", styleValue.borderWidth, 0.0'f32, 8.0'f32,
-    "cornerRadius", styleValue.cornerRadius, 0.0'f32, 16.0'f32,
-  )
+  b.tableLayout([tableColumnFit(), tableColumnFit()], 8.0, 4.0):
+    discard b.fit()
+    b.node:
+      b.debugName("theme-editor-style-row-label")
+      discard b.fit().alignCenter()
+      discard b.text("padding/border").fit()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    b.node:
+      discard b.fit()
+      b.debugName("theme-editor-style-row-widget")
+      var layoutVec = vec4(styleValue.paddingX, styleValue.paddingY, styleValue.borderWidth, styleValue.cornerRadius)
+      discard b.dragFloat4(layoutVec,
+        [styleValue.paddingX, styleValue.paddingY, styleValue.borderWidth, styleValue.cornerRadius],
+        [0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32],
+        [32.0'f32, 32.0'f32, 8.0'f32, 16.0'f32],
+        dfCustom, @["PX", "PY", "BW", "CR"])
+      styleValue.paddingX = layoutVec.x
+      styleValue.paddingY = layoutVec.y
+      styleValue.borderWidth = layoutVec.z
+      styleValue.cornerRadius = layoutVec.w
 
-  editFloatRow4(
-    b,
-    "theme-editor-corner-radii-row",
-    "cornerTL", styleValue.cornerRadii.topLeft, 0.0'f32, 32.0'f32,
-    "cornerTR", styleValue.cornerRadii.topRight, 0.0'f32, 32.0'f32,
-    "cornerBR", styleValue.cornerRadii.bottomRight, 0.0'f32, 32.0'f32,
-    "cornerBL", styleValue.cornerRadii.bottomLeft, 0.0'f32, 32.0'f32,
-  )
+    b.node:
+      b.debugName("theme-editor-style-row-label")
+      discard b.fit().alignCenter()
+      discard b.text("corner radius").fit()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    b.node:
+      discard b.fit()
+      b.debugName("theme-editor-style-row-widget")
+      var cornerRadiiVec = vec4(styleValue.cornerRadii.topLeft, styleValue.cornerRadii.topRight, styleValue.cornerRadii.bottomRight, styleValue.cornerRadii.bottomLeft)
+      discard b.dragFloat4(cornerRadiiVec, 0.0'f32, 0.0'f32, 32.0'f32, dfCustom, @["TL", "TR", "BR", "BL"])
+      styleValue.cornerRadii.topLeft = cornerRadiiVec.x
+      styleValue.cornerRadii.topRight = cornerRadiiVec.y
+      styleValue.cornerRadii.bottomRight = cornerRadiiVec.z
+      styleValue.cornerRadii.bottomLeft = cornerRadiiVec.w
 
-  editFloatRow4(
-    b,
-    "theme-editor-border-widths-row",
-    "borderLeft", styleValue.borderWidths.left, 0.0'f32, 8.0'f32,
-    "borderTop", styleValue.borderWidths.top, 0.0'f32, 8.0'f32,
-    "borderRight", styleValue.borderWidths.right, 0.0'f32, 8.0'f32,
-    "borderBottom", styleValue.borderWidths.bottom, 0.0'f32, 8.0'f32,
-  )
+    b.node:
+      b.debugName("theme-editor-style-row-label")
+      discard b.fit().alignCenter()
+      discard b.text("border width").fit()
+      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    b.node:
+      discard b.fit()
+      b.debugName("theme-editor-style-row-widget")
+      var borderWidthsVec = vec4(styleValue.borderWidths.left, styleValue.borderWidths.top, styleValue.borderWidths.right, styleValue.borderWidths.bottom)
+      discard b.dragFloat4(borderWidthsVec, 0.0'f32, 0.0'f32, 8.0'f32, dfCustom, @[" L", " T", " R", " B"])
+      styleValue.borderWidths.left = borderWidthsVec.x
+      styleValue.borderWidths.top = borderWidthsVec.y
+      styleValue.borderWidths.right = borderWidthsVec.z
+      styleValue.borderWidths.bottom = borderWidthsVec.w
 
-  b.layoutHorizontal("theme-editor-style-colors-row"):
+  b.layoutHorizontal:
+    b.debugName("theme-editor-style-colors-row")
     discard b.fillX().fitY().gap(12)
     labeledColorPicker(b, "Fill", styleValue.fillColor)
     labeledColorPicker(b, "Border", styleValue.borderColor)
-
-  b.layoutHorizontal("theme-editor-border-colors-row"):
-    discard b.fillX().fitY().gap(12)
-    labeledColorPicker(b, "Border Left", styleValue.borderColors.left)
-    labeledColorPicker(b, "Border Top", styleValue.borderColors.top)
-    labeledColorPicker(b, "Border Right", styleValue.borderColors.right)
-    labeledColorPicker(b, "Border Bottom", styleValue.borderColors.bottom)
+    labeledColorPicker(b, "L", styleValue.borderColors.left)
+    labeledColorPicker(b, "T", styleValue.borderColors.top)
+    labeledColorPicker(b, "R", styleValue.borderColors.right)
+    labeledColorPicker(b, "B", styleValue.borderColors.bottom)
 
   discard b.setThemeStyle(styleIndex, styleValue)
 
@@ -213,7 +221,10 @@ proc buildThemeTextStyleEntry(b: var UiBuilder, itemIndex: int, userData: int) {
   b.layoutHorizontal("theme-editor-text-style-edit-row"):
     discard b.fillX().fitY().gap(12)
 
-    discard slider(b, "fontSize", textStyleValue.fontSize, 4.0'f32, 128.0'f32, 16)
+    b.layoutHorizontal:
+      discard b.fitX().fitY().gap(2)
+      b.label("Size:")
+      discard b.dragFloat(textStyleValue.fontSize, 16'f32, 4.0'f32, 128.0'f32)
 
     if fonts.len > 0:
       b.layoutHorizontal("theme-editor-text-style-font-row"):
@@ -257,7 +268,7 @@ proc themeEditor*(b: var UiBuilder, themeEditor: var ThemeEditor): var UiBuilder
       else:
         int(UiStyleIndexDefault)
 
-  b.window(ThemeTitle, 170, 180, 900.0'f32, 800.0'f32):
+  b.window(ThemeTitle, 170, 180, 555.0'f32, 800.0'f32):
     b.layoutVertical("theme-editor-root"):
       discard b.fillX().fillY().gap(6)
 

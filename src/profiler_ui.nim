@@ -81,8 +81,7 @@ proc buildFlameDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   else:
     b.absoluteNodePos(nodeIdx)
   let mouseLocal = b.frameCtx.input.mouse - (nodeAbs + vec2(style.paddingX, style.paddingY))
-  if mouseLocal.x >= 0.0'f32 and mouseLocal.x <= contentSize.x and
-     mouseLocal.y >= 0.0'f32 and mouseLocal.y <= contentSize.y:
+  if b.previousOutput.scrolledId == b.currentNode.id:
     let input = b.frameCtx.input
     if ModAlt in input.modsDown:
       gprof.scrollX += input.wheel.y * 20.0'f32
@@ -259,7 +258,7 @@ proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
       fillBottomColor: rgba(0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32),
     )
 
-  if b.wasHovered(b.currentNode):
+  if b.previousOutput.scrolledId == b.currentNode.id:
     gprof.plotScale *= (1.0'f32 - b.frameCtx.input.wheel.y * 0.1'f32)
 
   let commands = buildPlotVertices(
@@ -295,15 +294,24 @@ proc buildNuiProfiler*(b: var UiBuilder) =
         gprof.scaleX = 0.7'f32
         gprof.scrollX = 0.0'f32
       profFrameIndexFloat = gprof.frameIndex.float32
-      if b.slider("Frame", profFrameIndexFloat, 0.0'f32, 50.0'f32):
-        gprof.frameIndex = profFrameIndexFloat.int32
-      if b.slider("Scale", gprof.scaleX, 0.0'f32, 1000.0'f32, 1):
-        discard
+      b.layoutHorizontal:
+        discard b.fitX().fitY()
+        b.label("Frame")
+        if b.dragFloat(profFrameIndexFloat, 0.5'f32, 0.0'f32, 50.0'f32):
+          gprof.frameIndex = profFrameIndexFloat.int32
+      b.layoutHorizontal:
+        discard b.fitX().fitY()
+        b.label("Scale")
+        if b.dragFloat(gprof.scaleX, 1, 0.0'f32, 1000.0'f32):
+          discard
 
     b.layoutHorizontal("profiler-controls-2"):
       discard b.fillX().fitY().gap(6)
-      if b.slider("Plot Scale", gprof.plotScale, 1.0'f32, 32.0'f32):
-        discard
+      b.layoutHorizontal:
+        discard b.fitX().fitY()
+        b.label("Plot Scale")
+        if b.dragFloat(gprof.plotScale, 0.5'f32, 1.0'f32, 32.0'f32):
+          discard
       if profPlottedStatsCsv.len == 0:
         profPlottedStatsCsv = gprof.plottedStats.join(",")
       if b.textField(profPlottedStatsCsv, "comma-separated tags, e.g. frame, tickGame, drawEntities"):
@@ -312,12 +320,12 @@ proc buildNuiProfiler*(b: var UiBuilder) =
           gprof.plottedStats = parsed
 
     b.node("profiler-plot"):
-      discard b.fillX().height(300.0'f32).maskChildren()
+      discard b.fillX().height(300.0'f32).maskChildren().scrollable()
       discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.deferBuild(buildPlotDeferred)
 
     b.node("profiler-flame"):
       # discard b.fill().maskChildren()
-      discard b.fillX().height(500.0'f32).maskChildren()
+      discard b.fillX().height(500.0'f32).maskChildren().scrollable()
       discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.deferBuild(buildFlameDeferred)

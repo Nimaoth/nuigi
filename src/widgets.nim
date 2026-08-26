@@ -1,3 +1,4 @@
+import std/math
 import nuigi
 import mymath, arena
 import array_view
@@ -111,12 +112,10 @@ proc button*(b: var UiBuilder, text: string): bool =
     discard b.text(text)
     let nodeId = b.currentNode.id
     let wasHovered = b.previousOutput.hoveredId == nodeId
-    let hoverScale = if wasHovered: 1.15'f32 else: 1.0'f32
     discard b.fillBackground()
     b.animate(b.previousOutput.clickedId == nodeId or
         b.previousOutput.hoverBeganId == nodeId or
         b.previousOutput.hoverEndedId == nodeId):
-      discard b.transformScaleAnim(hoverScale)
       discard b.backgroundColorAnim(if wasHovered:
         b.themeStyle(UiStyleIndexButtonHover)[].fillColor
       else:
@@ -302,7 +301,7 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     value = not value
   clicked
 
-proc slider*(b: var UiBuilder, label: string, value: var float32, minValue = 0.0'f32, maxValue = 1.0'f32, defaultValue = 0.5'f32): bool =
+proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue = 1.0'f32, defaultValue = 0.5'f32): bool =
   prof("slider")
   let trackWidth = 160.0'f32
   let trackHeight = 18.0'f32
@@ -319,17 +318,9 @@ proc slider*(b: var UiBuilder, label: string, value: var float32, minValue = 0.0
   var thumbX = normalized * max(0.0'f32, trackWidth - thumbWidth)
   var fillWidth = max(thumbWidth, normalized * trackWidth)
 
-  discard b.pushId(label)
-  b.layoutVertical("slider"):
-    discard b.padding(4)
-    discard b.fitX().fitY()
-    discard b.gap(4)
-
-    b.node("slider-label"):
-      discard b.styleIndex(UiStyleIndexSlider)
-      discard b.copyTextStyleIndex(UiStyleIndexSliderText)
-      discard b.fitX().fitY()
-      discard b.text(label & ": " & fmt2(value))
+  discard b.pushId(cast[uint64](value.addr))
+  b.layoutHorizontal("slider"):
+    discard b.fitX().fitY().gap(6)
 
     b.node("slider-track"):
       discard b.styleIndex(UiStyleIndexSliderTrack)
@@ -352,6 +343,11 @@ proc slider*(b: var UiBuilder, label: string, value: var float32, minValue = 0.0
         discard b.position(thumbX, 1)
         discard b.size(thumbWidth, trackHeight - 2.0'f32)
         discard b.fillBackground()
+
+    b.node("slider-value"):
+      discard b.copyTextStyleIndex(UiStyleIndexSliderText)
+      discard b.fitX().fitY()
+      discard b.text(fmt2(value))
   discard b.popId()
 
   let input = b.frameCtx.input
@@ -385,6 +381,241 @@ proc slider*(b: var UiBuilder, label: string, value: var float32, minValue = 0.0
     return changed
 
   false
+
+const dragFloatNegInf: float32 = -Inf
+const dragFloatInf: float32 = Inf
+const dragFloatHeight*: float32 = 18.0'f32
+const dragFloatDefaultWidth*: float32 = 160.0'f32
+const dragFloatMultiWidth*: float32 = 64.0'f32
+
+type DragFloatLabelMode* = enum
+  ## Per-component label style for the multi-component dragFloat widgets.
+  dfNoLabel
+  dfXYZW
+  dfRGBA
+  dfCustom
+
+proc dragFloat*(b: var UiBuilder, value: var float32,
+    default: float32,
+    minValue: float32 = dragFloatNegInf,
+    maxValue: float32 = dragFloatInf,
+    trackWidth: float32 = dragFloatDefaultWidth): bool =
+  prof("dragFloat")
+  let trackHeight = dragFloatHeight
+
+  let hasMin = minValue != dragFloatNegInf
+  let hasMax = maxValue != dragFloatInf
+  let low = if hasMin: minValue else: -3.4028235e38'f32
+  let high = if hasMax: maxValue else: 3.4028235e38'f32
+  let span = max(0.0001'f32, high - low)
+
+  var trackNodeId = noneNodeId()
+  var trackNodeIdx = -1
+  var previousTrackIndex = -1
+
+  var normalized = 0.0'f32
+  if hasMin and hasMax and high > low:
+    normalized = clamp((value - low) / (high - low), 0.0'f32, 1.0'f32)
+  let fillWidth = normalized * trackWidth
+
+  b.node:
+    b.debugName("dragfloat-track")
+    discard b.styleIndex(UiStyleIndexSliderTrack)
+    discard b.size(trackWidth, trackHeight)
+    discard b.fillBackground()
+    trackNodeId = b.currentNode.id
+    trackNodeIdx = b.stack[^1]
+    previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
+    let trackHovered = b.wasHovered(trackNodeIdx, includeChildren = true)
+    discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
+
+    if hasMin and hasMax:
+      b.node("dragfloat-fill"):
+        discard b.styleIndex(UiStyleIndexSliderFill)
+        discard b.size(max(0.0'f32, fillWidth), trackHeight)
+        discard b.fillBackground()
+
+    b.node("dragfloat-text"):
+      discard b.copyTextStyleIndex(UiStyleIndexSliderText)
+      discard b.fitX().fitY().alignCenter().noHover()
+      discard b.text(fmt2(value))
+
+
+  let input = b.frameCtx.input
+  previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
+  let dragging =
+    previousTrackIndex >= 0 and
+    MouseLeft in input.mouseDown and
+    b.wasHeld(trackNodeIdx, includeChildren = true)
+
+  let clicked =
+    previousTrackIndex >= 0 and
+    b.wasClicked(trackNodeIdx, includeChildren = true)
+
+  let dragged =
+    previousTrackIndex >= 0 and
+    b.wasDragged(trackNodeIdx, includeChildren = true)
+
+  let rightClicked =
+    previousTrackIndex >= 0 and
+    b.wasRightClicked(trackNodeIdx, includeChildren = true)
+
+  var changed = false
+  if rightClicked and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
+    if value != default:
+      value = default
+      changed = true
+
+  if (dragging or clicked) and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
+    if hasMin and hasMax and high > low:
+      if clicked and not dragging and not dragged:
+        # click-to-set: map pointer position along the track to the value
+        let track = b.nodes[trackNodeIdx].addr
+        let trackPos = b.absoluteNodePosPrev(trackNodeId, trackNodeIdx)
+        let pointerT =
+          if track.size.x <= 0.0'f32:
+            0.0'f32
+          else:
+            clamp((input.mouse.x - trackPos.x) / track.size.x, 0.0'f32, 1.0'f32)
+        let newValue = low + pointerT * span
+        if abs(newValue - value) > 0.0001'f32:
+          value = newValue
+          changed = true
+      elif dragging:
+        let delta = input.mouseDelta.x * (span / 200.0'f32)
+        if delta != 0.0'f32:
+          value += delta
+          if value < low: value = low
+          if value > high: value = high
+          changed = true
+    else:
+      if dragging:
+        let delta = input.mouseDelta.x * 1.0'f32
+        if delta != 0.0'f32:
+          value += delta
+          if hasMin and value < low: value = low
+          if hasMax and value > high: value = high
+          changed = true
+
+  changed
+
+proc dragFloatLabelStrings(mode: DragFloatLabelMode, n: int, custom: seq[string]): seq[string] =
+  result = newSeq[string](n)
+  case mode
+  of dfNoLabel:
+    discard
+  of dfXYZW:
+    let all = ["X", "Y", "Z", "W"]
+    for i in 0 ..< n:
+      result[i] = all[i]
+  of dfRGBA:
+    let all = ["R", "G", "B", "A"]
+    for i in 0 ..< n:
+      result[i] = all[i]
+  of dfCustom:
+    for i in 0 ..< n:
+      result[i] = if i < custom.len: custom[i] else: ""
+
+proc dragFloatComponent(b: var UiBuilder, value: var float32,
+    default: float32,
+    minValue: float32,
+    maxValue: float32,
+    trackWidth: float32,
+    labelText: string): bool =
+  prof("dragFloatComponent")
+  if labelText.len > 0:
+    b.node:
+      discard b.size(dragFloatHeight * labelText.len.float32, dragFloatHeight)
+      b.node:
+        discard b.fitX().fitY().alignCenter().noHover()
+        discard b.copyTextStyleIndex(UiStyleIndexSliderText)
+        discard b.text(labelText)
+  let changed = b.dragFloat(value, default, minValue, maxValue, trackWidth = trackWidth)
+  changed
+
+proc dragFloat2*(b: var UiBuilder, v: var Vec2,
+    defaults, mins, maxs: array[2, float32],
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  prof("dragFloat2")
+  let labels = dragFloatLabelStrings(labelMode, 2, customLabels)
+  var changed = false
+  b.layoutHorizontal:
+    discard b.fit()
+    let c0 = b.dragFloatComponent(v.x, defaults[0], mins[0], maxs[0], trackWidth, labels[0])
+    let c1 = b.dragFloatComponent(v.y, defaults[1], mins[1], maxs[1], trackWidth, labels[1])
+    changed = c0 or c1
+  changed
+
+proc dragFloat2*(b: var UiBuilder, v: var Vec2,
+    default: float32,
+    minValue: float32 = dragFloatNegInf,
+    maxValue: float32 = dragFloatInf,
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  let defaults = [default, default]
+  let mins = [minValue, minValue]
+  let maxs = [maxValue, maxValue]
+  b.dragFloat2(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
+
+proc dragFloat3*(b: var UiBuilder, v: var Vec3,
+    defaults, mins, maxs: array[3, float32],
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  prof("dragFloat3")
+  let labels = dragFloatLabelStrings(labelMode, 3, customLabels)
+  var changed = false
+  b.layoutHorizontal:
+    discard b.fit()
+    let c0 = b.dragFloatComponent(v.x, defaults[0], mins[0], maxs[0], trackWidth, labels[0])
+    let c1 = b.dragFloatComponent(v.y, defaults[1], mins[1], maxs[1], trackWidth, labels[1])
+    let c2 = b.dragFloatComponent(v.z, defaults[2], mins[2], maxs[2], trackWidth, labels[2])
+    changed = c0 or c1 or c2
+  changed
+
+proc dragFloat3*(b: var UiBuilder, v: var Vec3,
+    default: float32,
+    minValue: float32 = dragFloatNegInf,
+    maxValue: float32 = dragFloatInf,
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  let defaults = [default, default, default]
+  let mins = [minValue, minValue, minValue]
+  let maxs = [maxValue, maxValue, maxValue]
+  b.dragFloat3(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
+
+proc dragFloat4*(b: var UiBuilder, v: var Vec4,
+    defaults, mins, maxs: array[4, float32],
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  prof("dragFloat4")
+  let labels = dragFloatLabelStrings(labelMode, 4, customLabels)
+  var changed = false
+  b.layoutHorizontal:
+    discard b.fit()
+    let c0 = b.dragFloatComponent(v.x, defaults[0], mins[0], maxs[0], trackWidth, labels[0])
+    let c1 = b.dragFloatComponent(v.y, defaults[1], mins[1], maxs[1], trackWidth, labels[1])
+    let c2 = b.dragFloatComponent(v.z, defaults[2], mins[2], maxs[2], trackWidth, labels[2])
+    let c3 = b.dragFloatComponent(v.w, defaults[3], mins[3], maxs[3], trackWidth, labels[3])
+    changed = c0 or c1 or c2 or c3
+  changed
+
+proc dragFloat4*(b: var UiBuilder, v: var Vec4,
+    default: float32,
+    minValue: float32 = dragFloatNegInf,
+    maxValue: float32 = dragFloatInf,
+    labelMode: DragFloatLabelMode = dfXYZW,
+    customLabels: seq[string] = @[],
+    trackWidth: float32 = dragFloatMultiWidth): bool =
+  let defaults = [default, default, default, default]
+  let mins = [minValue, minValue, minValue, minValue]
+  let maxs = [maxValue, maxValue, maxValue, maxValue]
+  b.dragFloat4(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
 
 type DropdownStorage = ref object of UiNodeStorageData
   open: bool
@@ -756,7 +987,7 @@ proc tableCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: 
     let col = data.columns[c]
     case col.kind
     of TableColumnFixed:
-      colWidths[c] = max(0.0'f32, col.fixedWidth)
+      colWidths[c] = max(0.0'f32, col.fixedWidth.round())
       colWeights[c] = 0.0'f32
     of TableColumnFit:
       colWidths[c] = 0.0'f32
@@ -778,7 +1009,7 @@ proc tableCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: 
       let child = b.frame.nodes[childIdx].addr
       let c = i mod cols
       if colWeights[c] == 0.0'f32 and data.columns[c].kind == TableColumnFit:
-        colWidths[c] = max(colWidths[c], child.size.x)
+        colWidths[c] = max(colWidths[c], child.size.x).round()
       inc i
 
   var usedByBase = 0.0'f32
@@ -793,7 +1024,7 @@ proc tableCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: 
   if totalWeight > 0.0'f32 and freeSpace > 0.0'f32:
     for c in 0 ..< cols:
       if colWeights[c] > 0.0'f32:
-        colWidths[c] = max(0.0'f32, freeSpace * (colWeights[c] / totalWeight))
+        colWidths[c] = max(0.0'f32, freeSpace * (colWeights[c] / totalWeight)).round()
 
   let layoutCheckpoint = b.frame.arena[].checkpoint()
   var rowHeights = b.frame.arena[].allocArray(rowCount, float32)

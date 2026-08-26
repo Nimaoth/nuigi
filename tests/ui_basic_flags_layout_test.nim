@@ -613,22 +613,22 @@ proc testSliderClickUpdatesValue() =
 
   discard b.beginUiFrame(300.0, 120.0)
   let sliderIdx = b.nodes.len
-  discard b.slider("Blend", value, 0.0'f32, 100.0'f32)
+  discard b.slider(value, 0.0'f32, 100.0'f32)
 
   require(b.childCount(sliderIdx) >= 2, "slider should create label and track children")
   let pressInput = UiInputSnapshot(
-    mouse: vec2(84, 32),
+    mouse: vec2(84, 12),
     mousePressed: {MouseLeft},
   )
   discard b.beginUiFrame(300.0, 120.0, input = pressInput)
-  discard b.slider("Blend", value, 0.0'f32, 100.0'f32)
+  discard b.slider(value, 0.0'f32, 100.0'f32)
 
   let releaseInput = UiInputSnapshot(
-    mouse: vec2(84, 32),
+    mouse: vec2(84, 12),
     mouseReleased: {MouseLeft},
   )
   discard b.beginUiFrame(300.0, 120.0, input = releaseInput)
-  let changed = b.slider("Blend", value, 0.0'f32, 100.0'f32)
+  let changed = b.slider(value, 0.0'f32, 100.0'f32)
 
   require(changed, "slider should report changed after click on track")
   require(approxEq(value, 50.0'f32), "slider click should map pointer x to range value")
