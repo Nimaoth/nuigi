@@ -112,6 +112,7 @@ proc cpBuildSv(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let hsvH = storage.h
   let s = storage.s
   let v = storage.v
+  let markerCol = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
 
   let cTL = hsvToRgb(hsvH, 0.0'f32, 1.0'f32)
   let cTR = hsvToRgb(hsvH, 1.0'f32, 1.0'f32)
@@ -125,7 +126,7 @@ proc cpBuildSv(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
 
   let cx = x0 + s * w
   let cy = y0 + (1.0'f32 - v) * hgt
-  cpPushCircleFan(vbuf, vi, cx, cy, 6.0'f32, rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32), 12)
+  cpPushCircleFan(vbuf, vi, cx, cy, 6.0'f32, markerCol, 12)
   cpPushCircleFan(vbuf, vi, cx, cy, 4.0'f32, hsvToRgb(hsvH, s, v, 1.0'f32), 12)
 
   cpSetCommands(b, nodeIdx, vbuf, vi)
@@ -142,6 +143,7 @@ proc cpBuildHue(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let hgt = n.size.y
   let x1 = x0 + w
   let y1 = y0 + hgt
+  let markerCol = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
 
   let segs = 32
   let vcount = segs * 6 + 6
@@ -157,7 +159,7 @@ proc cpBuildHue(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
     cpPushQuad(vbuf, vi, x0s, y0, x1s, y1, c0, c1, c0, c1)
 
   let ix = x0 + storage.h * w
-  cpPushRect(vbuf, vi, ix - 1.0'f32, y0, ix + 1.0'f32, y1, rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+  cpPushRect(vbuf, vi, ix - 1.0'f32, y0, ix + 1.0'f32, y1, markerCol)
 
   cpSetCommands(b, nodeIdx, vbuf, vi)
 
@@ -173,6 +175,9 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let hgt = n.size.y
   let x1 = x0 + w
   let y1 = y0 + hgt
+  let markerCol = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
+  let tileLight = b.themeStyle(UiStyleIndexRowAlt)[].fillColor
+  let tileDark = b.themeStyle(UiStyleIndexTabBarContent)[].fillColor
 
   let tile = 8.0'f32
   let cols = max(1, int(ceil(w / tile)))
@@ -183,8 +188,7 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   for r in 0 ..< rows:
     for c in 0 ..< cols:
       let even = (r + c) mod 2 == 0
-      let col = if even: rgba(0.62'f32, 0.62'f32, 0.62'f32, 1.0'f32)
-                else: rgba(0.34'f32, 0.34'f32, 0.34'f32, 1.0'f32)
+      let col = if even: tileLight else: tileDark
       let x0c = x0 + c.float32 * tile
       let y0c = y0 + r.float32 * tile
       cpPushRect(vbuf, vi, x0c, y0c, min(x0c + tile, x1), min(y0c + tile, y1), col)
@@ -197,7 +201,7 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
     rgba(base.r, base.g, base.b, 1.0'f32))
 
   let ix = x0 + storage.a * w
-  cpPushRect(vbuf, vi, ix - 1.0'f32, y0, ix + 1.0'f32, y1, rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+  cpPushRect(vbuf, vi, ix - 1.0'f32, y0, ix + 1.0'f32, y1, markerCol)
 
   cpSetCommands(b, nodeIdx, vbuf, vi)
 
@@ -221,7 +225,8 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
     discard b.fillBackground()
     discard b.backgroundColor(value)
     discard b.borderWidth(if swatchOpen or swatchHovered: 2.0'f32 else: 1.0'f32)
-    discard b.borderColor(if swatchOpen or swatchHovered: rgba(0.95, 0.86, 0.40, 1.0) else: rgba(0.64, 0.28, 0.34, 1.0))
+    discard b.borderColor(if swatchOpen or swatchHovered: b.themeStyle(UiStyleIndexButtonHover)[].borderColor
+                          else: b.themeStyle(UiStyleIndexButton)[].borderColor)
 
   if b.previousOutput.clickedId == swatchId:
     if b.focusedNode == swatchId:
@@ -253,9 +258,9 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
         discard b.padding(6)
         discard b.gap(6)
         discard b.fillBackground()
-        discard b.backgroundColor(rgba(0.10, 0.12, 0.16, 0.98))
+        discard b.backgroundColor(b.themeStyle(UiStyleIndexTooltip)[].fillColor)
         discard b.borderWidth(1)
-        discard b.borderColor(rgba(0.34, 0.40, 0.50, 1.0))
+        discard b.borderColor(b.themeStyle(UiStyleIndexTooltip)[].borderColor)
         discard b.cornerRadius(4)
 
         b.node("cp-sv"):
@@ -275,7 +280,7 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
 
         b.node("cp-readout"):
           discard b.fitX().fitY().padding(2)
-          discard b.fillBackground().backgroundColor(rgba(0.0, 0.0, 0.0, 0.3))
+          discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexTabBarContent)[].fillColor)
           discard b.text(toHex(value))
 
   if pickerOpen:

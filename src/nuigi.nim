@@ -1437,27 +1437,34 @@ proc clearFrameOutput(output: var UiFrameOutput) =
 proc initDefaultThemeStyles*(): seq[UiStyle] =
   result = newSeq[UiStyle](UiThemeStyleSlotCount)
 
-  let panelFill = UiColor(r: 0.14'f32, g: 0.16'f32, b: 0.20'f32, a: 1.0'f32)
-  let panelBorder = UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32)
-  let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
-  let softFill = UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.16'f32, a: 0.96'f32)
+  let grayWindow = UiColor(r: 0.07'f32, g: 0.07'f32, b: 0.08'f32, a: 1.0'f32)
+  let grayBg = UiColor(r: 0.07'f32, g: 0.07'f32, b: 0.08'f32, a: 1.0'f32)
+  let graySurface = UiColor(r: 0.10'f32, g: 0.10'f32, b: 0.11'f32, a: 1.0'f32)
+  let grayButton = UiColor(r: 0.18'f32, g: 0.18'f32, b: 0.20'f32, a: 1.0'f32)
+  let graySurfaceHi = UiColor(r: 0.15'f32, g: 0.15'f32, b: 0.16'f32, a: 1.0'f32)
+  let grayHover = UiColor(r: 0.26'f32, g: 0.26'f32, b: 0.29'f32, a: 1.0'f32)
+  let grayBorder = UiColor(r: 0.22'f32, g: 0.22'f32, b: 0.25'f32, a: 1.0'f32)
+  let grayBorderStrong = UiColor(r: 0.32'f32, g: 0.32'f32, b: 0.36'f32, a: 1.0'f32)
+  let grayScroll = UiColor(r: 0.30'f32, g: 0.30'f32, b: 0.34'f32, a: 0.95'f32)
+  let accent = UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32)
+  let softFill = UiColor(r: 0.10'f32, g: 0.10'f32, b: 0.11'f32, a: 0.96'f32)
 
   result[int(UiStyleIndexDefault) - 1] = UiStyle(
   )
   result[int(UiStyleIndexWindow) - 1] = UiStyle(
     borderWidth: 1.0'f32,
     cornerRadius: 6.0'f32,
-    fillColor: softFill,
-    borderColor: panelBorder,
+    fillColor: grayWindow,
+    borderColor: grayBorderStrong,
   )
   result[int(UiStyleIndexWindowTitleBar) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 8.0'f32,
-    fillColor: UiColor(r: 0.18'f32, g: 0.22'f32, b: 0.30'f32, a: 1.0'f32),
+    fillColor: graySurface,
   )
   result[int(UiStyleIndexWindowTitleBarCollapseHover) - 1] = UiStyle(
     cornerRadius: 2.0'f32,
-    fillColor: UiColor(r: 0.28'f32, g: 0.32'f32, b: 0.40'f32, a: 1.0'f32),
+    fillColor: grayHover,
   )
   result[int(UiStyleIndexWindowContent) - 1] = UiStyle(
     paddingX: 0.0'f32,
@@ -1465,222 +1472,222 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
   )
   result[int(UiStyleIndexWindowResizeHandle) - 1] = UiStyle(
     cornerRadius: 2.0'f32,
-    fillColor: UiColor(r: 0.44'f32, g: 0.52'f32, b: 0.64'f32, a: 0.95'f32),
+    fillColor: grayBorderStrong,
   )
   result[int(UiStyleIndexButton) - 1] = UiStyle(
     paddingX: 4.0'f32,
     paddingY: 0.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.22'f32, g: 0.25'f32, b: 0.30'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
+    fillColor: grayButton,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexButtonHover) - 1] = UiStyle(
     paddingX: 4.0'f32,
     paddingY: 0.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.30'f32, g: 0.35'f32, b: 0.42'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.56'f32, g: 0.62'f32, b: 0.72'f32, a: 1.0'f32),
+    fillColor: grayHover,
+    borderColor: accent,
   )
   result[int(UiStyleIndexCheckbox) - 1] = UiStyle(
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: panelFill,
-    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+    fillColor: grayButton,
+    borderColor: grayBorderStrong,
   )
   result[int(UiStyleIndexCheckboxHover) - 1] = UiStyle(
-    borderWidth: 2.0'f32,
+    borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.20'f32, g: 0.23'f32, b: 0.30'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.86'f32, g: 0.90'f32, b: 0.98'f32, a: 1.0'f32),
+    fillColor: grayHover,
+    borderColor: accent,
   )
   result[int(UiStyleIndexCheckboxMark) - 1] = UiStyle(
-    fillColor: accentWarm,
+    fillColor: accent,
   )
   result[int(UiStyleIndexSlider) - 1] = UiStyle(
   )
   result[int(UiStyleIndexSliderTrack) - 1] = UiStyle(
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: panelFill,
-    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: grayBorderStrong,
   )
   result[int(UiStyleIndexSliderTrackHover) - 1] = UiStyle(
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.20'f32, g: 0.23'f32, b: 0.30'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.58'f32, g: 0.64'f32, b: 0.76'f32, a: 1.0'f32),
+    fillColor: grayHover,
+    borderColor: grayBorderStrong,
   )
   result[int(UiStyleIndexSliderFill) - 1] = UiStyle(
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.34'f32, g: 0.58'f32, b: 0.86'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.34'f32, g: 0.58'f32, b: 0.86'f32, a: 1.0'f32),
+    fillColor: accent,
+    borderColor: accent,
   )
   result[int(UiStyleIndexSliderHandle) - 1] = UiStyle(
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32),
+    fillColor: accent,
   )
   result[int(UiStyleIndexScrollBar) - 1] = UiStyle(
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.92'f32),
+    fillColor: UiColor(r: 0.10'f32, g: 0.10'f32, b: 0.11'f32, a: 0.92'f32),
   )
   result[int(UiStyleIndexScrollBarHandle) - 1] = UiStyle(
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.45'f32, g: 0.52'f32, b: 0.64'f32, a: 0.95'f32),
+    fillColor: grayScroll,
   )
   result[int(UiStyleIndexScrollBarHandleHover) - 1] = UiStyle(
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.62'f32, g: 0.70'f32, b: 0.84'f32, a: 0.98'f32),
+    fillColor: grayBorderStrong,
   )
   result[int(UiStyleIndexTabBarHeader) - 1] = UiStyle(
     paddingX: 4.0'f32,
     paddingY: 4.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 6.0'f32,
-    fillColor: UiColor(r: 0.14'f32, g: 0.18'f32, b: 0.24'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.34'f32, g: 0.42'f32, b: 0.54'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexTabBarItem) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 2.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.20'f32, g: 0.24'f32, b: 0.30'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.42'f32, g: 0.48'f32, b: 0.58'f32, a: 1.0'f32),
+    fillColor: grayButton,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexTabBarItemActive) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 2.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.34'f32, g: 0.42'f32, b: 0.56'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.88'f32, g: 0.76'f32, b: 0.30'f32, a: 1.0'f32),
+    fillColor: grayHover,
+    borderColor: accent,
   )
   result[int(UiStyleIndexTabBarContent) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 6.0'f32,
-    fillColor: UiColor(r: 0.11'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.30'f32, g: 0.38'f32, b: 0.50'f32, a: 1.0'f32),
+    fillColor: grayBg,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexTextField) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 6.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.12'f32, g: 0.15'f32, b: 0.20'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.40'f32, g: 0.46'f32, b: 0.58'f32, a: 1.0'f32),
+    fillColor: grayBg,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexTextFieldFocused) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.15'f32, g: 0.18'f32, b: 0.25'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.60'f32, g: 0.70'f32, b: 0.90'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: accent,
   )
   result[int(UiStyleIndexTextFieldHint) - 1] = UiStyle(
   )
   result[int(UiStyleIndexTextCursor) - 1] = UiStyle(
-    fillColor: UiColor(r: 0.94'f32, g: 0.94'f32, b: 0.97'f32, a: 1.0'f32),
+    fillColor: accent,
   )
   result[int(UiStyleIndexMenu) - 1] = UiStyle(
     paddingX: 4.0'f32,
     paddingY: 4.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 6.0'f32,
-    fillColor: UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.16'f32, a: 0.98'f32),
-    borderColor: UiColor(r: 0.32'f32, g: 0.38'f32, b: 0.48'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexMenuItem) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.0'f32),
-    borderColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.22'f32, a: 0.0'f32),
+    fillColor: UiColor(r: 0.13'f32, g: 0.13'f32, b: 0.14'f32, a: 0.0'f32),
+    borderColor: UiColor(r: 0.13'f32, g: 0.13'f32, b: 0.14'f32, a: 0.0'f32),
   )
   result[int(UiStyleIndexMenuItemHover) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.22'f32, g: 0.28'f32, b: 0.38'f32, a: 1.0'f32),
+    fillColor: grayHover,
+    borderColor: grayHover,
   )
   result[int(UiStyleIndexMenuBar) - 1] = UiStyle(
     paddingX: 4.0'f32,
     paddingY: 4.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 0.0'f32,
-    fillColor: UiColor(r: 0.18'f32, g: 0.22'f32, b: 0.30'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+    fillColor: graySurfaceHi,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexPanel) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 8.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.12'f32, g: 0.16'f32, b: 0.22'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+    fillColor: grayWindow,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexStage) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 8.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.15'f32, g: 0.17'f32, b: 0.22'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.28'f32, g: 0.33'f32, b: 0.42'f32, a: 1.0'f32),
+    fillColor: grayWindow,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexCard) - 1] = UiStyle(
     paddingX: 10.0'f32,
     paddingY: 10.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.16'f32, g: 0.20'f32, b: 0.28'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.34'f32, g: 0.40'f32, b: 0.52'f32, a: 1.0'f32),
+    fillColor: grayWindow,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexHeader) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
-    borderWidth: 1.0'f32,
+    borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.20'f32, g: 0.25'f32, b: 0.34'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.30'f32, g: 0.36'f32, b: 0.46'f32, a: 1.0'f32),
+    fillColor: graySurfaceHi,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexRow) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 3.0'f32,
-    fillColor: UiColor(r: 0.12'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.12'f32, g: 0.14'f32, b: 0.19'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: graySurface,
   )
   result[int(UiStyleIndexRowAlt) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 3.0'f32,
-    fillColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.23'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.14'f32, g: 0.17'f32, b: 0.23'f32, a: 1.0'f32),
+    fillColor: graySurfaceHi,
+    borderColor: graySurfaceHi,
   )
   result[int(UiStyleIndexTooltip) - 1] = UiStyle(
     paddingX: 8.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.10'f32, g: 0.12'f32, b: 0.18'f32, a: 0.98'f32),
-    borderColor: UiColor(r: 0.36'f32, g: 0.42'f32, b: 0.54'f32, a: 1.0'f32),
+    fillColor: graySurface,
+    borderColor: grayBorder,
   )
   result[int(UiStyleIndexAccent) - 1] = UiStyle(
     paddingX: 6.0'f32,
     paddingY: 6.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: UiColor(r: 0.40'f32, g: 0.64'f32, b: 0.90'f32, a: 1.0'f32),
-    borderColor: UiColor(r: 0.40'f32, g: 0.64'f32, b: 0.90'f32, a: 1.0'f32),
+    fillColor: accent,
+    borderColor: accent,
   )
 
 
@@ -1688,8 +1695,8 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
 proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   result = newSeq[UiNodeText](UiTextStyleCount)
 
-  let defaultText = UiColor(r: 0.92'f32, g: 0.92'f32, b: 0.92'f32, a: 1.0'f32)
-  let accentWarm = UiColor(r: 0.92'f32, g: 0.82'f32, b: 0.24'f32, a: 1.0'f32)
+  let defaultText = UiColor(r: 0.86'f32, g: 0.86'f32, b: 0.88'f32, a: 1.0'f32)
+  let accentWarm = UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32)
 
   result[int(UiStyleIndexDefaultText) - 1] = UiNodeText(
     fontSize: 14,
@@ -1809,7 +1816,7 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   result[int(UiStyleIndexHeadingText) - 1] = UiNodeText(
     fontSize: 18,
     text: "Heading".uiString,
-    textColor: UiColor(r: 0.96'f32, g: 0.92'f32, b: 0.78'f32, a: 1.0'f32),
+    textColor: UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32),
   )
   result[int(UiStyleIndexMutedText) - 1] = UiNodeText(
     fontSize: 12,
@@ -1819,7 +1826,7 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   result[int(UiStyleIndexHeaderText) - 1] = UiNodeText(
     fontSize: 12,
     text: "Header".uiString,
-    textColor: UiColor(r: 0.96'f32, g: 0.90'f32, b: 0.55'f32, a: 1.0'f32),
+    textColor: UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32),
   )
 
 proc rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =

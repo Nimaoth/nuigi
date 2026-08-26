@@ -24,6 +24,8 @@ var debugPanelState: DebugPanel = DebugPanel()
 var debugPanelState2: DebugPanel = DebugPanel()
 var themeEditorState: ThemeEditor = ThemeEditor()
 var gSampleCount: GPUSampleCount = GPU_SAMPLECOUNT_8
+var gMsaaSelected = 3
+var gFontSelected = 0
 var gFps = 0.0
 var gFrame = 0.0
 var gTick = 0.0
@@ -400,38 +402,91 @@ proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY:
       discard b.fit().padding(10).fontId(testFont).text(display).alignCenter()
 
 proc buildSettingsWindow(b: var UiBuilder) =
-  b.window("Settings", 0, 0, 400, 600):
+  b.window("Settings", 0, 0, 420, 640):
     b.scrollBox():
       discard b.sizeToParentX().fitY()
       b.layoutVertical:
-        discard b.sizeToParentX().fitY().padding(4)
+        discard b.fillX().fitY().padding(12).gap(12)
 
         b.node():
-          discard b.height(10)
+          discard b.fillX().fitY().padding(2)
+          discard b.backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
+          discard b.copyTextStyleIndex(UiStyleIndexHeadingText)
+          discard b.text("Performance")
 
-        b.buildSettingsMetricRow("  FPS", metric = 0, maxY = 120, precision = 0)
+        b.buildSettingsMetricRow("FPS", metric = 0, maxY = 120, precision = 0)
         b.buildSettingsMetricRow("Frame", metric = 1, maxY = 8,  precision = 1)
-        b.buildSettingsMetricRow(" Tick", metric = 2, maxY = 8,  precision = 1)
+        b.buildSettingsMetricRow("Tick", metric = 2, maxY = 8,  precision = 1)
 
-        if b.button("MSAAx1"):
-          gSampleCount = GPU_SAMPLECOUNT_1
-        if b.button("MSAAx2"):
-          gSampleCount = GPU_SAMPLECOUNT_2
-        if b.button("MSAAx4"):
-          gSampleCount = GPU_SAMPLECOUNT_4
-        if b.button("MSAAx8"):
-          gSampleCount = GPU_SAMPLECOUNT_8
-        if b.button("Font: subpixel"):
-          gFontRender.flags = {
-            FontRenderFlag.SubpixelPhasing,
-            FontRenderFlag.PixelSnapping,
-          }
-        if b.button("Font: pixel snapped"):
-          gFontRender.flags = {FontRenderFlag.PixelSnapping}
-        if b.button("Font: fractional"):
-          gFontRender.flags = {}
+        b.node():
+          discard b.fillX().fitY().padding(2)
+          discard b.backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
+          discard b.copyTextStyleIndex(UiStyleIndexHeadingText)
+          discard b.text("Rendering")
 
-        discard b.checkbox("Show Profiler (nuigi)", gShowNuiProfiler)
+        b.tableLayout([tableColumnFit(), tableColumnFill()], 14, 10):
+          discard b.fit()
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("MSAA Samples")
+          if b.dropdown(["1x", "2x", "4x", "8x"], gMsaaSelected):
+            case gMsaaSelected
+            of 0: gSampleCount = GPU_SAMPLECOUNT_1
+            of 1: gSampleCount = GPU_SAMPLECOUNT_2
+            of 2: gSampleCount = GPU_SAMPLECOUNT_4
+            else: gSampleCount = GPU_SAMPLECOUNT_8
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Profiler Overlay")
+          discard b.checkbox("", gShowNuiProfiler)
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Demo")
+          discard b.checkbox("", gShowDemoWindow)
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Theme Editor")
+          discard b.checkbox("", b.showThemeEditor)
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Debug Panel")
+          discard b.checkbox("", b.showDebugPanel)
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Debug Panel 2")
+          discard b.checkbox("", b.showDebugPanel2)
+
+        b.node():
+          discard b.fillX().fitY().padding(2)
+          discard b.backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
+          discard b.copyTextStyleIndex(UiStyleIndexHeadingText)
+          discard b.text("Text")
+
+        b.tableLayout([tableColumnFit(), tableColumnFill()], 14, 10):
+          discard b.fit()
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Font Hinting")
+          if b.dropdown(["Subpixel", "Pixel snapped", "Fractional"], gFontSelected):
+            case gFontSelected
+            of 0: gFontRender.flags = {
+                FontRenderFlag.SubpixelPhasing,
+                FontRenderFlag.PixelSnapping,
+              }
+            of 1: gFontRender.flags = {FontRenderFlag.PixelSnapping}
+            else: gFontRender.flags = {}
 
 proc buildUi(b: var UiBuilder) =
   prof("buildUi")

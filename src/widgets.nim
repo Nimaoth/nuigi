@@ -255,7 +255,8 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
   var boxNodeIdx = -1
 
   discard b.pushId(label)
-  b.layoutHorizontalReverse("checkbox"):
+  b.layoutHorizontalReverse:
+    b.debugName("checkbox")
     discard b.fitX().fitY()
     discard b.gap(6)
 
@@ -263,32 +264,36 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     if fillXInVertical and parent != nil and LayoutVertical in parent.flags:
       discard b.fillX()
 
-    b.node("checkbox-box"):
-      discard b.styleIndex(UiStyleIndexCheckbox)
-      discard b.size(14, 14)
-      discard b.fillBackground()
-      discard b.alignCenter()
-      boxNodeIdx = b.nodes.high
-      boxNodeId = b.currentNode.id
-
-      b.node("checkbox-mark"):
-        discard b.styleIndex(UiStyleIndexCheckboxMark)
-        discard b.alignCenter()
-        b.animate(b.wasClicked(boxNodeIdx, includeChildren = true)):
-          if value:
-            discard b.sizeAnim(8, 8)
-          else:
-            discard b.sizeAnim(0, 0)
+    b.node():
+      discard b.padding(2).fit()
+      b.node("checkbox-box"):
+        discard b.styleIndex(UiStyleIndexCheckbox)
+        let defaultTextSize = b.themeTextStyle(UiStyleIndexDefaultText)[].fontSize
+        discard b.size(defaultTextSize, defaultTextSize)
         discard b.fillBackground()
+        discard b.alignCenter()
+        boxNodeIdx = b.nodes.high
+        boxNodeId = b.currentNode.id
 
-      let boxIsHovered = b.wasHovered(boxNodeIdx, includeChildren = true)
-      discard b.styleIndex(if boxIsHovered: UiStyleIndexCheckboxHover else: UiStyleIndexCheckbox)
+        b.node("checkbox-mark"):
+          discard b.styleIndex(UiStyleIndexCheckboxMark)
+          discard b.alignCenter()
+          b.animate(b.wasClicked(boxNodeIdx, includeChildren = true)):
+            if value:
+              discard b.sizeAnim(defaultTextSize - 6, defaultTextSize - 6)
+            else:
+              discard b.sizeAnim(0, 0)
+          discard b.fillBackground()
 
-    b.node("checkbox-label"):
-      # discard b.padding(4)
-      discard b.copyTextStyleIndex(UiStyleIndexLabel)
-      discard b.fillX().fitX().fitY().alignCenter()
-      discard b.text(label)
+        let boxIsHovered = b.wasHovered(boxNodeIdx, includeChildren = true)
+        discard b.styleIndex(if boxIsHovered: UiStyleIndexCheckboxHover else: UiStyleIndexCheckbox)
+
+    if label != "":
+      b.node("checkbox-label"):
+        # discard b.padding(4)
+        discard b.copyTextStyleIndex(UiStyleIndexLabel)
+        discard b.fillX().fitX().fitY().alignCenter()
+        discard b.text(label)
   discard b.popId()
 
   previousBoxNodeIndex = b.previousNodeIndex(boxNodeId, boxNodeIdx)

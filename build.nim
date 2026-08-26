@@ -211,26 +211,6 @@ proc buildNuiDemo(compiler: NimCompiler) =
     createDir("build")
     copyFile("assets/nuigi-demo.html", "build/nuigi-demo.html")
 
-proc buildDemoNim2() =
-  let passthroughArgs = passthroughArgs.join(" ")
-  createDir("build")
-  shellCapture(
-    &"nim c -o:demo-nim2.exe --cc:clang --d:debug --path:src {passthroughArgs} src/demo/demo_window.nim",
-    "demo-nim2"
-  )
-
-proc buildDemoNimony() =
-  let passthroughArgs = passthroughArgs.join(" ")
-  createDir("build")
-  shellCapture(
-    &"nimony c -o:demo-nimony.exe --path:src {passthroughArgs} src/demo/demo_window.nim",
-    "demo-nimony"
-  )
-
-proc buildDemo() =
-  buildDemoNim2()
-  buildDemoNimony()
-
 proc buildUiTestNim2() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
@@ -355,7 +335,7 @@ proc main() =
   of "clean":
     removeDir("./build", false)
 
-  of "nuigi-demo":
+  of "demo", "nuigi-demo":
     buildNuiDemo(compiler)
 
   of "ui-test":
@@ -366,15 +346,6 @@ proc main() =
 
   of "ui-test-nimony":
     buildUiTestNimony()
-
-  of "demo":
-    buildDemo()
-
-  of "demo-nim2":
-    buildDemoNim2()
-
-  of "demo-nimony":
-    buildDemoNimony()
 
   of "shader":
     buildShader()

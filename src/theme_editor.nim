@@ -268,7 +268,7 @@ proc themeEditor*(b: var UiBuilder, themeEditor: var ThemeEditor): var UiBuilder
       else:
         int(UiStyleIndexDefault)
 
-  b.window(ThemeTitle, 170, 180, 555.0'f32, 800.0'f32):
+  b.window(ThemeTitle, 500, 180, 555.0'f32, 800.0'f32):
     b.layoutVertical("theme-editor-root"):
       discard b.fillX().fillY().gap(6)
 

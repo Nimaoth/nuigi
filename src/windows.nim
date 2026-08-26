@@ -208,7 +208,7 @@ proc applyWindowResizeHighlight(b: var UiBuilder, edges: set[WindowResizeEdge]) 
   let style = b.currentNodeStyle()
   var widths = style[].resolvedBorderWidths
   var colors = style[].resolvedBorderColors
-  let highlightColor = rgba(1.0'f32, 0.86'f32, 0.16'f32, 1.0'f32)
+  let highlightColor = b.themeStyle(UiStyleIndexAccent).borderColor
   if ResizeLeft in edges:
     widths.left = 2.0'f32
     colors.left = highlightColor
