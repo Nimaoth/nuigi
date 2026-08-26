@@ -309,7 +309,8 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
   prof("slider")
   let trackWidth = 160.0'f32
   let trackHeight = 18.0'f32
-  let thumbWidth = 10.0'f32
+  let lineThickness = 4.0'f32
+  let handleDiameter = 14.0'f32
   let low = min(minValue, maxValue)
   let high = max(minValue, maxValue)
   let span = max(0.0001'f32, high - low)
@@ -319,8 +320,14 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
   var trackNodeIdx = -1
   var previousTrackIndex = -1
   var normalized = clamp((value - low) / span, 0.0'f32, 1.0'f32)
-  var thumbX = normalized * max(0.0'f32, trackWidth - thumbWidth)
-  var fillWidth = max(thumbWidth, normalized * trackWidth)
+  let handleCenter = clamp(
+    normalized * trackWidth,
+    handleDiameter / 2.0'f32,
+    max(handleDiameter / 2.0'f32, trackWidth - handleDiameter / 2.0'f32))
+  let thumbX = handleCenter - handleDiameter / 2.0'f32
+  let fillWidth = thumbX + 2
+  let lineY = (trackHeight - lineThickness) / 2.0'f32
+  let handleY = (trackHeight - handleDiameter) / 2.0'f32
 
   discard b.pushId(cast[uint64](value.addr))
   b.layoutHorizontal("slider"):
@@ -329,7 +336,6 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
     b.node("slider-track"):
       discard b.styleIndex(UiStyleIndexSliderTrack)
       discard b.size(trackWidth, trackHeight)
-      discard b.fillBackground()
 
       trackNodeId = b.currentNode.id
       trackNodeIdx = b.stack[^1]
@@ -337,15 +343,29 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
       let trackHovered = b.wasHovered(trackNodeIdx, includeChildren = true)
       discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
 
+      b.node("slider-line"):
+        discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
+        discard b.position(0, lineY)
+        discard b.size(trackWidth, lineThickness)
+        discard b.cornerRadius(lineThickness / 2.0'f32)
+        discard b.fillBackground()
+
       b.node("slider-fill"):
         discard b.styleIndex(UiStyleIndexSliderFill)
-        discard b.size(fillWidth, trackHeight)
+        discard b.position(0, lineY)
+        discard b.size(max(0.0'f32, fillWidth), lineThickness)
+        discard b.cornerRadius(lineThickness / 2.0'f32)
         discard b.fillBackground()
 
       b.node("slider-thumb"):
+        let handleColor = b.themeStyle(UiStyleIndexSliderHandle)[].fillColor
         discard b.styleIndex(UiStyleIndexSliderHandle)
-        discard b.position(thumbX, 1)
-        discard b.size(thumbWidth, trackHeight - 2.0'f32)
+        discard b.position(thumbX, handleY)
+        discard b.size(handleDiameter, handleDiameter)
+        discard b.cornerRadius(handleDiameter / 2.0'f32)
+        discard b.borderWidth(2.0'f32)
+        discard b.borderColor(handleColor)
+        discard b.backgroundColor(UiColor(r: 0.0'f32, g: 0.0'f32, b: 0.0'f32, a: 0.0'f32))
         discard b.fillBackground()
 
     b.node("slider-value"):
