@@ -1437,16 +1437,13 @@ proc buildDemoUi*(b: var UiBuilder) =
         let itemSize = b.nodes[itemNodeIndex].size
         b.menu(demoMenuOpen, itemPos.x, itemPos.y + itemSize.y):
           b.menuItem:
-            b.label("Font size")
-          do:
-            discard
-          do:
-            var f = b.defaultText.fontSize
-            b.layoutHorizontal:
-              discard b.fitX().fitY().gap(2)
-              b.label("Font Size")
-              discard b.dragFloat(f, 11, 2.0'f32, 100.0'f32)
-            b.defaultText.fontSize = f
+            var f = b.fontScale
+            b.layoutHorizontalReverse:
+              discard b.fillX().fit().gap(2)
+              discard b.dragFloat(f, 1, 0.1'f32, 4.0'f32)
+              b.label("Font Size"):
+                discard b.fitX()
+            b.fontScale = f
 
           b.menuItem:
             var showThemeEditor = b.showThemeEditor

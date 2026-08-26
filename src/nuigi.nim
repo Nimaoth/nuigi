@@ -425,6 +425,7 @@ type
     measureText*: UiMeasureTextFn
     buildTextMesh*: nil UiBuildTextMeshFn
     fonts*: Table[string, UiFontId]
+    fontScale*: float32
 
     # Event tracing for debugging: maps a node id to the sequence of events
     # recorded for that node during the current frame. Cleared at frame start.
@@ -658,8 +659,8 @@ proc buildTextArrangement(b: UiBuilder, text: ptr UiNodeText, key: uint64, maxWi
   prof("buildTextArrangement")
   result = UiTextArrangementCacheEntry()
   if b.measureText != nil:
-    result.arrangement = b.measureText(text.text.value, text.fontId, text.fontSize, maxWidth)
-  result.arrangement.fontSize = text.fontSize
+    result.arrangement = b.measureText(text.text.value, text.fontId, text.fontSize * b.fontScale, maxWidth)
+  result.arrangement.fontSize = text.fontSize * b.fontScale
   result.key = key
   result.text = text.text
   result.fontSize = text.fontSize
@@ -668,7 +669,7 @@ proc buildTextArrangement(b: UiBuilder, text: ptr UiNodeText, key: uint64, maxWi
 
 proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): ptr UiTextArrangement {.raises: [].} =
   prof("getTextArrangement")
-  let key = makeTextArrangementKey(text.text, text.fontSize, text.fontId, maxWidth)
+  let key = makeTextArrangementKey(text.text, text.fontSize * b.fontScale, text.fontId, maxWidth)
   inc b.textArrangementTick
 
   let idx = onRaiseQuit(b.textArrangementLookup.getOrDefault(key, -1))
@@ -1705,7 +1706,7 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
     textColor: defaultText,
   )
   result[int(UiStyleIndexSmallText) - 1] = UiNodeText(
-    fontSize: 10,
+    fontSize: 12,
     text: "Small".uiString,
     textColor: defaultText,
   )
@@ -1928,6 +1929,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     defaultTransform: UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32)),
     currentNode: sentinelNode.addr,
     lastNode: sentinelNode.addr,
+    fontScale: 1,
   )
   result.measureText = measureText
   result.buildTextMesh = buildTextMesh

@@ -560,8 +560,7 @@ proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimc
   label.add(n[].nodeDebugName())
   label.add(" id=")
   label.add($nodeIdValue(n.id))
-  discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
-  discard b.fontSize(13)
+  discard b.copyTextStyleIndex(UiStyleIndexSmallText)
   discard b.text(label)
 
 proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.discardable.} =
@@ -639,7 +638,8 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
               else:
                 let itemCenter = float(targetItemIdx) * float(itemH) + float(itemH) * 0.5
                 debugPanel.scrollOffset2 = itemCenter - float(vpH) * 0.5
-        b.virtualList(debugPanel.scrollOffset2, cutoff, 24.0, buildDebugListEntry, cast[int](debugPanel.addr))
+        let rowHeight = b.themeTextStyle(UiStyleIndexDefaultText).fontSize * b.fontScale + 6
+        b.virtualList(debugPanel.scrollOffset2, cutoff, rowHeight, buildDebugListEntry, cast[int](debugPanel.addr))
 
   if debugPanel.rowHoverTarget != noneNodeId():
     b.applyDebugOutlineToNode(debugPanel.rowHoverTarget, cutoff)
