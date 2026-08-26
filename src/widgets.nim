@@ -104,8 +104,8 @@ proc button*(b: var UiBuilder, text: string): bool =
   prof("button")
   let nodeIndex = b.nodes.len
 
-  discard b.pushId(text)
-  b.node("button"):
+  b.node:
+    b.debugName("button")
     discard b.copyStyleIndex(UiStyleIndexButton)
     discard b.copyTextStyleIndex(UiStyleIndexButtonText)
     discard b.fitX().fitY()
@@ -122,7 +122,6 @@ proc button*(b: var UiBuilder, text: string): bool =
         b.themeStyle(UiStyleIndexButton)[].fillColor)
       if b.previousOutput.clickedId == nodeId:
         b.ensureNodeStyle(b.currentNode).fillColor = b.themeTextStyle(UiStyleIndexButtonText)[].textColor
-  discard b.popId()
 
   let id = b.nodes[nodeIndex].id
   b.previousOutput.clickedId == id
