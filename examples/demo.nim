@@ -29,6 +29,9 @@ var gFontSelected = 0
 var gFps = 0.0
 var gFrame = 0.0
 var gTick = 0.0
+var gRenderOnDemand = true
+var gHadInputThisFrame = false
+var gNumFramesWithoutInput = 0
 
 # --- per-frame plot history for the settings window graphs ----------------------
 const PlotHistoryLen = 256
@@ -345,6 +348,7 @@ proc beginInputFrame() =
   gInputAccum.keysReleased = {}
   gInputAccum.keysRepeated = {}
   gInputAccum.textInput.setLen(0)
+  gHadInputThisFrame = false
 
 proc makeInputSnapshot(): UiInputSnapshot =
   UiInputSnapshot(
@@ -436,6 +440,12 @@ proc buildSettingsWindow(b: var UiBuilder) =
             of 1: gSampleCount = GPU_SAMPLECOUNT_2
             of 2: gSampleCount = GPU_SAMPLECOUNT_4
             else: gSampleCount = GPU_SAMPLECOUNT_8
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Render On Demand")
+          discard b.checkbox("", gRenderOnDemand)
 
           b.node():
             discard b.fit()
@@ -879,6 +889,7 @@ proc mainLoop() {.cdecl.} =
 
         var ev {.noinit.}: sdl3.Event
         while pollEvent(ev):
+          gHadInputThisFrame = true
           accumulateSdlInput(ev)
           case ev.`type`
           of EVENT_WINDOW_CLOSE_REQUESTED:
@@ -905,6 +916,28 @@ proc mainLoop() {.cdecl.} =
             echo "running is false"
             emscripten_cancel_main_loop()
           return
+
+      if b.anythingAnimating or b.virtualNodes.len > 0 or b.middleDragScroll != vec2(0.0'f32, 0.0'f32):
+        gHadInputThisFrame = true
+      if gRenderOnDemand:
+        for a in b.animations:
+          var active = false
+          if a.unchangedFrames == 0:
+            for f in a.fields:
+              if f.currentValue != f.targetValue:
+                active = true
+                break
+          if active:
+            gHadInputThisFrame = true
+      if not gHadInputThisFrame:
+        inc gNumFramesWithoutInput
+      else:
+        gNumFramesWithoutInput = 0
+      if gRenderOnDemand and gNumFramesWithoutInput > 1:
+        # On-demand mode: skip rebuilding and rendering when no input arrived.
+        when not defined(wasm):
+          sleep(10)
+        return
 
       var outputWidth: cint = 0
       var outputHeight: cint = 0

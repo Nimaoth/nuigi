@@ -392,6 +392,7 @@ type
     animationSpeed*: float32 = 1.0'f32
     configuringAnimationStack*: seq[bool]
     animationTriggerStack*: seq[bool]
+    anythingAnimating*: bool
     windows*: UiNodeId
     overlays*: UiNodeId
     focusedNode*: UiNodeId
@@ -1458,8 +1459,8 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     borderColor: grayBorderStrong,
   )
   result[int(UiStyleIndexWindowTitleBar) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 8.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 4.0'f32,
     fillColor: graySurface,
   )
   result[int(UiStyleIndexWindowTitleBarCollapseHover) - 1] = UiStyle(
@@ -2275,6 +2276,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   b.autoChildCounter.setLen(0)
   b.configuringAnimationStack.setLen(0)
   b.animationTriggerStack.setLen(0)
+  b.anythingAnimating = false
 
   let rootId = rootNodeId()
 

@@ -220,6 +220,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
           -maxScrollVelocity,
           maxScrollVelocity)
         wheelScrolled = true
+        if storage.scrollVelocityY != 0:
+          b.anythingAnimating = true
 
       let dragScroll = b.middleDragScroll.y
       if b.previousOutput.scrolledId == b.currentNode.id and abs(dragScroll) > 0.0001'f32:
@@ -233,6 +235,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
       storage.scrollVelocityY = storage.scrollVelocityY / (1.0'f32 + scrollDamping * frameTime)
       if abs(storage.scrollVelocityY) <= 1'f32:
         storage.scrollVelocityY = 0.0'f32
+      if storage.scrollVelocityY != 0:
+        b.anythingAnimating = true
 
       discard b.deferBuild(dynamicVirtualListDeferredBuild)
 

@@ -607,6 +607,7 @@ var transformDemoPivotY = 0.5'f32
 var transformDemoAnimate = true
 
 proc buildTransformExamples*(b: var UiBuilder) =
+  b.anythingAnimating = true
   b.layoutVertical("transform-demos"):
     discard b.fillX().fitY().padding(8).gap(8)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -1264,6 +1265,7 @@ proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   plotTime += b.frameCtx.animationTick.float64
 
 proc buildCustomRenderExamples*(b: var UiBuilder) =
+  b.anythingAnimating = true
   b.layoutVertical("custom-render-root"):
     discard b.fillX().fitY().padding(8).gap(8)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -1359,6 +1361,7 @@ proc buildCustomDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
     discard b.customRenderCommands(buildCustomQuadCommands(b.frame.arena, contentOrigin, contentSize, float32(b.frameCtx.time), mouseX, mouseY))
 
 proc buildCustomMaterialExample*(b: var UiBuilder) =
+  b.anythingAnimating = true
   let parent = b.currentNode
   b.layoutVertical("custom-material-root"):
     if FitY in parent.flags:
