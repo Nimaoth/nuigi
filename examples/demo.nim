@@ -1004,7 +1004,7 @@ proc mainLoop() {.cdecl.} =
     when defined(wasm):
       emscripten_cancel_main_loop()
 
-proc main =
+proc main(quitImmediately: bool) =
   sdl3.setLogPriorities(LOG_PRIORITY_VERBOSE)
   assert sdl3.init(INIT_VIDEO or INIT_GAMEPAD or INIT_EVENTS or INIT_AUDIO), "std init"
   echo "sdl init ok"
@@ -1092,9 +1092,31 @@ proc main =
   when defined(wasm):
     emscripten_set_main_loop(mainLoop, 0, true)
   else:
-    while running:
-      mainLoop()
+    if not quitImmediately:
+      while running:
+        mainLoop()
 
     destroyWindow(gWindow)
 
-main()
+var quitImmediately = false
+
+when not defined(wasm) and not defined(nimony):
+  import std/parseopt
+  var optParser = initOptParser("")
+  for kind, key, val in optParser.getopt():
+    case kind
+    of cmdArgument:
+      discard
+
+    of cmdLongOption, cmdShortOption:
+      case key
+      of "test":
+        quitImmediately = true
+
+      else:
+        discard
+
+    of cmdEnd: assert(false) # cannot happen
+
+main(quitImmediately)
+

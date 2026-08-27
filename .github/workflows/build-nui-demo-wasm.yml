@@ -84,6 +84,9 @@ jobs:
       - name: Build demo native
         run: ./build.exe demo
 
+      - name: Run demo native
+        run: ./bin/demo.exe --test
+
       # - name: Build test nimony
       #   run: ./build.exe test --nimony
 
