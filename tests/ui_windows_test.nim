@@ -23,11 +23,12 @@ proc buildWindowFrame(b: var UiBuilder, input = default(UiInputSnapshot)) =
 proc windowOrder(b: UiBuilder): seq[UiNodeId] =
   let windowSpaceIndex = b.currentNodeIndex(b.windows)
   if windowSpaceIndex < 0:
-    return
+    return @[]
+  result = @[]
   for childIndex in b.children(windowSpaceIndex):
     result.add b.frame.nodes[childIndex].id
 
-proc windowSpaceStorage(b: var UiBuilder): WindowSpaceStorage =
+proc windowSpaceStorage(b: var UiBuilder): nil WindowSpaceStorage =
   let windowSpaceIndex = b.currentNodeIndex(b.windows)
   if windowSpaceIndex < 0:
     return nil
@@ -36,7 +37,7 @@ proc windowSpaceStorage(b: var UiBuilder): WindowSpaceStorage =
     return cast[WindowSpaceStorage](stored)
   nil
 
-proc windowStorage(b: var UiBuilder, windowId: UiNodeId): WindowStorage =
+proc windowStorage(b: var UiBuilder, windowId: UiNodeId): nil WindowStorage =
   let windowIndex = b.currentNodeIndex(windowId)
   if windowIndex < 0:
     return nil
@@ -77,9 +78,10 @@ proc testPressedWindowMovesToFront() =
     "pressing the first window should move it to the top")
   let storage = b.windowSpaceStorage()
   require(storage != nil, "window space should persist activation data in node storage")
-  require(storage.windows.len == 2, "window space should track both windows")
-  require(storage.windows[0].lastActive > storage.windows[1].lastActive,
-    "pressed window should have the newest activation value")
+  if storage != nil:
+    require(storage.windows.len == 2, "window space should track both windows")
+    require(storage.windows[0].lastActive > storage.windows[1].lastActive,
+      "pressed window should have the newest activation value")
 
 proc testTitleBarMatchesWindowTopCornerRadii() =
   var b = newBuilder(fixedMeasureText)
@@ -110,7 +112,8 @@ proc testWindowResizesFromBottomRightCorner() =
   ))
   let storage = b.windowStorage(firstId)
   require(storage != nil, "first window should have persistent storage")
-  require(storage.resizeEdges == {ResizeRight, ResizeBottom},
+  if storage != nil:
+    require(storage.resizeEdges == {ResizeRight, ResizeBottom},
     "pressing near the bottom-right corner should capture both edges")
 
   b.buildWindowFrame(UiInputSnapshot(
@@ -120,10 +123,11 @@ proc testWindowResizesFromBottomRightCorner() =
     mouseDown: {MouseLeft},
   ))
 
-  require(storage.pos == vec2(0.0'f32),
-    "bottom-right resizing should not move the window origin")
-  require(storage.size == vec2(220.0'f32, 215.0'f32),
-    "bottom-right resizing should apply mouse delta to both dimensions")
+  if storage != nil:
+    require(storage.pos == vec2(0.0'f32),
+      "bottom-right resizing should not move the window origin")
+    require(storage.size == vec2(220.0'f32, 215.0'f32),
+      "bottom-right resizing should apply mouse delta to both dimensions")
   let firstIndex = b.currentNodeIndex(firstId)
   require(firstIndex >= 0, "first window should exist after resizing")
   let style = b.nodeStyle(firstIndex)

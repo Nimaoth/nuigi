@@ -69,6 +69,12 @@ jobs:
       - name: Compile build.nim
         run: nim c -o:build.exe build.nim
 
+      - name: Build test nim2
+        run: ./build.exe test --nim2
+
+      # - name: Build test nimony
+      #   run: ./build.exe test --nimony
+
       # 2) Build the nuigi-demo as wasm (html + js + wasm) via the build tool.
       #    EMSDK is read by build.nim to activate the emscripten environment.
       - name: Build nuigi-demo with wasm

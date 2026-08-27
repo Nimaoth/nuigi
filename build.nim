@@ -201,7 +201,7 @@ proc buildNuiDemo(compiler: NimCompiler) =
   of Nim2Ic:
     shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
-    shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
     shell &"nimony l -d:llvm {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:

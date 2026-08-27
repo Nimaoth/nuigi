@@ -112,7 +112,8 @@ when defined(emscripten):
 else:
   {.push callConv: cdecl, dynlib: LibName.}
 
-{.passL: "-lSDL3".}
+when defined(sdl3):
+  {.passL: "-lSDL3".}
 type cva_list* {.importc: "va_list", header: "<stdarg.h>".} = object
 type cwchar_t {.importc: "wchar_t", header: "<wchar.h>".} = object
 
