@@ -125,13 +125,13 @@ proc configureWindowNode(b: var UiBuilder, storage: WindowStorage) =
       currentValue: previousScale.x,
       targetValue: 0.0'f32,
       speed: 18.0'f32,
-      fieldOffset: UiNodeTransformScaleXFieldOffset,
+      fieldOffset: UiNodeFieldTransformScaleX,
     ),
     UiFieldAnimation(
       currentValue: previousScale.y,
       targetValue: 0.0'f32,
       speed: 18.0'f32,
-      fieldOffset: UiNodeTransformScaleYFieldOffset,
+      fieldOffset: UiNodeFieldTransformScaleY,
     ),
   ]
   discard b.virtualizeNode(closeScaleAnimation)

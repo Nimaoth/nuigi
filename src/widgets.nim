@@ -223,13 +223,13 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
               currentValue: previousScale.x,
               targetValue: 0.0'f32,
               speed: 18.0'f32,
-              fieldOffset: UiNodeTransformScaleXFieldOffset,
+              fieldOffset: UiNodeFieldTransformScaleX,
             ),
             UiFieldAnimation(
               currentValue: previousScale.y,
               targetValue: 0.0'f32,
               speed: 18.0'f32,
-              fieldOffset: UiNodeTransformScaleYFieldOffset,
+              fieldOffset: UiNodeFieldTransformScaleY,
             ),
           ]
           discard b.virtualizeNode(closeScaleAnim)
