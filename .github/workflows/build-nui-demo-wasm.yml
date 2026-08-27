@@ -77,10 +77,10 @@ jobs:
 
       # 2) Build the nuigi-demo as wasm (html + js + wasm) via the build tool.
       #    EMSDK is read by build.nim to activate the emscripten environment.
-      - name: Build nuigi-demo with wasm
+      - name: Build demo with wasm
         env:
           EMSDK: ${{ github.workspace }}/emsdk
-        run: ./emsdk/emsdk.ps1 activate 4.0.10; ./build.exe nuigi-demo --wasm
+        run: ./emsdk/emsdk.ps1 activate 4.0.10; ./build.exe demo --wasm
 
       # 3) Collect the wasm artifacts for GitHub Pages
       - name: Stage GitHub Pages artifact
