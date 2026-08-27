@@ -43,6 +43,8 @@ jobs:
             deps
             nimcache
             emsdk
+            build
+            bin
           key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}
 
       - name: Download emscripten
@@ -70,6 +72,7 @@ jobs:
         run: nim c -o:build.exe build.nim
 
       - name: Build sdl
+        # if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: ./build.exe deps
 
       - name: Build test nim2
