@@ -45,7 +45,7 @@ jobs:
             emsdk
             build
             bin
-          key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}
+          key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}-2
 
       - name: Download emscripten
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -74,7 +74,7 @@ jobs:
       - name: Compile build.nim
         run: nim c -o:build.exe build.nim
 
-      - name: Build sdl
+      - name: Build deps (sdl3, freetype, harfbuzz, fribidi)
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: ./build.exe deps
 
@@ -84,7 +84,7 @@ jobs:
       - name: Build demo native
         run: ./build.exe demo
 
-      - name: Run demo native
+      - name: Run demo
         run: ./bin/demo.exe --test
 
       # - name: Build test nimony
