@@ -855,9 +855,18 @@ when defined(wasm):
       else:
         discard
 
+proc perfNow*(): uint64 =
+  when not defined(nimony):
+    when defined(emscripten):
+      return uint64(emscriptenGetNow() * 1e6)
+    else:
+      return getTicksNS()
+  else:
+    return 0
+
 proc mainLoop() {.cdecl.} =
   try:
-    var now = profNow().float64 / NS_PER_SECOND.float64
+    var now = perfNow().float64 / NS_PER_SECOND.float64
     let dt = now - last
     last = now
 
@@ -873,7 +882,7 @@ proc mainLoop() {.cdecl.} =
     when defined(wasm):
       let renderer = gWindow.getRenderer()
 
-    let tickStart = (profNow().float64 / NS_PER_MS.float64).float32
+    let tickStart = (perfNow().float64 / NS_PER_MS.float64).float32
 
     block:
       prof("tick")
@@ -958,7 +967,7 @@ proc mainLoop() {.cdecl.} =
             gRender2D.clear()
             b.renderNewUi()
 
-      let tickDt = (profNow().float64 / NS_PER_MS.float64).float32 - tickStart
+      let tickDt = (perfNow().float64 / NS_PER_MS.float64).float32 - tickStart
       gFps = fps
       gFrame = dt * 1000
       gTick = tickDt
@@ -1011,7 +1020,7 @@ proc main(quitImmediately: bool) =
     return
   discard gWindow.startTextInput()
 
-  const debug = true
+  const debug = defined(sdlDebug)
   when debug:
     const gpuDebugHint = cstring"SDL_RENDER_GPU_DEBUG"
     const gpuDebugVal = cstring"1"
@@ -1063,7 +1072,7 @@ proc main(quitImmediately: bool) =
     discard gFontRender.addFontFace("assets/dontuse/fonts/ProFont Bold For Powerline.ttf")
 
   # Initialize shared loop state and start the loop.
-  last = profNow().float64 / NS_PER_SECOND.float64 - 0.016
+  last = perfNow().float64 / NS_PER_SECOND.float64 - 0.016
   fps = 60.0
   running = true
 
