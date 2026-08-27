@@ -282,23 +282,23 @@ proc buildUiTestNim2() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nim c -r -o:bin/tests/ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
+    &"nim c -r -o:bin/ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
     "ui-mesh-style-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/tests/ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim",
+    &"nim c -r -o:bin/ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim",
     "ui-windows-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/tests/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
+    &"nim c -r -o:bin/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
     "ui-dynamic-virtualist-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/tests/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+    &"nim c -r -o:bin/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
     "ui-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/tests/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
+    &"nim c -r -o:bin/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
     "ui-bench-nim2"
   )
 
@@ -307,23 +307,23 @@ proc buildUiTestNimony() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nimony c -r -o:ui-mesh-style-test-nimony.exe --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
+    &"nimony c -r -o:bin/ui-mesh-style-test-nimony.exe --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
     "ui-mesh-style-test-nimony"
   )
   shellCapture(
-    &"nimony c -r -o:ui-windows-test-nimony.exe --path:src {passthroughArgs} tests/ui_windows_test.nim",
+    &"nimony c -r -o:bin/ui-windows-test-nimony.exe --path:src {passthroughArgs} tests/ui_windows_test.nim",
     "ui-windows-test-nimony"
   )
   shellCapture(
-    &"nimony c -r -o:ui-dynamic-virtualist-test-nimony.exe --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
+    &"nimony c -r -o:bin/ui-dynamic-virtualist-test-nimony.exe --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
     "ui-dynamic-virtualist-test-nimony"
   )
   shellCapture(
-    &"nimony c -r -o:ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+    &"nimony c -r -o:bin/ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
     "ui-test-nimony"
   )
   shellCapture(
-    &"nimony c -r -o:ui-bench-nimony.exe --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
+    &"nimony c -r -o:bin/ui-bench-nimony.exe --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
     "ui-bench-nimony"
   )
 
