@@ -72,6 +72,12 @@ jobs:
       - name: Build test nim2
         run: ./build.exe test --nim2
 
+      - name: Build sdl
+        run: ./build.exe deps
+
+      - name: Build demo native
+        run: ./build.exe demo
+
       # - name: Build test nimony
       #   run: ./build.exe test --nimony
 

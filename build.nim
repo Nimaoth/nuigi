@@ -89,6 +89,7 @@ proc mesonCommand(args: string): string =
   return &"meson {args}"
 
 proc buildSdl3(debug = false) =
+  echo "buildSdl3"
   createDir("vendor")
   if not dirExists("vendor/SDL"):
     shell("git clone https://github.com/libsdl-org/SDL", "vendor")
@@ -96,7 +97,8 @@ proc buildSdl3(debug = false) =
   let mode = if debug: "Debug" else: "Release"
   shell &"\"{windowsMsBuildPath}/MSBuild.exe\" VisualC/SDL/SDL.vcxproj /p:Configuration={mode} /p:Platform=x64", "vendor/SDL"
   createDir("build")
-  copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.dll", "./SDL3.dll"
+  createDir("bin")
+  copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.dll", "./bin/SDL3.dll"
   copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.lib", "./build/SDL3.lib"
 
 proc buildSdl3Wasm() =
@@ -131,25 +133,28 @@ proc buildSdl3Wasm() =
   echo "wasm: SDL3 wasm static lib ready at build/sdl3_wasm/libSDL3.a"
 
 proc buildFreetype(debug = false) =
+  echo "buildFreetype"
   createDir("vendor")
   if not dirExists("vendor/freetype"):
     shell("git clone https://gitlab.freedesktop.org/freetype/freetype.git", "vendor")
   let mode = if debug: "Debug" else: "Release"
   shell &"\"{windowsMsBuildPath}/MSBuild.exe\" -t:Rebuild -p:Configuration={mode} -p:Platform=x64 MSBuild.sln", "vendor/freetype"
   createDir("build")
-  copyFile &"vendor/freetype/objs/x64/{mode}/freetype.dll", "./freetype.dll"
+  copyFile &"vendor/freetype/objs/x64/{mode}/freetype.dll", "./bin/freetype.dll"
   copyFile &"vendor/freetype/objs/x64/{mode}/freetype.lib", "./build/freetype.lib"
 
 proc buildHarfbuzz() =
+  echo "buildHarfbuzz"
   createDir("vendor")
   if not dirExists("vendor/harfbuzz"):
     shell("git clone https://github.com/harfbuzz/harfbuzz", "vendor")
 
   createDir("build")
   shell "clang++.exe -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
-  copyFile &"build/harfbuzz.dll", "./harfbuzz.dll"
+  copyFile &"build/harfbuzz.dll", "./bin/harfbuzz.dll"
 
 proc buildFribidi() =
+  echo "buildFribidi"
   createDir("vendor")
   if not dirExists("vendor/fribidi"):
     shell("git clone https://github.com/fribidi/fribidi", "vendor")
@@ -177,7 +182,7 @@ proc buildFribidi() =
     echo "Could not find built FriBidi DLL in vendor/fribidi/", fribidiBuildDir
     quit(0)
 
-  copyFile(builtDll, "./fribidi.dll")
+  copyFile(builtDll, "./bin/fribidi.dll")
   if builtLib.len > 0:
     copyFile(builtLib, "./build/fribidi.lib")
 
@@ -212,6 +217,7 @@ proc buildNuiDemo(compiler: NimCompiler) =
     copyFile("assets/nuigi-demo.html", "build/nuigi-demo.html")
 
 proc buildUiTestNim2() =
+  echo "buildUiTestNim2"
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
@@ -236,6 +242,7 @@ proc buildUiTestNim2() =
   )
 
 proc buildUiTestNimony() =
+  echo "buildUiTestNimony"
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
@@ -279,6 +286,9 @@ proc buildUiTest(compiler: NimCompiler) =
 
 var optParser = initOptParser("")
 proc main() =
+  createDir("build")
+  createDir("bin")
+
   var cmd = "all"
   var compiler = Nim2
   var debug = false
@@ -352,6 +362,12 @@ proc main() =
 
   of "shader":
     buildShader()
+
+  of "deps":
+    buildSdl3()
+    buildFreetype()
+    buildHarfbuzz()
+    buildFribidi()
 
   of "all":
     buildSdl3()
