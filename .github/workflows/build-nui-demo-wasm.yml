@@ -45,7 +45,8 @@ jobs:
             emsdk
             build
             bin
-          key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}-2
+            vendor/harfbuzz/src
+          key: ${{ runner.os }}-nuigi-demo-wasm-${{ hashFiles('atlas.lock') }}-3
 
       - name: Download emscripten
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
