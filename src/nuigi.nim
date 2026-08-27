@@ -15,106 +15,232 @@ from "."/hash as nui_hash import Hash, `!&`, `!$`
 
 type
   MaterialId* = uint64
+    ## Opaque handle identifying a renderer-side material/pipeline used by
+    ## `CmdRawVertices` render commands. The UI does not interpret it; it is
+    ## passed through to the renderer.
 
 const
   textArrangementCacheCapacity = 512
 
 type
   UiFlag* = enum
-    AlignCenter
-    FillX, FillY
-    FitX, FitY
-    AnchorX, AnchorY
-    SizeXKnown, SizeYKnown
-    DrawText, WrapText, FillBackground
-    MaskChildren, PostProcessChildren, IsPostProcessing
-    LayoutVertical, LayoutHorizontal
-    FlexLayout, GridLayout
-    DirectionReverse
-    NoHover
-    NoChildHover
-    Scrollable
+    ## Per-node behavior flags stored in `UiFlags`. They drive layout
+    ## (sizing, anchoring, stacking), rendering, hit-testing, and animation.
+    SizeXKnown
+      ## Internal: the node's X size has been resolved this frame (layout bookkeeping).
+    SizeYKnown
+      ## Internal: the node's Y size has been resolved this frame (layout bookkeeping).
+    IsPostProcessing
+      ## Internal: the node is currently inside a post-processing pass, so a size change can
+      ## trigger a re-pass of its parent.
     SizeDirty
+      ## Internal: the node's size changed during post-processing, requiring a re-pass of descendants.
+    VirtualTree
+      ## Internal: the node was extracted into a virtual-node subtree (`extractVirtualTree`).
+    AlignCenter
+      ## Center children along the cross axis of a vertical/horizontal layout.
+    FillX
+      ## Child stretches to fill the remaining width of its parent's content area.
+    FillY
+      ## Child stretches to fill the remaining height of its parent's content area.
+    FitX
+      ## Node sizes to its content width (measured text or accumulated child extent).
+    FitY
+      ## Node sizes to its content height (measured text or accumulated child extent).
+    AnchorX
+      ## Position the node on the X axis via anchors (fractions of parent size + offsets).
+    AnchorY
+      ## Position the node on the Y axis via anchors (fractions of parent size + offsets).
+    DrawText
+      ## Node renders its `UiNodeText` string.
+    WrapText
+      ## Node text wraps within its measured width instead of staying on one line.
+    FillBackground
+      ## Node renders its style background fill (rect or rounded rect).
+    MaskChildren
+      ## Clip children to the node's bounds during rendering (pushes a clip rect).
+    PostProcessChildren
+      ## Node requires a layout post-processing pass over its children (anchored/fill/fit/stacking).
+    LayoutVertical
+      ## Stack children vertically, honoring `gap` and style padding.
+    LayoutHorizontal
+      ## Stack children horizontally, honoring `gap` and style padding.
+    FlexLayout
+      ## Lay out children with the CSS-flexbox-style engine (`nui_flex`).
+    GridLayout
+      ## Lay out children with the CSS-grid-style engine (`nui_grid`).
+    DirectionReverse
+      ## Reverse the order of children along the layout axis.
+    NoHover
+      ## The node itself is not hoverable; mouse hit-testing passes straight through it.
+    NoChildHover
+      ## Children of this node are not hoverable; hit-testing stops at this node.
+    Scrollable
+      ## Node can be scrolled (wheel / middle-drag) when its content exceeds its bounds.
     NodeStorageParent
-    VirtualNode
+      ## Node acts as a storage parent; its ID scopes child node-storage lookups.
     VirtualizeNode
+      ## Node should be promoted to a persistent virtual node if it is absent in a future frame.
 
   UiTraceMode* = enum
+    ## Controls which nodes have their events recorded in `UiBuilder.eventTraces`.
     TraceNone
+      ## Record no events.
     TraceAll
+      ## Record events for every node during the frame.
     TraceNodeId
+      ## Record events only for the node selected by `UiBuilder.traceNodeId`.
 
-  UiString* = object
+  UiString* = object ## Wrapper around string which caches the hash of the string.
     valueHash: Hash
-    value*: string
+      ## Cached FNV-1a hash of `value`, used for O(1) `==` and as the basis of node-ID hashing.
+    value: string
+      ## The underlying string content.
 
   UiFlags* = set[UiFlag]
+    ## Set of `UiFlag` behaviors attached to a node.
 
   UiNodeId* = distinct uint64
+    ## Stable per-frame identifier for a node. Zero (`noneNodeId`) is the sentinel
+    ## "no node"; auto-generated IDs are deterministic from the parent path, the
+    ## per-parent auto counter, and any active `pushId`/`popId` ID scope.
 
   UiMouseButton* = enum
+    ## Mouse buttons recognized by the UI input system.
     MouseLeft, MouseRight, MouseMiddle
 
   UiFieldAnimation* = object
+    ## A single animated float field of a node. One `UiFieldAnimation` exists per
+    ## animated field within a node's `UiAnimation` record.
     currentValue*: float32
+      ## The currently displayed value; stepped toward `targetValue` each frame.
     targetValue*: float32
+      ## The value the field eases toward.
     speed*: float32
-    fieldOffset*: UiNodeFloatField # Byte offset of float32 field in UiNode to animate to targetValue
+      ## Step rate; multiplied by `animationSpeed` and `animationTick` to get the per-frame blend.
+    fieldOffset*: UiNodeFloatField # Identifies field in UiNode to animate to targetValue
+      ## Which node field this track animates (a `UiNodeFloatField` byte offset).
     touchedFrame*: uint64
+      ## Frame index on which this track was last (re)touched via an `...Anim` mutator or `animatePos/Size`.
+
+  UiAnimation* = object
+    ## Per-node animation record keyed by node ID; holds one `UiFieldAnimation` track per animated field.
+    nodeId*: UiNodeId
+      ## Node this animation record belongs to.
+    fields*: seq[UiFieldAnimation]
+      ## The animated field tracks for this node.
+    unchangedFrames*: int
+      ## Number of consecutive frames with no active stepping; used to drop stale animations.
 
   UiNodeFloatField* = enum
+    ## Each animatable field inside `UiNode` or its side data (style, gap,
+    ## anchor, transform). Lets the generic animation engine animate any field without
+    ## per-field code.
     UiNodeFieldPosX
+      ## `UiNode.pos.x`
     UiNodeFieldPosY
+      ## `UiNode.pos.y`
     UiNodeFieldSizeX
+      ## `UiNode.size.x`
     UiNodeFieldSizeY
+      ## `UiNode.size.y`
     UiNodeFieldMinSizeX
+      ## `UiNode.minSize.x`
     UiNodeFieldMinSizeY
+      ## `UiNode.minSize.y`
     UiNodeFieldMaxSizeX
+      ## `UiNode.maxSize.x`
     UiNodeFieldMaxSizeY
+      ## `UiNode.maxSize.y`
     UiNodeFieldCursorX
+      ## `UiNode.cursor.x`
     UiNodeFieldCursorY
+      ## `UiNode.cursor.y`
     UiNodeFieldContentExtentX
+      ## `UiNode.contentExtent.x`
     UiNodeFieldContentExtentY
+      ## `UiNode.contentExtent.y`
     UiNodeFieldStylePaddingX
+      ## `UiStyle.paddingX`
     UiNodeFieldStylePaddingY
+      ## `UiStyle.paddingY`
     UiNodeFieldStyleBorderWidth
+      ## `UiStyle.borderWidth`
     UiNodeFieldStyleCornerRadius
+      ## `UiStyle.cornerRadius`
     UiNodeFieldStyleFillColorR
+      ## `UiStyle.fillColor.r`
     UiNodeFieldStyleFillColorG
+      ## `UiStyle.fillColor.g`
     UiNodeFieldStyleFillColorB
+      ## `UiStyle.fillColor.b`
     UiNodeFieldStyleFillColorA
+      ## `UiStyle.fillColor.a`
     UiNodeFieldStyleBorderColorR
+      ## `UiStyle.borderColor.r`
     UiNodeFieldStyleBorderColorG
+      ## `UiStyle.borderColor.g`
     UiNodeFieldStyleBorderColorB
+      ## `UiStyle.borderColor.b`
     UiNodeFieldStyleBorderColorA
+      ## `UiStyle.borderColor.a`
     UiNodeFieldStyleTextColorR
+      ## `UiNodeText.textColor.r`
     UiNodeFieldStyleTextColorG
+      ## `UiNodeText.textColor.g`
     UiNodeFieldStyleTextColorB
+      ## `UiNodeText.textColor.b`
     UiNodeFieldStyleTextColorA
+      ## `UiNodeText.textColor.a`
     UiNodeFieldGap
+      ## `UiFrame.gaps` entry referenced by `UiNode.gapIndex`.
     UiNodeFieldAnchorTopLeftX
+      ## `UiNodeAnchor.topLeft.x`
     UiNodeFieldAnchorTopLeftY
+      ## `UiNodeAnchor.topLeft.y`
     UiNodeFieldAnchorBottomRightX
+      ## `UiNodeAnchor.bottomRight.x`
     UiNodeFieldAnchorBottomRightY
+      ## `UiNodeAnchor.bottomRight.y`
     UiNodeFieldAnchorTopLeftOffsetX
+      ## `UiNodeAnchor.topLeftOffset.x`
     UiNodeFieldAnchorTopLeftOffsetY
+      ## `UiNodeAnchor.topLeftOffset.y`
     UiNodeFieldAnchorBottomRightOffsetX
+      ## `UiNodeAnchor.bottomRightOffset.x`
     UiNodeFieldAnchorBottomRightOffsetY
+      ## `UiNodeAnchor.bottomRightOffset.y`
     UiNodeFieldAnchorPivotX
+      ## `UiNodeAnchor.pivot.x`
     UiNodeFieldAnchorPivotY
+      ## `UiNodeAnchor.pivot.y`
     UiNodeFieldAnchoredOffsetX
+      ## `UiNode.pos` X offset applied by the anchor blend.
     UiNodeFieldAnchoredOffsetY
+      ## `UiNode.pos` Y offset applied by the anchor blend.
     UiNodeFieldTransformOffsetX
+      ## `UiNodeTransform.offset.x`
     UiNodeFieldTransformOffsetY
+      ## `UiNodeTransform.offset.y`
     UiNodeFieldTransformRotation
+      ## `UiNodeTransform.rotation`
     UiNodeFieldTransformScaleX
+      ## `UiNodeTransform.scale.x`
     UiNodeFieldTransformScaleY
+      ## `UiNodeTransform.scale.y`
     UiNodeFieldTransformPivotX
+      ## `UiNodeTransform.pivot.x`
     UiNodeFieldTransformPivotY
+      ## `UiNodeTransform.pivot.y`
 
   UiMouseButtons* = set[UiMouseButton]
+    ## Set of `UiMouseButton`s (used for down/pressed/released state).
 
   UiKey* = enum
+    ## Keyboard keys recognized by the UI input system. Each field name maps directly
+    ## to the physical key it represents: letters `KeyA`..`KeyZ`, digits `Key0`..`Key9`,
+    ## `KeyF1`..`KeyF12` function keys, `KeyKp*` numpad keys, and `KeyWorld1`/`KeyWorld2`
+    ## for locale-specific keys.
     KeyA, KeyB, KeyC, KeyD, KeyE, KeyF, KeyG, KeyH, KeyI, KeyJ, KeyK, KeyL, KeyM
     KeyN, KeyO, KeyP, KeyQ, KeyR, KeyS, KeyT, KeyU, KeyV, KeyW, KeyX, KeyY, KeyZ
     Key0, Key1, Key2, Key3, Key4, Key5, Key6, Key7, Key8, Key9
@@ -133,70 +259,135 @@ type
     KeyLeftBracket, KeyRightBracket, KeyGrave, KeyWorld1, KeyWorld2
 
   UiKeys* = set[UiKey]
+    ## Set of `UiKey`s (used for down/pressed/released/repeated state).
 
   UiModifier* = enum
-    ModShift, ModControl, ModAlt, ModSuper
+    ## Keyboard modifier keys.
+    ModShift
+      ## Shift key (left or right).
+    ModControl
+      ## Control key (left or right).
+    ModAlt
+      ## Alt key (left or right).
+    ModSuper
+      ## OS "super"/GUI key (left or right, e.g. Windows/Command).
 
   UiModifiers* = set[UiModifier]
+    ## Set of `UiModifier`s currently held.
 
   UiInputSnapshot* = object
+    ## Raw input for a single frame, fed into `beginUiFrame`. `computeFrameInteraction`
+    ## uses it (against the previous frame's node positions) to produce `UiFrameOutput`.
     frameIndex*: uint64
+      ## Monotonically increasing frame counter; also used as the "last access" stamp for node storage.
     mouse*: Vec2
+      ## Mouse cursor position in viewport pixels.
     mouseDelta*: Vec2
+      ## Mouse movement since the previous frame, in pixels.
     wheel*: Vec2
+      ## Scroll wheel delta this frame.
     mouseDown*: UiMouseButtons
+      ## Buttons currently held down.
     mousePressed*: UiMouseButtons
+      ## Buttons that went down this frame.
     mouseReleased*: UiMouseButtons
+      ## Buttons that went up this frame.
     keysDown*: UiKeys
+      ## Keyboard keys currently held down.
     keysPressed*: UiKeys
+      ## Keyboard keys that went down this frame.
     keysReleased*: UiKeys
+      ## Keyboard keys that went up this frame.
     keysRepeated*: UiKeys
+      ## Keyboard keys emitting auto-repeat this frame.
     modsDown*: UiModifiers
+      ## Modifier keys currently held.
     textInput*: string
+      ## Committed text typed this frame (for text fields).
 
   UiStyle* = object
+    ## Visual style for a node: padding, border, corner radius, fill/border colors,
+    ## plus per-corner/per-side overrides. Any non-default value in a `*Radii`/
+    ## `*Widths`/`*Colors` group activates that whole group (see `hasPerCornerRadii` etc.).
     paddingX*, paddingY*: float32
+      ## Inner padding applied on each axis before laying out children / drawing content.
     borderWidth*: float32
+      ## Uniform border width; fallback used when `borderWidths` is unset.
     cornerRadius*: float32
+      ## Uniform corner radius; fallback used when `cornerRadii` is unset.
     fillColor*: UiColor
+      ## Background fill color.
     borderColor*: UiColor
+      ## Border color; fallback used when `borderColors` is unset.
     cornerRadii*: UiCornerRadii
+      ## Per-corner radii (topLeft, topRight, bottomRight, bottomLeft).
     borderWidths*: UiBorderWidths
+      ## Per-side border widths (left, top, right, bottom).
     borderColors*: UiBorderColors
+      ## Per-side border colors (left, top, right, bottom).
 
   UiFontId* = int16
+    ## Handle identifying a loaded font face within the font atlas.
 
   UiNodeText* = object
+    ## Text payload attached to a node (lazily created via `ensureNodeText`).
     text*: UiString
+      ## The string to render (hash-cached for fast comparison/ID derivation).
     fontSize*: float32
+      ## Font size in pixels (before `UiBuilder.fontScale`).
     fontId*: UiFontId
+      ## Font face used to render `text`.
     textColor*: UiColor
+      ## Color of the rendered text.
     measuredTextSizeCache*: Vec2
+      ## Cached measured size of the laid-out text, invalidated by `measuredTextDirty`.
     measuredTextDirty*: bool
+      ## When true, `measuredTextSizeCache` must be recomputed.
 
   UiNodeAnchor* = object
+    ## Anchor definition for a node: anchor points are fractions (0..1) of the parent
+    ## size; offsets are added in pixels. Resolved during the post-processing pass when
+    ## `AnchorX`/`AnchorY` flags are set.
     topLeft*: Vec2
+      ## Anchor fraction for the node's top-left corner (x = left, y = top).
     bottomRight*: Vec2
+      ## Anchor fraction for the node's bottom-right corner (x = right, y = bottom).
     topLeftOffset*: Vec2
+      ## Pixel offset added to the top-left anchor position.
     bottomRightOffset*: Vec2
+      ## Pixel offset added to the bottom-right anchor position.
     pivot*: Vec2
+      ## Fraction (0..1) of the node's own size used as the anchor pivot.
     offset*: Vec2
+      ## Extra pixel offset applied to the resolved anchored position.
 
   UiCustomLayoutProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].}
+    ## Callback that positions/measures the children of node `nodeIdx` during layout
+    ## (custom layout / custom child layout).
 
   UiNodeCustomLayout* = object
+    ## Pair of a custom layout callback and its user data.
     layoutProc*: UiCustomLayoutProc
+      ## The layout callback (nil = no custom layout).
     userData*: int
+      ## Opaque value passed back to `layoutProc`.
 
   UiDeferredBuildProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+    ## Callback whose body builds a node's children; executed during `flushDeferredNodes`
+    ## at `endUiFrame` (after the whole tree has been described).
 
   UiDeferredNode* = object
+    ## A node whose child-building is deferred to `endUiFrame` (see `deferBuild`).
     nodeIdx*: int
+      ## Index of the node whose children the callback builds.
     buildProc*: UiDeferredBuildProc
+      ## The deferred build callback.
     userData*: int
+      ## Opaque value passed back to `buildProc`.
     storageParentStack: seq[UiNodeId]
+      ## Storage-parent stack to restore while running `buildProc`.
 
-  UiVirtualNode* = object
+  UiVirtualTree* = object
     ## A buffered subtree that is inserted into the actual tree under `parent`
     ## during `endUiFrame`. `nodes` is the full flat list of `UiNode`s forming
     ## the subtree (or forest); internal `parent`/`lastChild`/`nextSibling` links
@@ -206,327 +397,598 @@ type
     ## insertion and the node indices are remapped accordingly. `animations` holds
     ## per-field animations (by `UiNode` byte-offset) applied to this subtree.
     parent*: UiNodeId
+      ## Node under which this subtree is inserted at `endUiFrame`.
     nodes*: seq[UiNode]
+      ## Flat list of nodes forming the subtree (or forest).
     animations*: seq[UiFieldAnimation]
+      ## Per-field animations applied to the subtree's root node.
     texts*: seq[UiNodeText]
+      ## Side-array: node text data referenced by 1-based `textIndex`.
     styles*: seq[UiStyle]
+      ## Side-array: node styles referenced by 1-based `styleIndex`.
     gaps*: seq[float32]
+      ## Side-array: node gaps referenced by 1-based `gapIndex`.
     anchors*: seq[UiNodeAnchor]
+      ## Side-array: node anchors referenced by 1-based `anchorIndex`.
     transforms*: seq[UiNodeTransform]
+      ## Side-array: node transforms referenced by 1-based `transformIndex`.
     customCommands*: seq[ArrayView[UiRenderCommand]]
+      ## Side-array: custom render commands referenced by 1-based `commandsIndex`.
     customLayouts*: seq[UiNodeCustomLayout]
+      ## Side-array: custom layouts referenced by 1-based `customLayoutIndex`/`customChildLayoutIndex`.
     # Persistent (frame-independent) copies of custom render command data and the
     # vertex buffers they reference. Required because a virtual node outlives the
     # frame arena the original commands/vertices were allocated in; the
     # `customCommands` ArrayViews point into `commandData`, and each command's
     # `vertexData` is repointed into `commandVertices`.
     commandData*: seq[UiRenderCommand]
+      ## Persistent copy of custom render command data (outlives the frame arena).
     commandVertices*: seq[UiVertex]
+      ## Persistent copy of the vertex buffers referenced by `commandData`.
 
   UiNodeTransform* = object
+    ## 2D affine transform applied to a node at render time (offset/rotation/scale about a pivot).
     offset*: Vec2
+      ## Translation offset in pixels, applied about `pivot`.
     rotation*: float32
+      ## Rotation in radians, applied about `pivot`.
     scale*: Vec2
+      ## Scale factors, applied about `pivot`.
     pivot*: Vec2
+      ## Fraction (0..1) of the node's size used as the transform origin.
 
   UiFrameContext* = object
+    ## Per-frame environment passed to `beginUiFrame`.
     viewportSize*: Vec2
+      ## Size of the render viewport in pixels (becomes the root node's size).
     animationTick*: float32
+      ## Time elapsed since the previous frame, used to step animations.
     time*: float32
+      ## Accumulated wall-clock time of the UI session.
     input*: UiInputSnapshot
+      ## Raw input for this frame.
 
   UiRenderCommandKind* = enum
-    CmdRectFill, CmdRectStroke
-    CmdCircleFill, CmdLine
-    CmdText, CmdImage
-    CmdClipPush, CmdClipPop
-    CmdTransformPush, CmdTransformPop
+    ## Kind of draw operation an `UiRenderCommand` represents. The renderer interprets
+    ## only the relevant payload fields for each kind.
+    CmdRectFill
+      ## Filled rounded rectangle (`pos`, `size`, `color`, `radius`).
+    CmdRectStroke
+      ## Rectangle outline (`pos`, `size`, `color`, `thickness`, `radius`).
+    CmdCircleFill
+      ## Filled circle (`pos` = center, `radius`).
+    CmdLine
+      ## Line segment (`pos` -> `pos2`, `thickness`, `color`).
+    CmdText
+      ## Text glyphs (`imageId` = font atlas, `textIndex`, `pos`, `color`).
+    CmdImage
+      ## Textured quad (`imageId`, `pos`, `size`, `uv0`, `uv1`, `samplerMode`).
+    CmdClipPush
+      ## Push a clip rectangle (intersected with the current clip stack).
+    CmdClipPop
+      ## Pop the top clip rectangle.
+    CmdTransformPush
+      ## Push an affine transform (`pivot`, `offset`, `scale`, `rotation`, `transformOrigin`).
+    CmdTransformPop
+      ## Pop the top transform.
     CmdRawVertices
+      ## User-supplied vertex batch (`vertexData`, `vertexCount`, `materialId`, `materialUniform`).
 
   UiImageId* = distinct uint64
+    ## Handle identifying a texture (image, font atlas, or render target) for `CmdImage`/`CmdText`.
 
   TextureSamplerMode* {.pure.} = enum
+    ## Texture filtering mode for image/text render commands.
     Linear
+      ## Bilinear filtering (smooth scaling).
     Nearest
+      ## Nearest-neighbor filtering (crisp pixels).
 
   UiRenderCommand* = object
+    ## A single renderer-agnostic draw command. Only the fields relevant to `kind` are used.
     kind*: UiRenderCommandKind
+      ## Which draw operation this command performs.
     nodeIndex*: int32 = -1
+      ## Index of the owning node (for hover/debug); -1 when not associated with a node.
     textIndex*: uint16 = 0
+      ## Index into the frame's text array for `CmdText`.
     clipDepth*: uint16
+      ## Clip-stack depth in effect when this command was emitted.
     color*: UiColor
+      ## Primary color (fill, stroke, line, or text color).
     pos*: Vec2
+      ## Primary position: rect origin, circle center, or text baseline origin.
     pos2*: Vec2
+      ## Secondary position: line end point.
     size*: Vec2
+      ## Size for `CmdRectFill`/`CmdRectStroke`/`CmdImage`.
     uv0*: Vec2
+      ## Texture UV minimum for `CmdImage` (default (0,0)).
     uv1*: Vec2
+      ## Texture UV maximum for `CmdImage` (default (1,1)).
     samplerMode*: TextureSamplerMode
+      ## Texture filtering for `CmdImage`.
     radius*: float32
+      ## Corner radius (`CmdRectFill`/`CmdRectStroke`) or circle radius (`CmdCircleFill`).
     thickness*: float32
+      ## Line/stroke thickness (`CmdLine`/`CmdRectStroke`).
     imageId*: UiImageId
+      ## Texture handle for `CmdImage` or font atlas for `CmdText`.
     vertexData*: nil ptr UncheckedArray[UiVertex]
+      ## Vertex pointer for `CmdRawVertices`.
     vertexCount*: int32
+      ## Number of vertices in `vertexData`.
     transformOrigin*: Vec2
+      ## Transform origin used by `CmdTransformPush`.
     pivot*: Vec2
+      ## Pivot (fraction of node size) for `CmdTransformPush`.
     offset*: Vec2
+      ## Translation offset for `CmdTransformPush`.
     scale*: Vec2
+      ## Scale for `CmdTransformPush`.
     rotation*: float32
+      ## Rotation (radians) for `CmdTransformPush`.
     materialId*: MaterialId
+      ## Material/pipeline for `CmdRawVertices`.
     materialUniform*: ArrayView[uint8]
+      ## Material uniform data for `CmdRawVertices`.
 
   UiFrameOutput* = object
+    ## Result of a frame's interaction + build: hover/press/scroll/drag/click state plus
+    ## the emitted render commands. Queried via `wasHovered`/`wasPressed`/`wasClicked` etc.
     hoveredId*: UiNodeId
+      ## Node currently under the cursor (none if nothing).
     hoveredIndex*: int
+      ## Frame index of `hoveredId` (-1 if none).
     scrolledId*: UiNodeId
+      ## Scrollable node currently under the cursor / being middle-drag scrolled.
     scrolledIndex*: int
+      ## Frame index of `scrolledId` (-1 if none).
     hoverBeganId*: UiNodeId
+      ## Node the cursor entered this frame (none if none).
     hoverEndedId*: UiNodeId
+      ## Node the cursor left this frame (none if none).
     pressedId*: UiNodeId
+      ## Node on which the left button was pressed this frame.
     heldId*: UiNodeId
+      ## Node currently held by the left button.
     draggedId*: UiNodeId
+      ## Node being dragged (held + moved, or released after a drag) this frame.
     pressedIndex*: int
+      ## Frame index of `pressedId`.
     heldIndex*: int
+      ## Frame index of `heldId`.
     draggedIndex*: int
+      ## Frame index of `draggedId`.
     rightPressedId*: UiNodeId
+      ## Node on which the right button was pressed this frame.
     rightPressedIndex*: int
+      ## Frame index of `rightPressedId`.
     clickedId*: UiNodeId
+      ## Node released by the left button over the node it was pressed on.
     clickedIndex*: int
+      ## Frame index of `clickedId`.
     rightClickedId*: UiNodeId
+      ## Node released by the right button over the node it was pressed on.
     rightClickedIndex*: int
+      ## Frame index of `rightClickedId`.
     commandLayers*: seq[seq[UiRenderCommand]]
+      ## Render commands grouped by layer (e.g. windows vs overlays) before flattening.
     commands*: seq[UiRenderCommand]
+      ## All render commands of the frame, concatenated from `commandLayers`.
 
   UiNode* = object
+    ## A single node in the UI tree. Stored as a flat array entry; tree structure is
+    ## expressed via integer indices (not heap pointers). `-1` indices mean "none".
     id*: UiNodeId
-    parent*: int
+      ## Stable per-frame identifier (see `UiNodeId`).
+    parent*: int32
+      ## Index of this node's parent in `UiFrame.nodes` (-1 for the root).
     lastChild*: int32
+      ## Index of the last child; the child ring is traversed from `nextSibling` of the tail to the tail (-1 if no children).
     nextSibling*: int32
+      ## Index of the next sibling in the child ring (-1 for the only/last child).
     flags*: UiFlags
+      ## Behavior flags (see `UiFlag`).
     pos*: Vec2
+      ## Position relative to the parent's content origin.
     size*: Vec2
+      ## Resolved size of the node.
     minSize*: Vec2
+      ## Minimum size clamp applied by `clampNodeSize`.
     maxSize*: Vec2
+      ## Maximum size clamp applied by `clampNodeSize`.
     cursor*: Vec2
+      ## Current layout cursor (where the next child is placed) within this node.
     contentExtent*: Vec2
-
+      ## Accumulated extent of children/content, used by `Fit` sizing.
     renderParent*: int32
+      ## Index of the node this node is drawn under in the render tree (for layering / render-under); -1 = its tree parent.
     renderChildLast*: int32
+      ## Index of the last child in render order; -1 if none.
     renderSibling*: int32
-    layoutIndex*: int32 = 0
+      ## Index of the next sibling in render order; -1 if none.
+    layerIndex*: int32 = 0
+      ## Layer index inherited from the parent (determines render layer).
 
     # Indices into arrays in the UiBuilder
     textIndex*: uint16
+      ## 1-based index into `UiFrame.texts`; 0 = no text.
     anchorIndex*: uint16
+      ## 1-based index into `UiFrame.anchors`; 0 = none.
     gapIndex*: uint16
+      ## 1-based index into `UiFrame.gaps`; 0 = none (gap 0).
     styleIndex*: uint16
+      ## 1-based index into `UiFrame.styles` (or a theme `UiStyleIndex`); 0 = default.
     transformIndex*: uint16
+      ## 1-based index into `UiFrame.transforms`; 0 = none.
     commandsIndex*: uint16
+      ## 1-based index into `UiFrame.customCommands`; 0 = none.
     customLayoutIndex*: uint16
+      ## 1-based index into `UiFrame.customLayouts`; 0 = none.
     customChildLayoutIndex*: uint16
+      ## 1-based index into `UiFrame.customLayouts` for child layout; 0 = none.
 
     when defined(nuiDebug):
       debugName*: string
+        ## Human-readable name for debugging/inspection.
       postProcessCounter*: int32
+        ## Debug counter of how many times this node was post-processed in a frame.
     when not defined(nimony) and defined(nuiDebug):
       debugSourceFile*: string
+        ## Source file where the node was created (debug only).
       debugSourceLine*: int32
+        ## Source line where the node was created (debug only).
       debugSourceColumn*: int32
-
-  UiAnimation* = object
-    nodeId*: UiNodeId
-    fields*: seq[UiFieldAnimation]
-    unchangedFrames*: int
+        ## Source column where the node was created (debug only).
 
   UiFrame* = object
+    ## One frame's UI tree and its side data. Swapped with `previousFrame` each frame so
+    ## state survives across rebuilds.
     arena*: ptr Arena
+      ## Arena allocator backing this frame's transient data.
     arenaCheckpoint*: uint64
+      ## Checkpoint to restore the arena at the next `beginUiFrame`.
     nodes*: seq[UiNode]
+      ## Flat list of all nodes in the tree.
     nodeIdToIndex*: Table[uint64, int]
+      ## Maps node ID -> index in `nodes` for fast lookup.
     duplicateNodeIds*: Table[uint64, seq[int]]
+      ## Records nodes that shared an ID (duplicate ID detection).
     texts*: seq[UiNodeText]
+      ## Side-array: node text data (1-based `textIndex`).
     styles*: seq[UiStyle]
+      ## Side-array: node styles (1-based `styleIndex`); starts with a copy of the theme styles.
     gaps*: seq[float32]
+      ## Side-array: node gaps (1-based `gapIndex`).
     anchors*: seq[UiNodeAnchor]
+      ## Side-array: node anchors (1-based `anchorIndex`).
     transforms*: seq[UiNodeTransform]
+      ## Side-array: node transforms (1-based `transformIndex`).
     customCommands*: seq[ArrayView[UiRenderCommand]]
+      ## Side-array: custom render commands (1-based `commandsIndex`).
     customLayouts*: seq[UiNodeCustomLayout]
+      ## Side-array: custom layouts (1-based `customLayoutIndex`/`customChildLayoutIndex`).
 
   UiNodeStorageData* = ref object of RootObj
     ## Base type for custom data for widgets. Create subtype and access using `proc nodeStorage`
 
   UiNodeStorage* = object
+    ## Per-node storage entry; keyed by node ID in `UiBuilder.nodeStorage`.
     data*: nil UiNodeStorageData
+      ## The widget's custom storage (nil if none).
     lastAccess*: uint64
+      ## Frame index of last access; used by GC to drop stale entries.
     parents*: seq[UiNodeId]
+      ## Storage-parent chain this entry belongs to.
     clearOldChildren*: bool
+      ## When true, storage of non-rendered children is not kept alive.
 
   UiTextArrangementCacheEntry = object
+    ## Cache entry mapping a (text, font, size, maxWidth) tuple to a laid-out `UiTextArrangement`.
     key*: uint64
+      ## Hash key identifying the arrangement inputs.
     text*: UiString
+      ## The text that was arranged.
     fontSize*: float32
+      ## Font size at arrangement time.
     fontId*: UiFontId
+      ## Font face used.
     lastUsedTick*: uint64
+      ## Tick of last use; drives LRU eviction.
     maxWidth*: float32
+      ## Wrap width used (<= 0 means no wrap).
     arrangement*: UiTextArrangement
+      ## The cached text arrangement (glyph positions, no atlas UVs).
 
   UiMeasureTextFn* = proc(text: openArray[char], fontId: UiFontId, fontSize: float32, maxWidth: float32): UiTextArrangement {.raises: [].}
+    ## Callback that shapes/wraps `text` into a cached `UiTextArrangement` (no atlas UVs).
   UiBuildTextMeshFn* = proc(arrangement: UiTextArrangement, pos: Vec2,
     screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
+    ## Callback that rasterizes `arrangement` into renderer-owned `UiVertex` data (runs during render-command build).
 
   UiBuilder* = object
+    ## The central UI object. Owns the current and previous frames, the node stack,
+    ## ID scopes, theme styles, animations, node storage, and frame output. Mutators
+    ## return `var UiBuilder` (`.discardable`) so calls chain.
     stack*: seq[int]
+      ## Index stack of nodes currently being built (innermost last); mirrors the begin/end nesting.
     nodeIdStack*: seq[UiNodeId]
+      ## Parallel stack of node IDs matching `stack`.
     # Composed ID scopes from pushId/popId; mixed into child node IDs.
     idScopeStack*: seq[uint64]
+      ## Active `pushId`/`popId` ID scopes, mixed into child node IDs.
     storageParentStack: seq[UiNodeId]
+      ## Stack of storage-parent node IDs for scoping child node storage.
     # Per-parent counter used for deterministic auto-generated child IDs.
     autoChildCounter*: seq[uint32]
+      ## Per-node counter producing deterministic auto-generated child IDs.
     frame*: UiFrame
+      ## The frame currently being built.
     previousFrame*: UiFrame
+      ## The previous frame (swapped each `beginUiFrame`); source of stable state.
     frameCtx*: UiFrameContext
+      ## Per-frame environment (viewport, input, time).
     previousOutput*: UiFrameOutput
+      ## Output of the previous frame; queried by `wasHovered`/`wasClicked` etc.
     frameOutput*: UiFrameOutput
+      ## Output produced for the current frame.
     themeStyles*: seq[UiStyle]
+      ## Named theme styles addressed by `UiStyleIndex`.
     themeTextStyles*: seq[UiNodeText]
+      ## Named theme text styles addressed by `UiTextStyleIndex`.
     animations*: seq[UiAnimation]
+      ## Active per-node animations.
     animationSpeed*: float32 = 1.0'f32
+      ## Global multiplier applied to every animation track's speed.
     configuringAnimationStack*: seq[bool]
+      ## Per-node flag: whether an `animate:` block is active (gates `...Anim` mutators).
     animationTriggerStack*: seq[bool]
+      ## Per-node flag: whether new animation tracks may be created this frame.
     anythingAnimating*: bool
+      ## True if any animation is actively stepping this frame.
     windows*: UiNodeId
+      ## ID of the window-space root node (windows layer).
     overlays*: UiNodeId
+      ## ID of the overlay root node (drawn above windows).
     focusedNode*: UiNodeId
+      ## ID of the currently focused node (for keyboard/text input).
     debugDrawGridLines*: bool
+      ## When true, draw layout grid/debug guides.
     showDebugPanel*: bool = false
+      ## Toggle the node-inspector debug panel.
     showDebugPanel2*: bool = false
+      ## Toggle the secondary debug panel.
     showThemeEditor*: bool = false
+      ## Toggle the live theme editor.
     fontAtlasImageId*: UiImageId
+      ## Image ID of the font atlas texture.
 
     nodeStorage: Table[uint64, UiNodeStorage]
+      ## Node-ID -> storage map; GC'd by `collectGarbage` at `endUiFrame`.
 
     currentNode: ptr UiNode
+      ## Pointer to the node currently being built (innermost begin/endNode).
     currentParent: nil ptr UiNode
+      ## Pointer to the parent of the current node (nil at root).
     lastNode: ptr UiNode
+      ## Pointer to the node finished most recently.
     lastNodeIndex: int
+      ## Index of `lastNode`.
 
     defaultText*: UiNodeText
+      ## Default text style applied to new nodes.
     defaultStyle*: UiStyle
+      ## Default visual style applied to new nodes.
     defaultAnchor*: UiNodeAnchor
+      ## Default (empty) anchor returned when a node has no anchor.
     defaultTransform*: UiNodeTransform
+      ## Default (identity) transform returned when a node has none.
     defaultCustomCommands*: ArrayView[UiRenderCommand]
+      ## Default (empty) custom-command view returned when a node has none.
     defaultCustomLayout*: UiNodeCustomLayout
+      ## Default (no-op) custom layout returned when a node has none.
+
     deferredNodes*: seq[UiDeferredNode]
-    virtualNodes*: seq[UiVirtualNode]
+      ## Nodes whose child-building is deferred to `flushDeferredNodes`.
+    virtualNodes*: seq[UiVirtualTree]
+      ## Buffered virtual subtrees to splice in at `endUiFrame`.
     virtualNodeAnimations*: Table[uint64, seq[UiFieldAnimation]]
+      ## Per virtualized node ID, the animations to attach to its virtual node.
 
     textArrangementLookup: Table[uint64, int]
+      ## Maps a text-arrangement key to its cache index.
     textArrangementEntries: seq[UiTextArrangementCacheEntry]
+      ## LRU cache of text arrangements.
     textArrangementTick: uint64
+      ## Monotonic tick used for LRU eviction.
     measureText*: UiMeasureTextFn
+      ## Callback that lays out text (set at `newBuilder`).
     buildTextMesh*: nil UiBuildTextMeshFn
+      ## Optional callback that builds text meshes (set at `newBuilder`).
     fonts*: Table[string, UiFontId]
+      ## Maps font names to loaded font IDs.
     fontScale*: float32
+      ## Global scale applied to font sizes (DPI/accessibility).
 
     # Event tracing for debugging: maps a node id to the sequence of events
     # recorded for that node during the current frame. Cleared at frame start.
     eventTraces*: Table[uint64, seq[string]]
+      ## Per-node sequence of recorded events (when tracing is enabled).
     # Controls which nodes have their events recorded. In `TraceNodeId` mode,
     # only events for `traceNodeId` are recorded.
     traceMode*: UiTraceMode
+      ## Which nodes have their events recorded (see `UiTraceMode`).
     traceNodeId*: UiNodeId
+      ## Node to trace when `traceMode == TraceNodeId`.
 
     # Middle-click drag scrolling: while the middle mouse button is held over a
     # scrollable node, the offset of the cursor from the drag start drives the
     # scroll position. `middleDragScroll` holds the per-frame scroll delta (in
     # pixels) to apply during the current frame's build.
     middleDragActive*: bool
+      ## True while a middle-button drag-scroll is in progress.
     middleDragScrollStart*: Vec2
+      ## Cursor position where the middle-drag scroll started.
     middleDragScroll*: Vec2
+      ## Per-frame scroll delta (pixels) from the middle-drag.
 
   UiClipRect* = object
+    ## An axis-aligned clipping rectangle.
     x*, y*, w*, h*: float32
+      ## Top-left origin (`x`,`y`) and size (`w`,`h`), in pixels.
 
 const
   DefaultAnimationSpeed* = 18.0'f32
 
 type
   UiStyleIndex* = enum
+    ## Named theme style slots in `UiBuilder.themeStyles`. Slots are 1-based when
+    ## used as node `styleIndex` (slot 0 / `None` means "unset"). `initDefaultThemeStyles`
+    ## fills these from `UiStyleIndexDefault` up to `UiStyleIndexAccent`.
     UiStyleIndexNone
+      ## Sentinel: no style assigned.
     UiStyleIndexDefault
+      ## Default node style; also copied into `UiBuilder.defaultStyle`.
     UiStyleIndexWindow
+      ## Window frame (border + rounded corners).
     UiStyleIndexWindowTitleBar
+      ## Window title bar background.
     UiStyleIndexButton
+      ## Button background.
     UiStyleIndexButtonHover
+      ## Button background while hovered.
     UiStyleIndexCheckbox
+      ## Checkbox box background.
     UiStyleIndexCheckboxHover
+      ## Checkbox box background while hovered.
     UiStyleIndexCheckboxMark
+      ## Checkbox check mark fill.
     UiStyleIndexSlider
+      ## Slider container.
     UiStyleIndexSliderTrack
+      ## Slider track background.
     UiStyleIndexSliderTrackHover
+      ## Slider track background while hovered.
     UiStyleIndexSliderFill
+      ## Slider fill (selected portion).
     UiStyleIndexSliderHandle
+      ## Slider handle.
     UiStyleIndexScrollBar
+      ## Scrollbar background.
     UiStyleIndexScrollBarHandle
+      ## Scrollbar handle.
     UiStyleIndexScrollBarHandleHover
+      ## Scrollbar handle while hovered.
     UiStyleIndexWindowContent
+      ## Window content area.
     UiStyleIndexWindowResizeHandle
+      ## Window resize-handle grip.
     UiStyleIndexTabBarHeader
+      ## Tab bar header strip.
     UiStyleIndexTabBarItem
+      ## Inactive tab item.
     UiStyleIndexTabBarItemActive
+      ## Active tab item.
     UiStyleIndexTabBarContent
+      ## Tab content panel.
     UiStyleIndexTextField
+      ## Text field background.
     UiStyleIndexTextFieldFocused
+      ## Text field background while focused.
     UiStyleIndexTextFieldHint
+      ## Text field placeholder/hint.
     UiStyleIndexTextCursor
+      ## Text field caret.
     UiStyleIndexMenu
+      ## Menu popup background.
     UiStyleIndexMenuItem
+      ## Menu item background.
     UiStyleIndexMenuItemHover
+      ## Menu item background while hovered.
     UiStyleIndexWindowTitleBarCollapseHover
+      ## Window collapse button while hovered.
     UiStyleIndexMenuBar
+      ## Menu bar background.
     UiStyleIndexPanel
+      ## Generic panel/container.
     UiStyleIndexStage
+      ## Top-level stage/root panel.
     UiStyleIndexCard
+      ## Card container.
     UiStyleIndexHeader
+      ## Section header bar.
     UiStyleIndexRow
+      ## List row.
     UiStyleIndexRowAlt
+      ## Alternating (zebra) list row.
     UiStyleIndexTooltip
+      ## Tooltip popup.
     UiStyleIndexAccent
+      ## Accent color block (base for `accentVariation`); last slot (`UiThemeStyleSlotCount`).
 
   UiTextStyleIndex* = enum
+    ## Named theme text-style slots in `UiBuilder.themeTextStyles`. Like `UiStyleIndex`,
+    ## slots are 1-based as node `textIndex` (slot 0 / `None` means "unset"). `initDefaultThemeTextStyles`
+    ## fills these from `UiStyleIndexDefaultText` up to `UiStyleIndexHeaderText`.
     UiTextStyleIndexNone
+      ## Sentinel: no text style assigned.
     UiStyleIndexDefaultText
+      ## Default text style; also copied into `UiBuilder.defaultText`.
     UiStyleIndexSmallText
+      ## Small text.
     UiStyleIndexLargeText
+      ## Large text.
     UiStyleIndexExtraLargeText
+      ## Extra-large text (headings/display).
     UiStyleIndexButtonText
+      ## Button label.
     UiStyleIndexMenuItemHoverText
+      ## Menu item label while hovered.
     UiStyleIndexMenuItemText
+      ## Menu item label.
     UiStyleIndexLabelText
+      ## Form label.
     UiStyleIndexWindowText
+      ## Window body text.
     UiStyleIndexWindowTitleBarText
+      ## Window title bar text.
     UiStyleIndexWindowContentText
+      ## Window content text.
     UiStyleIndexButtonHoverText
+      ## Button label while hovered.
     UiStyleIndexCheckboxText
+      ## Checkbox label.
     UiStyleIndexCheckboxHoverText
+      ## Checkbox label while hovered.
     UiStyleIndexCheckboxMarkText
+      ## Checkbox mark text/icon.
     UiStyleIndexSliderText
+      ## Slider label.
     UiStyleIndexTabBarHeaderText
+      ## Tab bar header text.
     UiStyleIndexTabBarItemText
+      ## Inactive tab item text.
     UiStyleIndexTabBarItemActiveText
+      ## Active tab item text.
     UiStyleIndexTabBarContentText
+      ## Tab content text.
     UiStyleIndexTextFieldText
+      ## Text field text.
     UiStyleIndexTextFieldFocusedText
+      ## Text field text while focused.
     UiStyleIndexTextFieldHintText
+      ## Text field hint/placeholder text.
     UiStyleIndexHeadingText
+      ## Heading text.
     UiStyleIndexMutedText
+      ## De-emphasized (muted) text.
     UiStyleIndexHeaderText
+      ## Header/section-title text (last slot; `UiTextStyleCount`).
 
 const
   UiThemeStyleSlotCount* = int(UiStyleIndexAccent)
   UiTextStyleCount* = int(UiStyleIndexHeaderText)
-
-func uiStyleIndexToUint16*(x: UiStyleIndex): uint16 = uint16(ord(x))
-func uiTextStyleIndexToUint16*(x: UiTextStyleIndex): uint16 = uint16(ord(x))
 
 proc accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
   ## Derive a color from `base` by rotating hue (`hueShift` in turns, 0..1)
@@ -573,6 +1035,9 @@ func hash*(s: UiString): Hash =
 
 func len*(s: UiString): int =
   return s.value.len
+
+func value*(s: UiString): string =
+  return s.value
 
 func `==`*(a, b: UiString): bool =
   return a.valueHash == b.valueHash and a.value == b.value
@@ -2348,14 +2813,15 @@ proc beginNodeWithId*(b: var UiBuilder, nodeId: UiNodeId): var UiBuilder {.disca
   let nodeIndex = b.frame.nodes.len
   let inheritedLayoutIndex =
     if parentIndex >= 0 and parentIndex < b.frame.nodes.len:
-      b.frame.nodes[parentIndex].layoutIndex
+      b.frame.nodes[parentIndex].layerIndex
     else:
       -1'i32
 
   if b.frame.nodeIdToIndex.hasKey(nodeIdValue(nodeId)):
     b.frame.duplicateNodeIds.mgetOrPut(nodeIdValue(nodeId), @[]).add [nodeIndex, b.frame.nodeIdToIndex.getOrQuit(nodeIdValue(nodeId))]
 
-  b.frame.nodeIdToIndex[nodeIdValue(nodeId)] = nodeIndex
+  when defined(nuiDebug):
+    b.frame.nodeIdToIndex[nodeIdValue(nodeId)] = nodeIndex
 
   b.frame.nodes.add UiNode(
     id: nodeId,
@@ -2365,8 +2831,8 @@ proc beginNodeWithId*(b: var UiBuilder, nodeId: UiNodeId): var UiBuilder {.disca
     renderParent: -1,
     renderChildLast: -1,
     renderSibling: -1,
-    parent: parentIndex,
-    layoutIndex: inheritedLayoutIndex,
+    parent: parentIndex.int32,
+    layerIndex: inheritedLayoutIndex,
   )
   b.currentNode = b.frame.nodes[^1].addr
 
@@ -2491,24 +2957,24 @@ proc flushDeferredNodes*(b: var UiBuilder) =
   b.storageParentStack = storageParentStack
   b.deferredNodes.setLen(0)
 
-proc addVirtualNode*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode]): var UiBuilder {.discardable.} =
+proc addVirtualTree*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode]): var UiBuilder {.discardable.} =
   ## Buffer a subtree (or forest) of `UiNode`s to be inserted under `parent` at `endUiFrame`.
-  b.virtualNodes.add UiVirtualNode(parent: parent, nodes: nodes)
+  b.virtualNodes.add UiVirtualTree(parent: parent, nodes: nodes)
   b
 
-proc addVirtualNode*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode], animations: seq[UiFieldAnimation]): var UiBuilder {.discardable.} =
+proc addVirtualTree*(b: var UiBuilder, parent: UiNodeId, nodes: seq[UiNode], animations: seq[UiFieldAnimation]): var UiBuilder {.discardable.} =
   ## Buffer a subtree (or forest) of `UiNode`s to be inserted under `parent` at
   ## `endUiFrame`, carrying the given per-field `animations`.
-  b.virtualNodes.add UiVirtualNode(parent: parent, nodes: nodes, animations: animations)
+  b.virtualNodes.add UiVirtualTree(parent: parent, nodes: nodes, animations: animations)
   b
 
 proc setAnimatedFieldValue(b: var UiBuilder, node: var UiNode, fieldOffset: UiNodeFloatField, value: float32) {.inline.}
 
-proc syncVirtualNodeFromFrame*(b: var UiBuilder, v: var UiVirtualNode, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.}
+proc syncVirtualTreeFromFrame*(b: var UiBuilder, v: var UiVirtualTree, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.}
 
-proc insertVirtualNodes*(b: var UiBuilder) =
+proc insertVirtualTrees*(b: var UiBuilder) =
   ## Splice every buffered virtual node into the actual tree under its parent.
-  prof("insertVirtualNodes")
+  prof("insertVirtualTrees")
   if b.virtualNodes.len == 0:
     return
 
@@ -2613,7 +3079,7 @@ proc insertVirtualNodes*(b: var UiBuilder) =
         if abs(a.targetValue - a.currentValue) <= 0.001'f32:
           a.currentValue = a.targetValue
         setAnimatedFieldValue(b, b.frame.nodes[startIdx], a.fieldOffset, a.currentValue)
-      syncVirtualNodeFromFrame(b, v, startIdx, baseStyle, baseGap, baseAnchor, baseTransform)
+      syncVirtualTreeFromFrame(b, v, startIdx, baseStyle, baseGap, baseAnchor, baseTransform)
       var allFinished = true
       for a in v.animations:
         if a.currentValue != a.targetValue:
@@ -2633,13 +3099,13 @@ proc insertVirtualNodes*(b: var UiBuilder) =
         b.virtualNodes[k] = move(b.virtualNodes[k + 1])
       b.virtualNodes.setLen(b.virtualNodes.len - 1)
 
-proc extractVirtualNode*(frame: var UiFrame, nodeIdx: int): UiVirtualNode =
-  ## Inverse of `insertVirtualNodes`: extract the subtree rooted at `nodeIdx` (all
+proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
+  ## Inverse of `insertVirtualTrees`: extract the subtree rooted at `nodeIdx` (all
   ## descendants plus their referenced side-array data) from `frame` into a
-  ## self-contained `UiVirtualNode`. Structural links are rebased to the local node
+  ## self-contained `UiVirtualTree`. Structural links are rebased to the local node
   ## list (any link leaving the subtree becomes -1), and `parent` is set to the
   ## original parent's id so re-insertion restores the node's original placement.
-  result = UiVirtualNode()
+  result = UiVirtualTree()
   if nodeIdx < 0 or nodeIdx >= frame.nodes.len:
     return result
 
@@ -2657,7 +3123,7 @@ proc extractVirtualNode*(frame: var UiFrame, nodeIdx: int): UiVirtualNode =
     let localIdx = result.nodes.len
     indexMap[origIdx] = localIdx
     result.nodes.add frame.nodes[origIdx]
-    result.nodes[^1].flags.incl VirtualNode
+    result.nodes[^1].flags.incl VirtualTree
     result.nodes[^1].flags.excl VirtualizeNode
     let n = frame.nodes[origIdx]
     if n.lastChild >= 0:
@@ -2793,9 +3259,9 @@ proc extractVirtualNode*(frame: var UiFrame, nodeIdx: int): UiVirtualNode =
           result.customLayouts.add default(UiNodeCustomLayout)
       n.customChildLayoutIndex = uint16(layoutMap.getOrQuit(slot) + 1)
 
-proc virtualNodeFromNode*(b: var UiBuilder, nodeIdx: int): UiVirtualNode =
-  ## Convenience wrapper around `extractVirtualNode` operating on the current frame.
-  extractVirtualNode(b.frame, nodeIdx)
+proc virtualNodeFromNode*(b: var UiBuilder, nodeIdx: int): UiVirtualTree =
+  ## Convenience wrapper around `extractVirtualTree` operating on the current frame.
+  extractVirtualTree(b.frame, nodeIdx)
 
 proc collectGarbage*(b: var UiBuilder) =
   prof("collectGarbage")
@@ -2825,7 +3291,7 @@ proc collectGarbage*(b: var UiBuilder) =
     for id in toRemove:
       b.nodeStorage.del(id)
 
-proc updateVirtualNodes(b: var UiBuilder) =
+proc updateVirtualTrees(b: var UiBuilder) =
   # Promote previous-frame nodes flagged VirtualizeNode that did not survive into the
   # current frame into persistent virtual nodes, so they keep being rendered.
   var virtualizedIds = initTable[uint64, int]()
@@ -2838,7 +3304,7 @@ proc updateVirtualNodes(b: var UiBuilder) =
       let id = nodeIdValue(prevNode.id)
       if b.currentNodeIndex(prevNode.id) < 0 and not virtualizedIds.hasKey(id):
         virtualizedIds[id] = 1
-        var vn = extractVirtualNode(b.previousFrame, prevIdx)
+        var vn = extractVirtualTree(b.previousFrame, prevIdx)
         if b.virtualNodeAnimations.hasKey(id):
           vn.animations = b.virtualNodeAnimations.getOrQuit(id)
           b.virtualNodeAnimations.del(id)
@@ -2859,7 +3325,7 @@ proc updateVirtualNodes(b: var UiBuilder) =
         b.virtualNodes[k] = move(b.virtualNodes[k + 1])
       b.virtualNodes.setLen(b.virtualNodes.len - 1)
 
-  b.insertVirtualNodes()
+  b.insertVirtualTrees()
 
 proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarbage: bool = true, buildMeshRenderCommands: bool = false) =
   ## End the UI frame. Flushes deferred nodes, removes stale animations, and builds render commands.
@@ -2872,7 +3338,7 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
   discard b.endNode()
   b.flushDeferredNodes()
   b.removeStaleAnimations()
-  b.updateVirtualNodes()
+  b.updateVirtualTrees()
 
   b.frameOutput.clearFrameOutput()
   if buildRenderCommands:
@@ -2925,7 +3391,7 @@ proc nodeStorageCount*(b: UiBuilder): int =
   ## Return the number of active node storage entries.
   b.nodeStorage.len
 
-proc pushRenderCommand*(b: var UiBuilder, layoutIndex: int32, command: sink UiRenderCommand, clipStack: seq[UiClipRect]) {.inline.} =
+proc pushRenderCommand*(b: var UiBuilder, layerIndex: int32, command: sink UiRenderCommand, clipStack: seq[UiClipRect]) {.inline.} =
   ## Add a render command to the appropriate layer in the frame output.
   # todo: this breaks with texts right now
   # case command.kind
@@ -2934,7 +3400,7 @@ proc pushRenderCommand*(b: var UiBuilder, layoutIndex: int32, command: sink UiRe
   #     return
   # else:
   #   discard
-  let layer = max(0, layoutIndex.int)
+  let layer = max(0, layerIndex.int)
   if layer >= b.frameOutput.commandLayers.len:
     b.frameOutput.commandLayers.setLen(layer + 1)
     b.frameOutput.commandLayers[layer] = newSeq[UiRenderCommand](2048)
@@ -2943,7 +3409,7 @@ proc pushRenderCommand*(b: var UiBuilder, layoutIndex: int32, command: sink UiRe
 proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect], transformStack: var seq[UiAffine2]) =
   prof("buildMeshRenderCommands")
   let n = b.frame.nodes[idx].addr
-  let layoutIndex = if n.layoutIndex >= 0: n.layoutIndex else: inheritedLayoutIndex
+  let layerIndex = if n.layerIndex >= 0: n.layerIndex else: inheritedLayoutIndex
   let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
   let absSize = n.size
   let nodeStyle = b.nodeStyle(n)
@@ -2975,7 +3441,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
       for n in 0..<vertexCount:
         vertexData[n].pos = transform * vertexData[n].pos
     if vertexData != nil and vertexCount > 0:
-      b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      b.pushRenderCommand(layerIndex, UiRenderCommand(
         kind: CmdRawVertices,
         nodeIndex: idx.int32,
         vertexData: vertexData,
@@ -2989,7 +3455,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
     if clipStack.len > 0:
       clipRect = intersectClipRect(clipStack[^1], clipRect)
     clipStack.add clipRect
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdClipPush,
       nodeIndex: idx.int32,
       pos: clipAabb.pos,
@@ -3011,7 +3477,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
       let (vertexData, vertexCount) = b.buildTextMesh(
         arrangement[], contentOrigin, screenOffset, nodeText.textColor, transform)
       if vertexData != nil and vertexCount > 0:
-        b.pushRenderCommand(layoutIndex, UiRenderCommand(
+        b.pushRenderCommand(layerIndex, UiRenderCommand(
           kind: CmdRawVertices,
           nodeIndex: idx.int32,
           vertexData: vertexData,
@@ -3026,11 +3492,11 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
       outCmd.nodeIndex = idx.int32
     outCmd.pos += contentOrigin
     outCmd.pos2 += contentOrigin
-    b.pushRenderCommand(layoutIndex, outCmd, clipStack)
+    b.pushRenderCommand(layerIndex, outCmd, clipStack)
 
   for childIdx in b.children(idx):
     if b.frame.nodes[childIdx].renderParent < 0:
-      b.buildMeshRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layoutIndex, clipStack, transformStack)
+      b.buildMeshRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layerIndex, clipStack, transformStack)
 
   # Process renderChildLast chain first - these nodes render under this node.
   let renderChildLast = n.renderChildLast
@@ -3040,7 +3506,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
     while rcIdx >= 0 and rcIdx < b.frame.nodes.len:
       let rcNode = b.frame.nodes[rcIdx].addr
       let rcAbsPos = b.absoluteNodePos(rcIdx)
-      b.buildMeshRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layoutIndex, clipStack, transformStack)
+      b.buildMeshRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layerIndex, clipStack, transformStack)
       rcIdx = rcNode.renderSibling
       if rcIdx == renderChildLast:
         break
@@ -3048,7 +3514,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
   if masksChildren:
     if clipStack.len > 0:
       discard clipStack.pop()
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdClipPop,
       nodeIndex: idx.int32,
     ), clipStack)
@@ -3062,7 +3528,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
       for n in 0..<vertexCount:
         vertexData[n].pos = transform * vertexData[n].pos
     if vertexData != nil and vertexCount > 0:
-      b.pushRenderCommand(layoutIndex, UiRenderCommand(
+      b.pushRenderCommand(layerIndex, UiRenderCommand(
         kind: CmdRawVertices,
         nodeIndex: idx.int32,
         vertexData: vertexData,
@@ -3080,7 +3546,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
 proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect]) =
   prof("buildRenderCommands")
   let n = b.frame.nodes[idx].addr
-  let layoutIndex = if n.layoutIndex >= 0: n.layoutIndex else: inheritedLayoutIndex
+  let layerIndex = if n.layerIndex >= 0: n.layerIndex else: inheritedLayoutIndex
   let absPos = vec2(ox + n.pos.x, oy + n.pos.y)
   let absSize = n.size
   let nodeStyle = b.nodeStyle(n)
@@ -3092,7 +3558,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
 
   if n.transformIndex >= 0:
     let nodeTransform = b.nodeTransform(n)
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdTransformPush,
       nodeIndex: idx.int32,
       transformOrigin: absPos,
@@ -3103,7 +3569,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     ), clipStack)
 
   if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdRectFill,
       nodeIndex: idx.int32,
       color: nodeStyle.fillColor,
@@ -3118,7 +3584,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     if clipStack.len > 0:
       clipRect = intersectClipRect(clipStack[^1], clipRect)
     clipStack.add clipRect
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdClipPush,
       nodeIndex: idx.int32,
       pos: contentOrigin,
@@ -3126,7 +3592,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     ), clipStack)
 
   if DrawText in n.flags and n.textIndex > 0:
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdText,
       nodeIndex: idx.int32,
       textIndex: n.textIndex,
@@ -3140,11 +3606,11 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
       outCmd.nodeIndex = idx.int32
     outCmd.pos += contentOrigin
     outCmd.pos2 += contentOrigin
-    b.pushRenderCommand(layoutIndex, outCmd, clipStack)
+    b.pushRenderCommand(layerIndex, outCmd, clipStack)
 
   for childIdx in b.children(idx):
     if b.frame.nodes[childIdx].renderParent < 0:
-      b.buildRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layoutIndex, clipStack)
+      b.buildRenderCommands(childIdx, contentOrigin.x, contentOrigin.y, layerIndex, clipStack)
 
   # Process renderChildLast chain first - these nodes render under this node.
   let renderChildLast = n.renderChildLast
@@ -3154,7 +3620,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     while rcIdx >= 0 and rcIdx < b.frame.nodes.len:
       let rcNode = b.frame.nodes[rcIdx].addr
       let rcAbsPos = b.absoluteNodePos(rcIdx)
-      b.buildRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layoutIndex, clipStack)
+      b.buildRenderCommands(rcIdx, rcAbsPos.x - rcNode.pos.x, rcAbsPos.y - rcNode.pos.y, layerIndex, clipStack)
       rcIdx = rcNode.renderSibling
       if rcIdx == renderChildLast:
         break
@@ -3162,13 +3628,13 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
   if masksChildren:
     if clipStack.len > 0:
       discard clipStack.pop()
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdClipPop,
       nodeIndex: idx.int32,
     ), clipStack)
 
   if nodeStyle.borderWidth > 0 and nodeStyle.borderColor.a > 0:
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdRectStroke,
       nodeIndex: idx.int32,
       color: nodeStyle.borderColor,
@@ -3179,7 +3645,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     ), clipStack)
 
   if n.transformIndex >= 0:
-    b.pushRenderCommand(layoutIndex, UiRenderCommand(
+    b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdTransformPop,
       nodeIndex: idx.int32,
     ), clipStack)
@@ -3352,7 +3818,7 @@ proc setAnimatedFieldValue(b: var UiBuilder, node: var UiNode, fieldOffset: UiNo
   of UiNodeFieldTransformPivotX: b.ensureNodeTransform(node.addr).pivot.x = value
   of UiNodeFieldTransformPivotY: b.ensureNodeTransform(node.addr).pivot.y = value
 
-proc syncVirtualNodeFromFrame*(b: var UiBuilder, v: var UiVirtualNode, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.} =
+proc syncVirtualTreeFromFrame*(b: var UiBuilder, v: var UiVirtualTree, frameNodeIdx: int, baseStyle, baseGap, baseAnchor, baseTransform: int) {.inline.} =
   ## Copy the animated float fields and side-array data of the inserted frame node
   ## back into the stored virtual node so it carries the updated values next frame.
   if frameNodeIdx < 0 or frameNodeIdx >= b.frame.nodes.len:
@@ -5251,9 +5717,9 @@ proc reverseLayout*(b: var UiBuilder): var UiBuilder {.discardable.} =
   b.frame.initCursorForLayout(b.currentNode)
   b
 
-proc layoutIndex*(b: var UiBuilder, value: int32): var UiBuilder {.discardable.} =
+proc layerIndex*(b: var UiBuilder, value: int32): var UiBuilder {.discardable.} =
   ## Set the render command layer index for the current node.
-  b.currentNode.layoutIndex = value
+  b.currentNode.layerIndex = value
   b
 
 proc measuredTextSize*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): Vec2 =

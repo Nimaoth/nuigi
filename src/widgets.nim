@@ -243,7 +243,7 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
       if KeyEscape in input.keysPressed:
         inOpen = false
 
-      if previousNodeIndex != -1 and VirtualNode notin b.previousFrame.nodes[previousNodeIndex].flags:
+      if previousNodeIndex != -1 and VirtualTree notin b.previousFrame.nodes[previousNodeIndex].flags:
         if MouseLeft in input.mousePressed and popupIdx >= 0 and not b.wasHovered(popupIdx, includeChildren = true):
           inOpen = false
 
