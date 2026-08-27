@@ -1,4 +1,3 @@
-
 import std/[os, syncio, tables, unicode, strutils, math, hashes, assertions]
 import sdl3, profiler, mymath, text, mesh
 export text
@@ -29,10 +28,14 @@ import freetype/[
   tttables,
   ]
 
-const useHarfbuzz = not defined(wasm) and not defined(nimony)
+when not defined(nimony):
+  const useHarfbuzz = not defined(wasm)
+else:
+  const useHarfbuzz = false
 
-when useHarfbuzz:
-  import harfbuzzy as hb
+when not defined(nimony):
+  when useHarfbuzz:
+    import harfbuzzy as hb
 
 const
   defaultFontAtlasSize* = 2048
@@ -181,10 +184,12 @@ proc beginFontRenderFrame*(r: var FontRender) {.inline, raises: [].} =
   let cacheCapacity = max(1, r.textMeshCacheCapacity)
   # LRU eviction: head.next is the least-recently-used node.
   while r.textMeshCache.len > cacheCapacity:
-    var oldest = r.textMeshLruHead.next
-    oldest.prev.next = oldest.next   # unlink oldest from the ring
-    oldest.next.prev = oldest.prev
-    r.textMeshCache.del(oldest.key)
+    let head = r.textMeshLruHead
+    if head != nil:
+      var oldest = head.next
+      oldest.prev.next = oldest.next   # unlink oldest from the ring
+      oldest.next.prev = oldest.prev
+      r.textMeshCache.del(oldest.key)
   inc r.textMeshCacheTick
 
 func glyphPackingBudgetExhausted(r: FontRender): bool {.inline.} =
@@ -847,13 +852,15 @@ proc cachedTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangeme
       # Move-to-front: unlink entry, then reinsert it right after head
       # (head = MRU, so the touched entry becomes the new MRU).
       if entry != r.textMeshLruHead:
-        entry.next.prev = entry.prev
-        entry.prev.next = entry.next
-        entry.next = r.textMeshLruHead.next
-        entry.prev = r.textMeshLruHead
-        r.textMeshLruHead.next.prev = entry
-        r.textMeshLruHead.next = entry
-        r.textMeshLruHead = entry
+        let head = r.textMeshLruHead
+        if head != nil:
+          entry.next.prev = entry.prev
+          entry.prev.next = entry.next
+          entry.next = head.next
+          entry.prev = head
+          head.next.prev = entry
+          head.next = entry
+          r.textMeshLruHead = entry
       if entry.vertices.len > 0:
         result.data = cast[ptr UncheckedArray[TextMeshVertex]](entry.vertices[0].addr)
         result.count = entry.vertices.len
@@ -882,15 +889,16 @@ proc storeTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangemen
   r.textMeshCache[key] = entry
 
   # Insert new entry as the MRU: link it between head and head.next.
-  if r.textMeshLruHead == nil:
+  let head = r.textMeshLruHead
+  if head == nil:
     entry.next = entry
     entry.prev = entry
     r.textMeshLruHead = entry
   else:
-    entry.next = r.textMeshLruHead.next
-    entry.prev = r.textMeshLruHead
-    r.textMeshLruHead.next.prev = entry
-    r.textMeshLruHead.next = entry
+    entry.next = head.next
+    entry.prev = head
+    head.next.prev = entry
+    head.next = entry
     r.textMeshLruHead = entry
 
   if entry.vertices.len > 0:

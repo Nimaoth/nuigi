@@ -1,3 +1,4 @@
+src
 deps/sdl3/src
 vendor/nimfreetype
 vendor/harfbuzzy/src

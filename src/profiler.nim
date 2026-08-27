@@ -1,6 +1,5 @@
 import std/[tables, assertions, strutils]
 import sdl3, mymath
-# import imgui, imgui_widgets
 
 include compat2
 
@@ -20,47 +19,49 @@ proc profNow*(): uint64 =
   else:
     return getTicksNS()
 
-let TimestampEndBit*: uint64 = 1'u64 shl 63
-let TimestampEndMask*: uint64 = uint64.high shr 1
+when defined(profiler) and not defined(nimony):
 
-type ProfEvent* = object
-  timestamp*: uint64
-  location*: tuple[tag: string, file: string, line: uint32, col: uint32]
+  let TimestampEndBit*: uint64 = 1'u64 shl 63
+  let TimestampEndMask*: uint64 = uint64.high shr 1
 
-type ProfFrame* = object
-  first*: uint64
-  last*: uint64
-  location*: tuple[tag: string, file: string, line: uint32, col: uint32]
+  type ProfEvent* = object
+    timestamp*: uint64
+    location*: tuple[tag: string, file: string, line: uint32, col: uint32]
 
-type Profiler* = object
-  record*: bool
-  stopOnThreshold*: bool
-  stopThreshold*: float32
-  stopOnShow*: bool
-  frameIndex*: int32
-  scrollX*: float32
-  scaleX*: float32
-  plotScale*: float32
-  plottedStats*: seq[string]
-  timeHistory*: seq[array[512, float32]] # i'th entry is ms history for i'th plottedStat
-  frameStart*: int
+  type ProfFrame* = object
+    first*: uint64
+    last*: uint64
+    location*: tuple[tag: string, file: string, line: uint32, col: uint32]
 
-var eventHistory* = array[1024 * 1024, ProfEvent].default
-var eventHistoryIndex*: int = 0
-var frameTimeIndex* = 0
-var plottedStatsCsvBuf*: array[1024, char]
-var plottedStatsCsvInitialized* = false
+  type Profiler* = object
+    record*: bool
+    stopOnThreshold*: bool
+    stopThreshold*: float32
+    stopOnShow*: bool
+    frameIndex*: int32
+    scrollX*: float32
+    scaleX*: float32
+    plotScale*: float32
+    plottedStats*: seq[string]
+    timeHistory*: seq[array[512, float32]] # i'th entry is ms history for i'th plottedStat
+    frameStart*: int
 
-var gprof* = Profiler(
-  stopOnThreshold: false,
-  stopThreshold: 10,
-  record: true,
-  scaleX: 0.5'f32,
-  plotScale: 8.0'f32,
-  frameStart: 0,
-)
+  var eventHistory* = array[1024 * 1024, ProfEvent].default
+  var eventHistoryIndex*: int = 0
+  var frameTimeIndex* = 0
+  var plottedStatsCsvBuf*: array[1024, char]
+  var plottedStatsCsvInitialized* = false
 
-when defined(profiler):
+  var gprof* = Profiler(
+    stopOnThreshold: false,
+    stopThreshold: 10,
+    record: true,
+    scaleX: 0.5'f32,
+    plotScale: 8.0'f32,
+    frameStart: 0,
+  )
+
+when defined(profiler) and not defined(nimony):
   template prof*(tag: string) =
     # todo: make this smaller
     when defined(nimony) or defined(nlvm):
@@ -88,7 +89,7 @@ else:
   template prof*(tag: string) =
     discard
 
-when defined(profiler):
+when defined(profiler) and not defined(nimony):
   template profd*(tag: string) =
     when defined(nimony) or defined(nlvm):
       let location = (tag, "", 0.uint32, 0.uint32)
@@ -115,89 +116,92 @@ else:
   template profd*(tag: string) =
     discard
 
-proc lastEventTimestamp*(tag: string, frameIndex: int): uint64 =
-  var i = gprof.frameStart - 1
-  if i < 0:
-    i = eventHistory.high
-  var frameIndex = frameIndex
-  while i != gprof.frameStart:
-    let event {.cursor.} = eventHistory[i]
-    if event.timestamp == 0:
-      break
+when defined(profiler) and not defined(nimony):
+  proc lastEventTimestamp*(tag: string, frameIndex: int): uint64 =
+    when defined(profiler) and not defined(nimony):
+      var i = gprof.frameStart - 1
+      if i < 0:
+        i = eventHistory.high
+      var frameIndex = frameIndex
+      while i != gprof.frameStart:
+        let event {.cursor.} = eventHistory[i]
+        if event.timestamp == 0:
+          break
 
-    if (eventHistory[i].timestamp and TimestampEndBit) != 0 and eventHistory[i].location.tag == tag:
-      if frameIndex == 0:
-        return eventHistory[i].timestamp and TimestampEndMask
-      dec frameIndex
+        if (eventHistory[i].timestamp and TimestampEndBit) != 0 and eventHistory[i].location.tag == tag:
+          if frameIndex == 0:
+            return eventHistory[i].timestamp and TimestampEndMask
+          dec frameIndex
 
-    dec i
-    if i < 0:
-      i = eventHistory.high
+        dec i
+        if i < 0:
+          i = eventHistory.high
 
-  return profNow()
-
-iterator profileFrames*(): (int, int, ProfFrame) {.sideEffect.} =
-  var stack = newSeq[ProfEvent](0)
-  var i = gprof.frameStart - 1
-  if i < 0:
-    i = eventHistory.high
-  while i != gprof.frameStart:
-    let event = eventHistory[i].addr
-    if event.timestamp == 0:
-      break
-
-    let isEnd = (event.timestamp and TimestampEndBit) != 0
-    if isEnd:
-      stack.add(event[])
+      return profNow()
     else:
-      if stack.len > 0:
-        let last = stack.pop()
-        yield (i, stack.len, ProfFrame(first: event.timestamp, last: last.timestamp and TimestampEndMask, location: event.location))
+      return 0
 
-    dec i
+  iterator profileFrames*(): (int, int, ProfFrame) {.sideEffect.} =
+    var stack = newSeq[ProfEvent](0)
+    var i = gprof.frameStart - 1
     if i < 0:
       i = eventHistory.high
+    while i != gprof.frameStart:
+      let event = eventHistory[i].addr
+      if event.timestamp == 0:
+        break
+
+      let isEnd = (event.timestamp and TimestampEndBit) != 0
+      if isEnd:
+        stack.add(event[])
+      else:
+        if stack.len > 0:
+          let last = stack.pop()
+          yield (i, stack.len, ProfFrame(first: event.timestamp, last: last.timestamp and TimestampEndMask, location: event.location))
+
+      dec i
+      if i < 0:
+        i = eventHistory.high
 
   # while stack.len > 0:
   #   let last = stack.pop()
   #   yield (i, stack.len, ProfFrame(first: 0, last: last.timestamp and TimestampEndMask, location: last.location))
 
-proc setCsvBuffer*(buf: var array[1024, char], values: openArray[string]) =
-  for i in 0..<buf.len:
-    buf[i] = '\0'
+  proc setCsvBuffer*(buf: var array[1024, char], values: openArray[string]) =
+    for i in 0..<buf.len:
+      buf[i] = '\0'
 
-  var writePos = 0
-  for i, value in values:
-    if i > 0:
-      for sepChar in ",":
+    var writePos = 0
+    for i, value in values:
+      if i > 0:
+        for sepChar in ",":
+          if writePos >= buf.len - 1:
+            return
+          buf[writePos] = sepChar
+          inc writePos
+
+      for c in value:
         if writePos >= buf.len - 1:
           return
-        buf[writePos] = sepChar
+        buf[writePos] = c
         inc writePos
 
-    for c in value:
-      if writePos >= buf.len - 1:
-        return
-      buf[writePos] = c
-      inc writePos
+  proc getCsvBuffer*(buf: array[1024, char]): string =
+    var n = 0
+    while n < buf.len and buf[n] != '\0':
+      inc n
+    result = newString(n)
+    for i in 0..<n:
+      result[i] = buf[i]
 
-proc getCsvBuffer*(buf: array[1024, char]): string =
-  var n = 0
-  while n < buf.len and buf[n] != '\0':
-    inc n
-  result = newString(n)
-  for i in 0..<n:
-    result[i] = buf[i]
+  proc parsePlottedStatsCsv*(csv: string): seq[string] =
+    result = @[]
+    for part in csv.split(','):
+      let tag = part.strip()
+      if tag.len > 0:
+        result.add(tag)
 
-proc parsePlottedStatsCsv*(csv: string): seq[string] =
-  result = @[]
-  for part in csv.split(','):
-    let tag = part.strip()
-    if tag.len > 0:
-      result.add(tag)
-
-proc profilerBeginFrame*(setFrameStart = true) =
-  when defined(profiler):
+  proc profilerBeginFrame*(setFrameStart = true) =
     proc toMs(ticks: uint64): float64 =
       return ticks.float64 / NS_PER_MS.float64
     if gprof.record:

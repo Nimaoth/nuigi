@@ -184,7 +184,7 @@ proc buildFribidi() =
 proc buildNuiDemo(compiler: NimCompiler) =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
-  let outFlag = if wasm: "-o:build/nuigi-demo.js" else: "-o:nuigi-nim.exe"
+  let outFlag = if wasm: "-o:build/nuigi-demo.js" else: "-o:bin/demo.exe"
   if wasm:
     if gEmscriptenEnv.len == 0:
       gEmscriptenEnv = emscriptenEnv()
@@ -201,7 +201,7 @@ proc buildNuiDemo(compiler: NimCompiler) =
   of Nim2Ic:
     shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
-    shell &"nimony c {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
     shell &"nimony l -d:llvm {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:
@@ -215,23 +215,23 @@ proc buildUiTestNim2() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nim c -r -o:ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
+    &"nim c -r -o:bin/tests/ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
     "ui-mesh-style-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim",
+    &"nim c -r -o:bin/tests/ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim",
     "ui-windows-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
+    &"nim c -r -o:bin/tests/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
     "ui-dynamic-virtualist-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+    &"nim c -r -o:bin/tests/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
     "ui-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
+    &"nim c -r -o:bin/tests/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
     "ui-bench-nim2"
   )
 
@@ -264,9 +264,18 @@ proc buildShader() =
   shell "dxc.exe -T ps_6_0 -E PSMain ./src/basic.hlsl -Fo basic.frag.dxil"
   shell "dxc.exe -T ps_6_0 -E PSMain ./src/custom.frag.hlsl -Fo custom.frag.dxil"
 
-proc buildUiTest() =
-  buildUiTestNim2()
-  buildUiTestNimony()
+proc buildUiTest(compiler: NimCompiler) =
+  case compiler
+  of Nim2:
+    buildUiTestNim2()
+  of Nim2Ic:
+    echo "not implemented"
+  of Nimony:
+    buildUiTestNimony()
+  of NimonyLlvm:
+    echo "not implemented"
+  of Nlvm:
+    echo "not implemented"
 
 var optParser = initOptParser("")
 proc main() =
@@ -335,17 +344,11 @@ proc main() =
   of "clean":
     removeDir("./build", false)
 
-  of "demo", "nuigi-demo":
+  of "demo":
     buildNuiDemo(compiler)
 
-  of "ui-test":
-    buildUiTest()
-
-  of "ui-test-nim2":
-    buildUiTestNim2()
-
-  of "ui-test-nimony":
-    buildUiTestNimony()
+  of "test":
+    buildUiTest(compiler)
 
   of "shader":
     buildShader()
@@ -355,6 +358,8 @@ proc main() =
     buildFreetype()
     buildHarfbuzz()
     buildFribidi()
+    buildUiTest(compiler)
+    buildNuiDemo(compiler)
 
   else:
     echo "Unknown command '", cmd, "'"

@@ -112,6 +112,7 @@ when defined(emscripten):
 else:
   {.push callConv: cdecl, dynlib: LibName.}
 
+{.passL: "-lSDL3".}
 type cva_list* {.importc: "va_list", header: "<stdarg.h>".} = object
 type cwchar_t {.importc: "wchar_t", header: "<wchar.h>".} = object
 
@@ -5089,7 +5090,7 @@ proc setRenderViewport*(renderer: Renderer, rect: ptr Rect): bool {.importc: "SD
 proc getRenderViewport*(renderer: Renderer, rect: var Rect): bool {.importc: "SDL_GetRenderViewport".}
 proc renderViewportSet*(renderer: Renderer): bool {.importc: "SDL_RenderViewportSet".}
 proc getRenderSafeArea*(renderer: Renderer, rect: var Rect):bool {.importc: "SDL_GetRenderSafeArea".}
-proc setRenderClipRect*(renderer: Renderer, rect: ptr Rect): bool {.importc: "SDL_SetRenderClipRect".}
+proc setRenderClipRect*(renderer: Renderer, rect: nil ptr Rect): bool {.importc: "SDL_SetRenderClipRect".}
 proc setRenderClipRect*(renderer: Renderer, rect: Rect): bool = setRenderClipRect(renderer, rect.addr)
 proc getRenderClipRect*(renderer: Renderer, rect: var Rect): bool {.importc: "SDL_GetRenderClipRect".}
 proc renderClipEnabled*(renderer: Renderer): bool {.importc: "SDL_RenderClipEnabled".}
@@ -5122,7 +5123,7 @@ proc renderTextureTiled*(renderer: Renderer, texture: Texture, srcrect: ptr FRec
 proc renderTexture9Grid*(renderer: Renderer, texture: Texture, srcrect: ptr FRect, left_width, right_width, top_height, bottom_height, scale: cfloat, dstrect: ptr FRect): bool {.importc: "SDL_RenderTexture9Grid".}
 proc renderGeometry*(renderer: Renderer, texture: Texture, vertices: ptr[Vertex], num_vertices: cint, indices: ptr[cint], num_indices: cint): bool {.importc: "SDL_RenderGeometry".}
 proc renderGeometry*(renderer: Renderer, texture: Texture, vertices: openArray[Vertex], indices: openArray[cint]): bool {.importc: "SDL_RenderGeometry".}
-proc renderGeometryRaw*(renderer: Renderer, texture: Texture, xy: ptr cfloat, xy_stride: cint, color: ptr FColor, color_stride: cint, uv: ptr cfloat, uv_stride: cint, num_vertices: cint, indices: pointer, num_indices: cint, size_indices: cint): bool {.importc: "SDL_RenderGeometryRaw".}
+proc renderGeometryRaw*(renderer: Renderer, texture: nil Texture, xy: ptr cfloat, xy_stride: cint, color: ptr FColor, color_stride: cint, uv: ptr cfloat, uv_stride: cint, num_vertices: cint, indices: nil pointer, num_indices: cint, size_indices: cint): bool {.importc: "SDL_RenderGeometryRaw".}
 proc renderReadPixels*(renderer: Renderer, rect: ptr Rect): ptr Surface {.importc: "SDL_RenderReadPixels".}
 proc renderPresent*(renderer: Renderer): bool {.importc: "SDL_RenderPresent".}
 proc destroyTexture*(texture: Texture) {.importc: "SDL_DestroyTexture".}

@@ -13,3 +13,6 @@ type
     descent*: float32
     glyphs*: seq[UiTextArrangementGlyph]
     contentHash*: Hash
+
+func hash*(g: UiTextArrangementGlyph): Hash =
+  !$(g.fontIndex.hash !& g.glyphIndex.hash !& g.pos.hash)

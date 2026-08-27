@@ -1,4 +1,4 @@
-import std/[tables, assertions, os, hashes]
+import std/[tables, assertions, os, hashes, syncio]
 import sdl3
 import mymath
 import render2d, fonts
@@ -381,7 +381,7 @@ proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY:
       let contentSize = plotSize - vec2(style.paddingX * 2.0'f32, style.paddingY * 2.0'f32)
       if contentSize.x > 0 and contentSize.y > 0:
         let count = max(1, gPlotHistoryCount)
-        var series: array[1, PlotSeries]
+        var series = array[1, PlotSeries].default
         series[0] = PlotSeries(
           fn: plotHistoryFn,
           userData: metric,
@@ -463,19 +463,25 @@ proc buildSettingsWindow(b: var UiBuilder) =
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
             discard b.text("Theme Editor")
-          discard b.checkbox("", b.showThemeEditor)
+          var x = b.showThemeEditor
+          discard b.checkbox("", x)
+          b.showThemeEditor = x
 
           b.node():
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
             discard b.text("Debug Panel")
-          discard b.checkbox("", b.showDebugPanel)
+          x = b.showDebugPanel
+          discard b.checkbox("", x)
+          b.showDebugPanel = x
 
           b.node():
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
             discard b.text("Debug Panel 2")
-          discard b.checkbox("", b.showDebugPanel2)
+          x = b.showDebugPanel2
+          discard b.checkbox("", x)
+          b.showDebugPanel2 = x
 
         b.node():
           discard b.fillX().fitY().padding(2)
@@ -546,7 +552,7 @@ proc buildUi(b: var UiBuilder) =
     b.keepAlive(themeEditorId)
     b.keepAlive("Examples".hashChars.UiNodeId)
 
-proc renderNewUi(b: var UiBuilder, frameOut: UiFrameOutput) =
+proc renderNewUi(b: var UiBuilder) =
   prof("renderCommands")
   func uiToFColor(color: UiColor): FColor {.inline.} =
     FColor(r: color.r, g: color.g, b: color.b, a: color.a)
@@ -598,7 +604,7 @@ proc renderNewUi(b: var UiBuilder, frameOut: UiFrameOutput) =
 
   var transformStack: seq[UiAffine2] = @[identityAffine2()]
 
-  for cmd in frameOut.commands:
+  for cmd in b.frameOutput.commands:
     let transform = transformStack[^1]
     case cmd.kind
     of CmdTransformPush:
@@ -718,8 +724,8 @@ proc renderNewUiRenderer(b: var UiBuilder, frameOut: UiFrameOutput, renderer: Re
     if count <= 0:
       return
     let xy = cast[ptr cfloat](first)
-    let color = cast[ptr FColor](cast[ByteAddress](first) + 16)
-    let uv = cast[ptr cfloat](cast[ByteAddress](first) + 8)
+    let color = cast[ptr FColor](cast[uint](first) + 16)
+    let uv = cast[ptr cfloat](cast[uint](first) + 8)
     let stride = cint(sizeof(UiVertex))
     discard renderer.renderGeometryRaw(
       texture, xy, stride, color, stride, uv, stride,
@@ -733,13 +739,14 @@ proc renderNewUiRenderer(b: var UiBuilder, frameOut: UiFrameOutput, renderer: Re
     let p1 = transform.transformPoint2(pos + vec2(size.x, 0.0'f32))
     let p2 = transform.transformPoint2(pos + size)
     let p3 = transform.transformPoint2(pos + vec2(0.0'f32, size.y))
-    var verts: array[6, UiVertex]
-    verts[0] = UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color)
-    verts[1] = UiVertex(pos: p1, uv: vec2(1.0'f32, 0.0'f32), color: color)
-    verts[2] = UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color)
-    verts[3] = UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color)
-    verts[4] = UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color)
-    verts[5] = UiVertex(pos: p3, uv: vec2(0.0'f32, 1.0'f32), color: color)
+    var verts = [
+      UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
+      UiVertex(pos: p1, uv: vec2(1.0'f32, 0.0'f32), color: color),
+      UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
+      UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
+      UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
+      UiVertex(pos: p3, uv: vec2(0.0'f32, 1.0'f32), color: color),
+    ]
     drawRawVertices(renderer, texture, verts[0].addr, 6)
 
   var transformStack: seq[UiAffine2] = @[identityAffine2()]
@@ -842,13 +849,14 @@ proc renderNewUiRenderer(b: var UiBuilder, frameOut: UiFrameOutput, renderer: Re
       let nx = if len > 0: -dy / len * cmd.thickness * 0.5'f32 else: 0.0'f32
       let ny = if len > 0: dx / len * cmd.thickness * 0.5'f32 else: 0.0'f32
       let c = cmd.color
-      var verts: array[6, UiVertex]
-      verts[0] = UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c)
-      verts[1] = UiVertex(pos: vec2(p1.x + nx, p1.y + ny), uv: vec2(1.0'f32, 0.0'f32), color: c)
-      verts[2] = UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c)
-      verts[3] = UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c)
-      verts[4] = UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c)
-      verts[5] = UiVertex(pos: vec2(p0.x - nx, p0.y - ny), uv: vec2(0.0'f32, 1.0'f32), color: c)
+      var verts = [
+        UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
+        UiVertex(pos: vec2(p1.x + nx, p1.y + ny), uv: vec2(1.0'f32, 0.0'f32), color: c),
+        UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
+        UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
+        UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
+        UiVertex(pos: vec2(p0.x - nx, p0.y - ny), uv: vec2(0.0'f32, 1.0'f32), color: c),
+      ]
       drawRawVertices(renderer, nil, verts[0].addr, 6)
 
     of CmdImage:
@@ -872,9 +880,11 @@ proc mainLoop() {.cdecl.} =
     if dt != 0:
       fps = mix(fps, 1.0 / dt, 0.5)
 
-    gprof.frameStart = eventHistoryIndex
+    when defined(profiler) and not defined(nimony):
+      gprof.frameStart = eventHistoryIndex
     prof("frame")
-    profilerBeginFrame(false)
+    when defined(profiler) and not defined(nimony):
+      profilerBeginFrame(false)
 
     when defined(wasm):
       let renderer = gWindow.getRenderer()
@@ -936,7 +946,8 @@ proc mainLoop() {.cdecl.} =
       if gRenderOnDemand and gNumFramesWithoutInput > 1:
         # On-demand mode: skip rebuilding and rendering when no input arrived.
         when not defined(wasm):
-          sleep(10)
+          when not defined(nimony):
+            sleep(10)
         return
 
       var outputWidth: cint = 0
@@ -949,7 +960,8 @@ proc mainLoop() {.cdecl.} =
       else:
         b.fontAtlasImageId = gpuTextureToImageId(gRender2D.fontTexture)
 
-      for (name, id) in themeEditorListFonts():
+      let fonts = themeEditorListFonts()
+      for (name, id) in fonts:
         b.fonts[name] = id
 
       discard b.beginUiFrame(outputWidth.float32, outputHeight.float32, makeInputSnapshot())
@@ -966,7 +978,7 @@ proc mainLoop() {.cdecl.} =
           b.endUiFrame(buildMeshRenderCommands = true)
           if gRender2D.beginRender(nil, outputWidth.uint32, outputHeight.uint32, render2DTargetFormat, gSampleCount):
             gRender2D.clear()
-            b.renderNewUi(b.frameOutput)
+            b.renderNewUi()
 
       let tickDt = (profNow().float64 / NS_PER_MS.float64).float32 - tickStart
       gFps = fps
@@ -986,8 +998,9 @@ proc mainLoop() {.cdecl.} =
         prof("vsync")
         gRender2D.presentToSwapchain(gWindow)
   except:
-    echo "mainLoop exception ", getCurrentExceptionMsg()
-    echo getCurrentException().getStackTrace()
+    when not defined(nimony):
+      echo "mainLoop exception ", getCurrentExceptionMsg()
+      echo getCurrentException().getStackTrace()
     when defined(wasm):
       emscripten_cancel_main_loop()
 
@@ -1018,11 +1031,7 @@ proc main =
   if gWindow == nil:
     echo "no window"
     return
-  echo "window created"
   discard gWindow.startTextInput()
-
-  for i in 0..<getNumGPUDrivers():
-    echo "gpu driver: ", getGPUDriver(i)
 
   const debug = true
   when debug:
@@ -1046,20 +1055,29 @@ proc main =
   else:
     discard gFontRender.init()
     var gpu = createGPUDevice(GPU_SHADERFORMAT_DXIL.uint32, debug, "direct3d12")
-    if gpu == nil:
-      echo "no gpu"
-      echo getError()
     discard gpu.claimWindowForGPUDevice(gWindow)
 
-    discard gFontRender.addSystemDefaultFonts()
     discard initRender2D(gRender2D, gFontRender.addr, gpu, render2DTargetFormat)
     if fileExists("./custom.frag.dxil"):
-      let customFrag = readFile("./custom.frag.dxil")
-      if customFrag.len > 0:
-        var customBytes = newSeq[uint8](customFrag.len)
-        copyMem(customBytes[0].addr, customFrag[0].unsafeAddr, customFrag.len)
-        gCustomMaterial = gRender2D.registerMaterial(customBytes, numUniformBuffers = 1)
-        echo "Registered custom material: ", gCustomMaterial
+      try:
+        var customFrag = readFile("./custom.frag.dxil")
+        if customFrag.len > 0:
+          var customBytes = newSeq[uint8](customFrag.len)
+          copyMem(customBytes[0].addr, customFrag.readRawData(), customFrag.len)
+          gCustomMaterial = gRender2D.registerMaterial(customBytes, numUniformBuffers = 1)
+          echo "Registered custom material: ", gCustomMaterial
+      except:
+        discard
+
+    discard gFontRender.addSystemDefaultFonts()
+    discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Regular.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-MediumItalic.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Medium.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-LightItalic.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Light.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Italic.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-BoldItalic.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Bold.ttf")
     testFont = gFontRender.addFontFace("assets/dontuse/fonts/DejaVuSansMono.ttf")
     discard gFontRender.addFontFace("assets/dontuse/fonts/DejaVuSansMono-Bold.ttf")
     discard gFontRender.addFontFace("assets/dontuse/fonts/DejaVuSansMono-Oblique.ttf")
@@ -1071,7 +1089,6 @@ proc main =
   fps = 60.0
   running = true
 
-  echo getPerformanceFrequency()
   when defined(wasm):
     emscripten_set_main_loop(mainLoop, 0, true)
   else:
@@ -1081,4 +1098,3 @@ proc main =
     destroyWindow(gWindow)
 
 main()
-echo "exit ok"

@@ -174,11 +174,11 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
         b.node:
           discard b.fillX().fitY().padding(2).gap(2).alignCenter()
           discard b.flexLayout().flexWrap(FlexWrap).justifyContent(FlexJustifyStart).alignItems(FlexAlignStart).alignContent(FlexContentStart).flexGaps(2, 2)
-          discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.72))
+          discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.72'f32))
           for chip in ["Left1", "Left2", "Left3", "Left4", "Left5", "Left6", "Left7", "Left8", "Left9", "Left10", "Left11", "Left12"]:
             b.node:
               discard b.fit().padding(2).flex(0.0, 0.0, -1.0)
-              discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.62))
+              discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.62'f32))
               discard b.text(chip)
 
       b.node:
@@ -193,11 +193,11 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
         b.node:
           discard b.fillX().fitY().padding(2).gap(2)
           discard b.flexLayout().flexWrap(FlexWrap).justifyContent(FlexJustifyStart).alignItems(FlexAlignAuto).alignContent(FlexContentStart).flexGaps(2, 2)
-          discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.72))
+          discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.72'f32))
           for chip in ["Right1", "Right2", "Right3", "Right4", "Right5", "Right6", "Right7", "Right8", "Right9", "Right10", "Right11", "Right12"]:
             b.node:
               discard b.fit().padding(2).flex(0.0, 0.0, -1.0)
-              discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.62))
+              discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.62'f32))
               discard b.text(chip)
 
     b.node("flex-anchor-ignored2"):
@@ -207,7 +207,7 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
 
       b.node:
         discard b.fitY().padding(3).flex(1.0, 1.0, 56.0).flexAlignSelf(flexAnchorIgnoredCurrentChildAlignSelf)
-        discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.62))
+        discard b.fillBackground().backgroundColor(accentVariation(accent, HGreen, 0.62'f32))
         b.node:
           discard b.fillX().fitY()
           discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).wrapText()
@@ -220,7 +220,7 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
 
       b.node:
         discard b.fitY().padding(3).flex(1.0, 1.0, 64.0).flexAlignSelf(flexAnchorIgnoredCurrentChildAlignSelf)
-        discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.62))
+        discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.62'f32))
         b.node:
           discard b.fillX().fitY()
           discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).wrapText()
@@ -331,7 +331,7 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
           let basis = if i mod 3 == 0: 74.0'f32 elif i mod 3 == 1: 56.0'f32 else: 48.0'f32
           let itemFont = if i mod 3 == 0: 10.0'f32 elif i mod 3 == 1: 13.0'f32 else: 16.0'f32
           discard b.fit().padding(3).fontSize(itemFont).flex(0.0, 1.0, basis).flexAlignSelf(flexWrapCurrentChildAlignSelf).fillBackground()
-          discard b.backgroundColor(accentVariation(accent, HBlue, 0.72 + i.float32 * 0.03'f32))
+          discard b.backgroundColor(accentVariation(accent, HBlue, 0.72'f32 + i.float32 * 0.03'f32))
           discard b.text("wrap " & $i)
 
     b.layoutHorizontal("flex-wrap-reverse"):
@@ -343,7 +343,7 @@ proc buildFlexLayoutExamples*(b: var UiBuilder) =
         b.node:
           let itemFont = if i mod 2 == 0: 11.0'f32 else: 15.0'f32
           discard b.fit().padding(3).fontSize(itemFont).flex(0.0, 1.0, 66.0 - (i mod 3).float32 * 10.0'f32).flexAlignSelf(flexWrapCurrentChildAlignSelf).fillBackground()
-          discard b.backgroundColor(accentVariation(accent, HOrange, 0.95 - i.float32 * 0.05'f32))
+          discard b.backgroundColor(accentVariation(accent, HOrange, 0.95'f32 - i.float32 * 0.05'f32))
           discard b.text("rev " & $i)
 
     b.label("justify-content interactive"):
@@ -535,7 +535,7 @@ proc buildGridLayoutExamples*(b: var UiBuilder) =
       for labelText in ["one", "two wide", "three", "four", "five", "six"]:
         b.node:
           discard b.gridJustifySelf(gridFrCurrentJustifySelf).gridAlignSelf(gridFrCurrentAlignSelf)
-          discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.85))
+          discard b.fillBackground().backgroundColor(accentVariation(accent, HBlue, 0.85'f32))
           discard b.text(labelText).fit()
 
     b.label("Self alignment inside cells"):

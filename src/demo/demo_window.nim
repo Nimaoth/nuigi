@@ -493,7 +493,7 @@ proc buildMaskChildrenExamples*(b: var UiBuilder) =
     b.node("mask-stage"):
       discard b.size(320, 170).padding(8)
       let h = b.wasHovered()
-      discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 0.9))
+      discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 0.9'f32))
       if maskDemoMask:
         discard b.maskChildren()
       if maskDemoNoHover:
@@ -915,7 +915,7 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
       nameCell("dynamicVirtualList", "Variable row heights; only renders visible rows. Very fast for huge lists, and handles mixed item height, caches rendered item heights for the scroll bar.")
       b.node:
         discard b.fillX().height(220).padding(4)
-        b.dynamicVirtualList(cvItemCount, 40.0'f32, cvDynItem)
+        discard b.dynamicVirtualList(cvItemCount, 40.0'f32, cvDynItem)
 
 # ---------------------------------------------------------------------------
 # Type 2 — combined common layouts (basic features composed)
@@ -993,7 +993,7 @@ proc buildLayoutExamples*(b: var UiBuilder) =
           discard b.size(96, 64).padding(6).gap(4)
           discard b.layout(LayoutVertical).forwardLayout()
           discard b.flex(0.0, 1.0, 96.0)
-          discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 0.9 - i.float32 * 0.04'f32)).cornerRadius(4)
+          discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 0.9'f32 - i.float32 * 0.04'f32)).cornerRadius(4)
           b.label("Card " & $i): discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor)
           b.labelWrapped("item description"):
             discard b.fontSize(11).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
@@ -1151,7 +1151,7 @@ proc buildSubpixelExamples*(b: var UiBuilder) =
       b.nodeWithId(labelId):
         discard b.position(offset, 0)
         discard b.fitX().fitY()
-        discard b.copyTextStyleIndex(UiStyleIndexLabel)
+        discard b.copyTextStyleIndex(UiStyleIndexLabelText)
         discard b.text("Subpixel stress test")
         absoluteSize = b.currentNode.size + vec2(5, 5)
 
@@ -1416,7 +1416,7 @@ proc buildDemoItem(b: var UiBuilder, itemIndex: int, userData: int) =
 proc buildAllExamples(b: var UiBuilder) =
   b.layoutVertical("all-root"):
     discard b.fill()
-    b.dynamicVirtualList(examples.len - 1, 500, buildDemoItem)
+    discard b.dynamicVirtualList(examples.len - 1, 500, buildDemoItem)
 
 proc buildDemoUi*(b: var UiBuilder) =
   prof("buildDemoUi")

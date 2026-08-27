@@ -131,7 +131,7 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
           dataYm += fnm(sx, udm)
           inc sampleCnt
       if sampleCnt > 0:
-        dataYm /= sampleCnt.float32
+        dataYm = dataYm / sampleCnt.float32
       let cy = pos.y + size.y - (dataYm - yRange.x) * invY * size.y
       let c = series[s].lineColor
       for k in 0 ..< circleSegs:

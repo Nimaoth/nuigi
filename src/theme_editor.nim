@@ -239,8 +239,8 @@ let themeEditorId* = ThemeTitle.hashChars.UiNodeId
 proc rebuildTheme(themeEditor: var ThemeEditor, b: var UiBuilder) =
   ## Rebuild the active theme from the editor's primary color (or the built-in
   ## default when none is chosen) and optionally strip all corner radii.
-  var styles: seq[UiStyle]
-  var texts: seq[UiNodeText]
+  var styles: seq[UiStyle] = @[]
+  var texts: seq[UiNodeText] = @[]
   if themeEditor.primaryColor.a > 0.0'f32:
     (styles, texts) = createThemeFromColor(themeEditor.primaryColor)
   else:

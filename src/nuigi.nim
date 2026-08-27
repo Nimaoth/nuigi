@@ -525,13 +525,10 @@ const
   UiThemeStyleSlotCount* = int(UiStyleIndexAccent)
   UiTextStyleCount* = int(UiStyleIndexHeaderText)
 
-converter uiStyleIndexToUint16*(x: UiStyleIndex): uint16 = uint16(ord(x))
-converter uiTextStyleIndexToUint16*(x: UiTextStyleIndex): uint16 = uint16(ord(x))
+func uiStyleIndexToUint16*(x: UiStyleIndex): uint16 = uint16(ord(x))
+func uiTextStyleIndexToUint16*(x: UiTextStyleIndex): uint16 = uint16(ord(x))
 
-const
-  UiStyleIndexLabel* = UiStyleIndexCheckboxHover
-
-func accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
+proc accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
   ## Derive a color from `base` by rotating hue (`hueShift` in turns, 0..1)
   ## and scaling brightness (V) by `brightness`. Used to generate the varied
   ## colored blocks in the demos from a single `Accent` theme color.
@@ -627,7 +624,8 @@ proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId)
   ## Prevent node storage from being garbage-collected this frame.
 
 proc makeTextArrangementKey(text: UiString, fontSize: float32, fontId: UiFontId, maxWidth: float32 = -1): uint64 {.inline, raises: [].} =
-  uint64(!$(nui_hash.hash(text) !& nui_hash.hash(fontSize) !& nui_hash.hash(maxWidth) !& nui_hash.hash(fontId)))
+  let a = !$(text.valueHash !& nui_hash.hash(fontSize) !& nui_hash.hash(maxWidth) !& nui_hash.hash(fontId))
+  uint64(a)
 
 proc evictOldestTextArrangement(b: var UiBuilder) {.raises: [].} =
   prof("evictOldestTextArrangement")
@@ -1074,10 +1072,14 @@ proc themeTextStyle*(b: UiBuilder, textStyleIndex: int): ptr UiNodeText {.inline
   ## Get a pointer to a theme text style slot by index (int overload).
   b.themeTextStyle(max(0, textStyleIndex).uint16)
 
+proc themeTextStyle*(b: UiBuilder, textStyleIndex: UiTextStyleIndex): ptr UiNodeText {.inline.} =
+  ## Get a pointer to a theme text style slot by index (int overload).
+  b.themeTextStyle(textStyleIndex.uint16)
+
 proc setThemeTextStyle*(b: var UiBuilder, textStyleIndex: uint16, value: UiNodeText): var UiBuilder {.discardable.} =
   ## Set a theme text style slot by index. Also updates defaultText if setting the default slot.
   b.ensureThemeTextStyleSlot(textStyleIndex) = value
-  if textStyleIndex == UiStyleIndexDefault:
+  if textStyleIndex == UiStyleIndexDefault.uint16:
     b.defaultText = value
   b
 
@@ -1130,10 +1132,14 @@ proc themeStyle*(b: UiBuilder, styleIndex: int): ptr UiStyle {.inline.} =
   ## Get a pointer to a theme style slot by index (int overload).
   b.themeStyle(max(0, styleIndex).uint16)
 
+proc themeStyle*(b: UiBuilder, styleIndex: UiStyleIndex): ptr UiStyle {.inline.} =
+  ## Get a pointer to a theme style slot by index (int overload).
+  b.themeStyle(styleIndex.uint16)
+
 proc setThemeStyle*(b: var UiBuilder, styleIndex: uint16, value: UiStyle): var UiBuilder {.discardable.} =
   ## Set a theme style slot by index. Also updates defaultStyle if setting the default slot.
   b.ensureThemeStyleSlot(styleIndex) = value
-  if styleIndex == UiStyleIndexDefault:
+  if styleIndex == UiStyleIndexDefault.uint16:
     b.defaultStyle = value
   b
 
@@ -1164,6 +1170,11 @@ proc styleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
   b.setCurrentNodeStyleIndex(value)
   b
 
+proc styleIndex*(b: var UiBuilder, value: UiStyleIndex): var UiBuilder {.discardable.} =
+  ## Fluent setter: set the current node's style index to a theme slot (int overload).
+  b.setCurrentNodeStyleIndex(value.uint16)
+  b
+
 proc copyStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
   ## Fluent setter: copy a theme style into the current node's style slot.
   b.copyCurrentNodeStyleAtIndex(value)
@@ -1172,6 +1183,11 @@ proc copyStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardab
 proc copyStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
   ## Fluent setter: copy a theme style into the current node's style slot (int overload).
   b.copyCurrentNodeStyleAtIndex(value)
+  b
+
+proc copyStyleIndex*(b: var UiBuilder, value: UiStyleIndex): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme style into the current node's style slot (int overload).
+  b.copyCurrentNodeStyleAtIndex(value.uint16)
   b
 
 proc textStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
@@ -1192,6 +1208,11 @@ proc copyTextStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.disca
 proc copyTextStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
   ## Fluent setter: copy a theme text style into the current node's text slot (int overload).
   b.copyCurrentNodeTextAtIndex(value)
+  b
+
+proc copyTextStyleIndex*(b: var UiBuilder, value: UiTextStyleIndex): var UiBuilder {.discardable.} =
+  ## Fluent setter: copy a theme text style into the current node's text slot (int overload).
+  b.copyCurrentNodeTextAtIndex(value.uint16)
   b
 
 proc setCurrentNodeGap*(b: var UiBuilder, value: float32) {.inline.} =
@@ -1831,7 +1852,7 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
     textColor: UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32),
   )
 
-proc rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =
+func rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =
   ## Construct a UiColor from numeric values (0-1 range for float, 0-255 for int).
   UiColor(r: r.float32, g: g.float32, b: b.float32, a: a.float32)
 

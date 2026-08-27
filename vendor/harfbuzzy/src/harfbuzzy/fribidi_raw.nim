@@ -3,8 +3,6 @@
 when defined(macosx):
   import std/os
 
-const fribidiDynlibOverride* {.strdefine: "harfbuzzyFribidiDynlib".} = ""
-
 when defined(macosx):
   const fribidiDetectedBrewPrefix = staticExec(
     "sh -c 'if command -v brew >/dev/null 2>&1; then brew --prefix fribidi 2>/dev/null | tr -d \"\\n\"; fi'"
@@ -22,9 +20,7 @@ when fribidiIncludeDir.len > 0:
   {.passC: "-I" & fribidiIncludeDir.}
 
 const fribidiLib* =
-  when fribidiDynlibOverride.len > 0:
-    fribidiDynlibOverride
-  elif defined(windows):
+  when defined(windows):
     "fribidi.dll"
   elif defined(macosx) and fribidiDetectedBrewPrefix.len > 0:
     fribidiDetectedBrewPrefix / "lib" / "libfribidi.dylib"

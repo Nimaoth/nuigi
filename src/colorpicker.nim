@@ -297,7 +297,9 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
       if drag or click:
         let ns = clamp(lx / sz.x, 0.0'f32, 1.0'f32)
         let nv = clamp(1.0'f32 - ly / sz.y, 0.0'f32, 1.0'f32)
-        if abs(ns - storage.s) > 0.0008'f32 or abs(nv - storage.v) > 0.0008'f32:
+        let s: float32 = ns - storage.s
+        let v: float32 = nv - storage.v
+        if abs(s) > 0.0008'f32 or abs(v) > 0.0008'f32:
           storage.s = ns
           storage.v = nv
           changed = true
@@ -312,7 +314,7 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
       let click = b.wasClicked(storage.hueIdx, includeChildren = true)
       if drag or click:
         let nh = clamp(lx / sz.x, 0.0'f32, 1.0'f32)
-        if abs(nh - storage.h) > 0.0008'f32:
+        if (nh - storage.h).float32.abs > 0.0008'f32:
           storage.h = nh
           changed = true
 
@@ -326,7 +328,7 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
       let click = b.wasClicked(storage.alphaIdx, includeChildren = true)
       if drag or click:
         let na = clamp(lx / sz.x, 0.0'f32, 1.0'f32)
-        if abs(na - storage.a) > 0.0008'f32:
+        if (na - storage.a).float32.abs > 0.0008'f32:
           storage.a = na
           changed = true
 
@@ -336,8 +338,8 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
     b.focusedNode = noneNodeId()
 
   if pickerOpen and MouseLeft in b.frameCtx.input.mousePressed:
-    let swatchHovered = swatchIdx >= 0 and b.wasHovered(swatchIdx, includeChildren = true)
-    let popupHovered = popupIdx >= 0 and b.wasHovered(popupIdx, includeChildren = true)
+    let swatchHovered: bool = swatchIdx >= 0 and b.wasHovered(swatchIdx, includeChildren = true)
+    let popupHovered: bool = popupIdx >= 0 and b.wasHovered(popupIdx, includeChildren = true)
     if not swatchHovered and not popupHovered and not b.wasHovered(pickerIdx, includeChildren = true):
       b.focusedNode = noneNodeId()
 

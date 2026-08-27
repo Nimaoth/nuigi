@@ -34,21 +34,21 @@ proc virtualList*(b: var UiBuilder,
 template label*(b: var UiBuilder, inText: string, body: untyped): untyped =
   b.node:
     discard b.fitX().fitY()
-    discard b.copyTextStyleIndex(UiStyleIndexLabel)
+    discard b.copyTextStyleIndex(UiStyleIndexLabelText)
     body
     discard b.text(inText)
 
 template labelWrapped*(b: var UiBuilder, inText: string, body: untyped): untyped =
   b.node:
     discard b.wrapText().fitY()
-    discard b.copyTextStyleIndex(UiStyleIndexLabel)
+    discard b.copyTextStyleIndex(UiStyleIndexLabelText)
     body
     discard b.text(inText)
 
 proc label*(b: var UiBuilder, inText: string) =
   b.node:
     discard b.fitX().fitY()
-    discard b.copyTextStyleIndex(UiStyleIndexLabel)
+    discard b.copyTextStyleIndex(UiStyleIndexLabelText)
     discard b.text(inText)
 
 template tooltip*(b: var UiBuilder, body: untyped): untyped =
@@ -290,7 +290,7 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     if label != "":
       b.node("checkbox-label"):
         # discard b.padding(4)
-        discard b.copyTextStyleIndex(UiStyleIndexLabel)
+        discard b.copyTextStyleIndex(UiStyleIndexLabelText)
         discard b.fillX().fitX().fitY().alignCenter()
         discard b.text(label)
   discard b.popId()
@@ -406,8 +406,8 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
 
   false
 
-const dragFloatNegInf: float32 = -Inf
-const dragFloatInf: float32 = Inf
+const dragFloatNegInf: float32 = -Inf.float32
+const dragFloatInf: float32 = Inf.float32
 const dragFloatHeight*: float32 = 18.0'f32
 const dragFloatDefaultWidth*: float32 = 160.0'f32
 const dragFloatMultiWidth*: float32 = 64.0'f32
@@ -421,9 +421,9 @@ type DragFloatLabelMode* = enum
 
 proc dragFloat*(b: var UiBuilder, value: var float32,
     default: float32,
-    minValue: float32 = dragFloatNegInf,
-    maxValue: float32 = dragFloatInf,
-    trackWidth: float32 = dragFloatDefaultWidth): bool =
+    minValue: float32 = dragFloatNegInf.float32,
+    maxValue: float32 = dragFloatInf.float32,
+    trackWidth: float32 = dragFloatDefaultWidth.float32): bool =
   prof("dragFloat")
   let trackHeight = dragFloatHeight
 
@@ -439,7 +439,7 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
 
   var normalized = 0.0'f32
   if hasMin and hasMax and high > low:
-    normalized = clamp((value - low) / (high - low), 0.0'f32, 1.0'f32)
+    normalized = clamp((value - low) / (high - low), 0.0'f32, 1.0'f32).float32
   let fillWidth = normalized * trackWidth
 
   b.node:
@@ -503,22 +503,22 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
             clamp((input.mouse.x - trackPos.x) / track.size.x, 0.0'f32, 1.0'f32)
         let newValue = low + pointerT * span
         if abs(newValue - value) > 0.0001'f32:
-          value = newValue
+          value = newValue.float32
           changed = true
       elif dragging:
         let delta = input.mouseDelta.x * (span / 200.0'f32)
         if delta != 0.0'f32:
-          value += delta
-          if value < low: value = low
-          if value > high: value = high
+          value += delta.float32
+          if value < low: value = low.float32
+          if value > high: value = high.float32
           changed = true
     else:
       if dragging:
         let delta = input.mouseDelta.x * 1.0'f32
         if delta != 0.0'f32:
-          value += delta
-          if hasMin and value < low: value = low
-          if hasMax and value > high: value = high
+          value += delta.float32
+          if hasMin and value < low: value = low.float32
+          if hasMax and value > high: value = high.float32
           changed = true
 
   changed
@@ -574,14 +574,14 @@ proc dragFloat2*(b: var UiBuilder, v: var Vec2,
 
 proc dragFloat2*(b: var UiBuilder, v: var Vec2,
     default: float32,
-    minValue: float32 = dragFloatNegInf,
-    maxValue: float32 = dragFloatInf,
+    minValue: float32 = dragFloatNegInf.float32,
+    maxValue: float32 = dragFloatInf.float32,
     labelMode: DragFloatLabelMode = dfXYZW,
     customLabels: seq[string] = @[],
     trackWidth: float32 = dragFloatMultiWidth): bool =
-  let defaults = [default, default]
-  let mins = [minValue, minValue]
-  let maxs = [maxValue, maxValue]
+  let defaults = [default.float32, default.float32]
+  let mins = [minValue.float32, minValue.float32]
+  let maxs = [maxValue.float32, maxValue.float32]
   b.dragFloat2(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
 
 proc dragFloat3*(b: var UiBuilder, v: var Vec3,
@@ -602,14 +602,14 @@ proc dragFloat3*(b: var UiBuilder, v: var Vec3,
 
 proc dragFloat3*(b: var UiBuilder, v: var Vec3,
     default: float32,
-    minValue: float32 = dragFloatNegInf,
-    maxValue: float32 = dragFloatInf,
+    minValue: float32 = dragFloatNegInf.float32,
+    maxValue: float32 = dragFloatInf.float32,
     labelMode: DragFloatLabelMode = dfXYZW,
     customLabels: seq[string] = @[],
     trackWidth: float32 = dragFloatMultiWidth): bool =
-  let defaults = [default, default, default]
-  let mins = [minValue, minValue, minValue]
-  let maxs = [maxValue, maxValue, maxValue]
+  let defaults = [default.float32, default.float32, default.float32]
+  let mins = [minValue.float32, minValue.float32, minValue.float32]
+  let maxs = [maxValue.float32, maxValue.float32, maxValue.float32]
   b.dragFloat3(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
 
 proc dragFloat4*(b: var UiBuilder, v: var Vec4,
@@ -631,14 +631,14 @@ proc dragFloat4*(b: var UiBuilder, v: var Vec4,
 
 proc dragFloat4*(b: var UiBuilder, v: var Vec4,
     default: float32,
-    minValue: float32 = dragFloatNegInf,
-    maxValue: float32 = dragFloatInf,
+    minValue: float32 = dragFloatNegInf.float32,
+    maxValue: float32 = dragFloatInf.float32,
     labelMode: DragFloatLabelMode = dfXYZW,
     customLabels: seq[string] = @[],
     trackWidth: float32 = dragFloatMultiWidth): bool =
-  let defaults = [default, default, default, default]
-  let mins = [minValue, minValue, minValue, minValue]
-  let maxs = [maxValue, maxValue, maxValue, maxValue]
+  let defaults: array[4, float32] = [default.float32, default.float32, default.float32, default.float32]
+  let mins: array[4, float32] = [minValue.float32, minValue.float32, minValue.float32, minValue.float32]
+  let maxs: array[4, float32] = [maxValue.float32, maxValue.float32, maxValue.float32, maxValue.float32]
   b.dragFloat4(v, defaults, mins, maxs, labelMode, customLabels, trackWidth)
 
 type DropdownStorage = ref object of UiNodeStorageData

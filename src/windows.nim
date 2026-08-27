@@ -292,7 +292,7 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
 
           var collapseBtnId = noneNodeId()
           b.node:
-            b.size(textHeight, textHeight).noChildHover()
+            discard b.size(textHeight, textHeight).noChildHover()
             if b.wasHovered():
               discard b.copyStyleIndex(UiStyleIndexWindowTitleBarCollapseHover).fillBackground()
             collapseBtnId = b.currentNode.id

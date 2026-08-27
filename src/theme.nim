@@ -1,8 +1,8 @@
+import std/math
 import nuigi
 import colorpicker
-import math
 
-func themeTint(baseH, hueShift, sat, val, a: float32): UiColor =
+proc themeTint(baseH, hueShift, sat, val, a: float32): UiColor =
   ## Build a color from `baseH` (the primary hue, 0..1) shifted by `hueShift`
   ## turns, with the given saturation/value/brightness and alpha.
   let hh = baseH + hueShift

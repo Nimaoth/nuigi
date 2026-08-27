@@ -17,7 +17,7 @@ type
 
   Arena* = object
     bucketSize: int
-    buckets: seq[Bucket] = @[]
+    buckets: seq[Bucket]
 
 proc `=copy`(x: var Arena, y: Arena) {.error.}
 

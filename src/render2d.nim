@@ -157,12 +157,13 @@ proc ensureRenderTargetTexture(r: var Render2D, renderer: Renderer): nil Texture
     discard r.targetTexture.setTextureBlendMode(BLENDMODE_BLEND)
   r.targetTexture
 
-proc ensureRenderTarget(r: var Render2D, renderer: Renderer, width, height: uint32, targetFormat: GPUTextureFormat,
+proc ensureRenderTarget(r: var Render2D, renderer: nil Renderer, width, height: uint32, targetFormat: GPUTextureFormat,
     sample_count: GPUSampleCount
   ): bool =
   if r.device == nil or width == 0 or height == 0:
     return false
 
+  let renderer = renderer
   if r.target != nil and r.targetWidth == width and r.targetHeight == height and r.pipelineFormat == targetFormat and r.sample_count == sample_count:
     return renderer == nil or r.ensureRenderTargetTexture(renderer) != nil
 
@@ -211,7 +212,9 @@ proc ensureRenderTarget(r: var Render2D, renderer: Renderer, width, height: uint
   r.targetWidth = width
   r.targetHeight = height
   r.sample_count = sample_count
-  r.ensureRenderTargetTexture(renderer) != nil
+  if renderer != nil:
+    return r.ensureRenderTargetTexture(renderer) != nil
+  return true
 
 proc releaseBuffers(r: var Render2D) =
   if r.vertexBuffer != nil:
@@ -742,7 +745,7 @@ proc clearBatch*(r: var Render2D) =
   r.textureIndices.setLen(0)
   r.vertexIndex = 0
 
-proc beginRender*(r: var Render2D, renderer: Renderer, targetWidth, targetHeight: uint32, targetFormat: GPUTextureFormat = render2DTargetFormat,
+proc beginRender*(r: var Render2D, renderer: nil Renderer, targetWidth, targetHeight: uint32, targetFormat: GPUTextureFormat = render2DTargetFormat,
     sample_count: GPUSampleCount = GPU_SAMPLECOUNT_1): bool =
   prof("Render2D.beginRender")
   if r.device == nil or targetWidth == 0 or targetHeight == 0:
@@ -1454,16 +1457,17 @@ proc present*(r: var Render2D, renderer: Renderer): bool =
 
 proc presentToSwapchain*(r: var Render2D, window: Window) =
   let commandBuffer = r.device.acquireGPUCommandBuffer()
-  var swapchainTexture: GPUTexture = nil
+  var swapchainTexture: nil GPUTexture = nil
   var swapchainWidth: uint32 = 0
   var swapchainHeight: uint32 = 0
   discard commandBuffer.waitAndAcquireGPUSwapchainTexture(window, swapchainTexture, swapchainWidth, swapchainHeight)
-  let copyPass = commandBuffer.beginGPUCopyPass()
-  var source = GPUTextureLocation(texture: r.target)
-  var destination = GPUTextureLocation(texture: swapchainTexture)
-  copyPass.copyGPUTextureToTexture(source.addr, destination.addr, r.targetWidth, r.targetHeight, 1, false)
-  copyPass.endGPUCopyPass()
-  discard submitGPUCommandBuffer(commandBuffer)
+  if swapchainTexture != nil:
+    let copyPass = commandBuffer.beginGPUCopyPass()
+    var source = GPUTextureLocation(texture: r.target)
+    var destination = GPUTextureLocation(texture: swapchainTexture)
+    copyPass.copyGPUTextureToTexture(source.addr, destination.addr, r.targetWidth, r.targetHeight, 1, false)
+    copyPass.endGPUCopyPass()
+    discard submitGPUCommandBuffer(commandBuffer)
 
 proc copyTargetToPreviousFrame(r: var Render2D): bool =
   if r.commandBuffer == nil or r.target == nil or r.previousTarget == nil:
