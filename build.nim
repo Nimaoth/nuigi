@@ -1,8 +1,53 @@
 
 import std/[parseopt, options, strutils, os, strformat, dirs, files, sequtils, unicode, osproc, times, tables, json, jsonutils, threadpool, sets, sugar, algorithm, strtabs]
 
-let windowsMsBuildPath = "C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin"
 let windowsMesonPath = "meson.exe"
+
+proc findMsBuild(): string =
+  # Locate MSBuild.exe so the same build works locally and on CI (e.g. GitHub
+  # windows-latest runners) where the install edition/path may differ.
+  when defined(windows):
+    let vswhere = "C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    if fileExists(vswhere):
+      let res = execCmdEx(
+        &"\"{vswhere}\" -latest -requires Microsoft.Component.MSBuild -find \"MSBuild\\Current\\Bin\\MSBuild.exe\"",
+        options = {poUsePath, poEvalCommand, poStdErrToStdOut}
+      )
+      if res.exitCode == 0:
+        let p = res.output.strip()
+        if p.len > 0 and fileExists(p):
+          return p
+    for cand in @[
+      "C:/Program Files/Microsoft Visual Studio/2022/Community/MSBuild/Current/Bin/MSBuild.exe",
+      "C:/Program Files/Microsoft Visual Studio/2022/Professional/MSBuild/Current/Bin/MSBuild.exe",
+      "C:/Program Files/Microsoft Visual Studio/2022/Enterprise/MSBuild/Current/Bin/MSBuild.exe",
+      "C:/Program Files/Microsoft Visual Studio/2022/BuildTools/MSBuild/Current/Bin/MSBuild.exe",
+      "C:/Program Files/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe",
+      "C:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe"
+    ]:
+      if fileExists(cand): return cand
+    return "MSBuild.exe"
+  else:
+    return "msbuild"
+
+proc llvmBinDir(): string =
+  # Best-effort location of the LLVM bin dir so clang++/lld-link can be found
+  # both locally and on CI where LLVM may not be on PATH.
+  when defined(windows):
+    for cand in @["C:/Program Files/LLVM/bin", "C:/llvm/bin"]:
+      if dirExists(cand): return cand
+    # clang++ discoverable on PATH implies its sibling lld-link is too.
+    if execCmdEx("clang++.exe --version", options = {poUsePath, poEvalCommand, poStdErrToStdOut}).exitCode == 0:
+      return ""
+    let w = execCmdEx("where clang++.exe", options = {poUsePath, poEvalCommand, poStdErrToStdOut})
+    if w.exitCode == 0:
+      for line in w.output.splitLines():
+        let p = line.strip()
+        if p.len > 2:
+          return p[0 ..< p.rfind('\\')]
+    return ""
+  else:
+    return ""
 var passthroughArgs = newSeq[string]()
 
 var wasm = false
@@ -22,6 +67,9 @@ proc shell(command: string, workingDir: string = "") =
   var p: Process
   if gShellEnv.len > 0:
     var envT: StringTableRef = newStringTable()
+    # Seed with the inherited environment so required system variables
+    # (e.g. SYSTEMROOT) are not dropped when we override PATH or others.
+    for k, v in envPairs(): envT[k] = v
     for k, v in gShellEnv: envT[k] = v
     p = startProcess(command, options = {poParentStreams, poUsePath, poEvalCommand}, workingDir = workingDir, env = envT)
   else:
@@ -95,7 +143,7 @@ proc buildSdl3(debug = false) =
     shell("git clone https://github.com/libsdl-org/SDL", "vendor")
 
   let mode = if debug: "Debug" else: "Release"
-  shell &"\"{windowsMsBuildPath}/MSBuild.exe\" VisualC/SDL/SDL.vcxproj /p:Configuration={mode} /p:Platform=x64", "vendor/SDL"
+  shell &"\"{findMsBuild()}\" VisualC/SDL/SDL.vcxproj /p:Configuration={mode} /p:Platform=x64", "vendor/SDL"
   createDir("build")
   createDir("bin")
   copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.dll", "./bin/SDL3.dll"
@@ -138,7 +186,7 @@ proc buildFreetype(debug = false) =
   if not dirExists("vendor/freetype"):
     shell("git clone https://gitlab.freedesktop.org/freetype/freetype.git", "vendor")
   let mode = if debug: "Debug" else: "Release"
-  shell &"\"{windowsMsBuildPath}/MSBuild.exe\" -t:Rebuild -p:Configuration={mode} -p:Platform=x64 MSBuild.sln", "vendor/freetype"
+  shell &"\"{findMsBuild()}\" -t:Rebuild -p:Configuration={mode} -p:Platform=x64 MSBuild.sln", "vendor/freetype"
   createDir("build")
   copyFile &"vendor/freetype/objs/x64/{mode}/freetype.dll", "./bin/freetype.dll"
   copyFile &"vendor/freetype/objs/x64/{mode}/freetype.lib", "./build/freetype.lib"
@@ -150,7 +198,20 @@ proc buildHarfbuzz() =
     shell("git clone https://github.com/harfbuzz/harfbuzz", "vendor")
 
   createDir("build")
-  shell "clang++.exe -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
+  let llvmBin = llvmBinDir()
+  let clangExe = if llvmBin.len > 0: "\"" & (llvmBin / "clang++.exe") & "\"" else: "clang++.exe"
+
+  # Make sure the LLVM bin dir (containing lld-link.exe) is on PATH so that
+  # -fuse-ld=lld-link resolves, both locally and on CI where LLVM may live in a
+  # location that is not on PATH.
+  let prevEnv = gShellEnv
+  if llvmBin.len > 0:
+    let basePath = if gShellEnv.hasKey("PATH"): gShellEnv["PATH"] else: getEnv("PATH")
+    gShellEnv["PATH"] = llvmBin & ";" & basePath
+
+  shell &"{clangExe} -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
+
+  gShellEnv = prevEnv
   copyFile &"build/harfbuzz.dll", "./bin/harfbuzz.dll"
 
 proc buildFribidi() =
@@ -166,7 +227,7 @@ proc buildFribidi() =
   else:
     shell(fribidiSetupCmd & " --backend=vs", "vendor/fribidi")
 
-  shell &"\"{windowsMsBuildPath}/MSBuild.exe\" /m /v:minimal fribidi.sln", "vendor/fribidi/" & fribidiBuildDir
+  shell &"\"{findMsBuild()}\" /m /v:minimal fribidi.sln", "vendor/fribidi/" & fribidiBuildDir
 
   createDir("build")
   var builtDll = ""
