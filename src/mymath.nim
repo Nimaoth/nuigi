@@ -1906,32 +1906,3 @@ when defined(nimony):
   proc `$`*[T: Scalar](a: GVec4[T]): string = "{" & $a.x & ", " & $a.y & ", " & $a.z & ", " & $a.w & "}"
 
   {.pop.}
-
-import sdl3
-func fpoint*(x, y: float32): FPoint = FPoint(x: x, y: y)
-func fpoint*(v: float32): FPoint = fpoint(v, v)
-converter vec2*(v: FPoint): Vec2 = vec2(v.x, v.y)
-converter fpoint*(v: Vec2): FPoint = fpoint(v.x, v.y)
-func rect*(x, y, w, h: float32): FRect = FRect(x: x, y: y, w: w, h: h)
-func rect*(xy: Vec2, wh: Vec2): FRect = FRect(x: xy.x, y: xy.y, w: wh.x, h: wh.y)
-func xy*(v: FRect): Vec2 = vec2(v.x, v.y)
-func xy2*(v: FRect): Vec2 = vec2(v.x + v.w, v.y + v.h)
-func wh*(v: FRect): Vec2 = vec2(v.w, v.h)
-
-func color*(r: float32 = 1; g: float32 = 1; b: float32 = 1; a: float32 = 1): FColor = FColor(r: r, g: g, b: b, a: a)
-
-when defined(withImgui):
-  import imgui
-
-  func imvec2*(x, y: float32): ImVec2 = ImVec2(x: x, y: y)
-  func imvec2*(v: float32): ImVec2 = imvec2(v, v)
-  converter vec2*(v: ImVec2): Vec2 = vec2(v.x, v.y)
-  converter imvec2*(v: Vec2): ImVec2 = imvec2(v.x, v.y)
-
-  func imvec4*(x, y, z, w: float32): ImVec4 = ImVec4(x: x, y: y, z: z, w: w)
-  func imvec4*(v: float32): ImVec4 = imvec4(v, v, v, v)
-  converter vec4*(v: ImVec4): Vec4 = vec4(v.x, v.y, v.z, v.w)
-  converter imvec4*(v: Vec4): ImVec4 = imvec4(v.x, v.y, v.z, v.w)
-  converter rect*(v: ImRect): FRect = rect(v.min.x, v.min.y, v.max.x, v.max.y)
-  func imrect*(x, y, w, h: float32): ImRect = ImRect(min: imvec2(x, y), max: imvec2(w, h))
-  converter imrect*(v: FRect): ImRect = imrect(v.x, v.y, v.w, v.h)

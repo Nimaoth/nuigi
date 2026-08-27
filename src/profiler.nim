@@ -1,7 +1,9 @@
 import std/[tables, assertions, strutils]
-import sdl3, mymath
 
 include compat2
+
+when defined(profiler) and not defined(nimony):
+  import sdl3, mymath
 
 # Timing source:
 #   - native:          SDL_GetTicksNS  (nanoseconds)
@@ -14,10 +16,13 @@ when defined(emscripten):
   proc emscriptenGetNow*(): float64 {.importc: "emscripten_get_now".}
 
 proc profNow*(): uint64 =
-  when defined(emscripten):
-    return uint64(emscriptenGetNow() * 1e6)
+  when defined(profiler) and not defined(nimony):
+    when defined(emscripten):
+      return uint64(emscriptenGetNow() * 1e6)
+    else:
+      return getTicksNS()
   else:
-    return getTicksNS()
+    return 0
 
 when defined(profiler) and not defined(nimony):
 
