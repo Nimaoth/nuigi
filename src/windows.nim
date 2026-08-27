@@ -2,7 +2,7 @@ import std/sequtils
 import nuigi
 import mymath
 import profiler
-import flex, widgets
+import flex
 
 include compat2
 

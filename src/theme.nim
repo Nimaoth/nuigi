@@ -14,7 +14,7 @@ proc createThemeFromColor*(primary: UiColor): (seq[UiStyle], seq[UiNodeText]) =
   ## color is the primary itself; all accent variations (warm/hover/active
   ## highlights) and every surface/text color are derived from `primary`'s hue
   ## via HSV manipulation so the whole UI stays color-cohesive.
-  let (h, s, v) = rgbToHsv(primary)
+  let (h, _, _) = rgbToHsv(primary)
   var styles = initDefaultThemeStyles()
   var texts = initDefaultThemeTextStyles()
 

@@ -15,7 +15,6 @@ when not defined(nimony):
 
 var demoTabIndex = 0
 var demoMenuOpen = false
-var demoMenuAnchor = vec2(0.0'f32, 0.0'f32)
 
 # ---------------------------------------------------------------------------
 # Type 1 #1 — Fill
@@ -1213,7 +1212,6 @@ proc buildStarCommands*(frameArena: ptr Arena, contentSize: Vec2): ArrayView[UiR
   let center = vec2(w * 0.5'f32, h * 0.5'f32)
   let outer = max(2.0'f32, min(w, h) * 0.5'f32 - 6.0'f32)
   let inner = outer * 0.45'f32
-  let points = 5
   let color = rgba(0.92, 0.46, 0.62, 1.0)
   var verts: array[10, Vec2] = default(array[10, Vec2])
   for i in 0 ..< 10:

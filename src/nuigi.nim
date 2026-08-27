@@ -1935,7 +1935,6 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
   let grayBorderStrong = UiColor(r: 0.32'f32, g: 0.32'f32, b: 0.36'f32, a: 1.0'f32)
   let grayScroll = UiColor(r: 0.30'f32, g: 0.30'f32, b: 0.34'f32, a: 0.95'f32)
   let accent = UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32)
-  let softFill = UiColor(r: 0.10'f32, g: 0.10'f32, b: 0.11'f32, a: 0.96'f32)
 
   result[int(UiStyleIndexDefault) - 1] = UiStyle(
   )

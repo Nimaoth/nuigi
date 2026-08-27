@@ -141,7 +141,6 @@ proc cpBuildHue(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let y0 = abs.y
   let w = n.size.x
   let hgt = n.size.y
-  let x1 = x0 + w
   let y1 = y0 + hgt
   let markerCol = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
 
@@ -309,7 +308,6 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
       let prev = b.absoluteNodePosPrev(hueId, storage.hueIdx)
       let sz = b.nodes[storage.hueIdx].size
       let lx = input.mouse.x - prev.x
-      let ly = input.mouse.y - prev.y
       let drag = (MouseLeft in input.mouseDown) and b.wasHeld(storage.hueIdx, includeChildren = true)
       let click = b.wasClicked(storage.hueIdx, includeChildren = true)
       if drag or click:
@@ -323,7 +321,6 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
       let prev = b.absoluteNodePosPrev(aId, storage.alphaIdx)
       let sz = b.nodes[storage.alphaIdx].size
       let lx = input.mouse.x - prev.x
-      let ly = input.mouse.y - prev.y
       let drag = (MouseLeft in input.mouseDown) and b.wasHeld(storage.alphaIdx, includeChildren = true)
       let click = b.wasClicked(storage.alphaIdx, includeChildren = true)
       if drag or click:

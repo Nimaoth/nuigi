@@ -1,4 +1,4 @@
-import std/[strutils, sequtils]
+import std/[strutils]
 import sdl3
 import mymath, arena, array_view
 import nuigi
@@ -216,14 +216,8 @@ when defined(profiler) and not defined(nimony):
     if gprof.timeHistory.len != gprof.plottedStats.len:
       gprof.timeHistory.setLen(gprof.plottedStats.len)
 
-    let nowTicks = lastEventTimestamp("frame", gprof.frameIndex)
-    proc toMs(ticks: uint64): float64 =
-      return ticks.float64 / NS_PER_MS.float64
-
     let n = gprof.timeHistory[0].len
     let fi = frameTimeIndex
-
-    let plotScale = gprof.plotScale
 
     let lineColors = [
       rgba(0.95'f32, 0.85'f32, 0.20'f32, 1.0'f32),

@@ -14,10 +14,10 @@ var b: UiBuilder
 var gUiExampleInitialized = false
 var gShowDemoWindow = true
 var gShowSettingsWindow = true
-var gUiWhiteTexture: nil Texture = nil
 var gRender2D: Render2D
 var gFontRender: FontRender
-var gFontAtlasTexture: nil Texture = nil
+when defined(wasm):
+  var gFontAtlasTexture: nil Texture = nil
 var gCustomMaterial: MaterialId = 0
 var testFont = 0'i16
 var debugPanelState: DebugPanel = DebugPanel()
@@ -81,23 +81,17 @@ type
   UiImageKind* = enum
     imageGpuTexture
     imageTexture
-    # imageSprite
 
 const
   uiImageKindShift = 62
   uiImageKindMask = 0b11'u64 shl uiImageKindShift
   uiImageDataMask = not uiImageKindMask
   uiImageTextureTag = 0b01'u64 shl uiImageKindShift
-  uiImageSpriteTag = 0b10'u64 shl uiImageKindShift
 
 func imageIdKind*(id: UiImageId): UiImageKind =
   case (cast[uint64](id) shr uiImageKindShift) and 0b11'u64
   of 0b01: imageTexture
-  # of 0b10: imageSprite
   else: imageGpuTexture
-
-# func spriteToImageId*(spriteId: SpriteId): UiImageId =
-#   UiImageId(cast[uint64](spriteId) or uiImageSpriteTag)
 
 func textureToImageId*(texture: nil Texture): UiImageId =
   if texture == nil:
@@ -108,9 +102,6 @@ func gpuTextureToImageId*(texture: GPUTexture): UiImageId =
   if texture == nil:
     return UiImageId(0'u64)
   UiImageId(cast[uint64](texture) and uiImageDataMask)
-
-# func imageIdToSprite*(id: UiImageId): SpriteId =
-#   SpriteId(cast[uint64](id) and uiImageDataMask)
 
 func imageIdToTexture*(id: UiImageId): nil Texture =
   cast[Texture](cast[uint64](id) and uiImageDataMask)
@@ -628,14 +619,6 @@ proc renderNewUi(b: var UiBuilder) =
       if cmd.vertexData != nil and cmd.vertexCount > 0:
         var gpuTexture: nil GPUTexture = nil
         case cmd.imageId.imageIdKind()
-        # of imageSprite:
-        #   let game = gGame
-        #   if game != nil:
-        #     let spriteId = cmd.imageId.imageIdToSprite()
-        #     let sprite = game.sprites.getSpriteFrame(spriteId, 0)
-        #     if sprite.texture != nil:
-        #       gpuTexture = sprite.texture.textureToGpuTexture()
-
         of imageTexture:
           gpuTexture = cmd.imageId.imageIdToTexture().textureToGpuTexture()
 
@@ -714,162 +697,163 @@ proc renderNewUi(b: var UiBuilder) =
     else:
       discard
 
-proc renderNewUiRenderer(b: var UiBuilder, frameOut: UiFrameOutput, renderer: Renderer) =
-  prof("renderCommands")
+when defined(wasm):
+  proc renderNewUiRenderer(b: var UiBuilder, frameOut: UiFrameOutput, renderer: Renderer) =
+    prof("renderCommands")
 
-  # Render an already-triangulated list of vertices via the SDL renderer.
-  # UiVertex and Render2DVertex share the same 32-byte interleaved layout
-  # (x, y, u, v, r, g, b, a), so we can point renderGeometryRaw directly at it.
-  proc drawRawVertices(renderer: Renderer, texture: nil Texture, first: ptr UiVertex, count: int) =
-    if count <= 0:
-      return
-    let xy = cast[ptr cfloat](first)
-    let color = cast[ptr FColor](cast[uint](first) + 16)
-    let uv = cast[ptr cfloat](cast[uint](first) + 8)
-    let stride = cint(sizeof(UiVertex))
-    discard renderer.renderGeometryRaw(
-      texture, xy, stride, color, stride, uv, stride,
-      cint(count), nil, 0, 0)
+    # Render an already-triangulated list of vertices via the SDL renderer.
+    # UiVertex and Render2DVertex share the same 32-byte interleaved layout
+    # (x, y, u, v, r, g, b, a), so we can point renderGeometryRaw directly at it.
+    proc drawRawVertices(renderer: Renderer, texture: nil Texture, first: ptr UiVertex, count: int) =
+      if count <= 0:
+        return
+      let xy = cast[ptr cfloat](first)
+      let color = cast[ptr FColor](cast[uint](first) + 16)
+      let uv = cast[ptr cfloat](cast[uint](first) + 8)
+      let stride = cint(sizeof(UiVertex))
+      discard renderer.renderGeometryRaw(
+        texture, xy, stride, color, stride, uv, stride,
+        cint(count), nil, 0, 0)
 
-  # Emit a filled quad (two triangles) for an axis/transformed rect.
-  proc renderFilledRectTransformed(renderer: Renderer, transform: UiAffine2, pos, size: Vec2, color: UiColor, texture: nil Texture = nil) =
-    if size.x <= 0.0'f32 or size.y <= 0.0'f32:
-      return
-    let p0 = transform.transformPoint2(pos)
-    let p1 = transform.transformPoint2(pos + vec2(size.x, 0.0'f32))
-    let p2 = transform.transformPoint2(pos + size)
-    let p3 = transform.transformPoint2(pos + vec2(0.0'f32, size.y))
-    var verts = [
-      UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
-      UiVertex(pos: p1, uv: vec2(1.0'f32, 0.0'f32), color: color),
-      UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
-      UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
-      UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
-      UiVertex(pos: p3, uv: vec2(0.0'f32, 1.0'f32), color: color),
-    ]
-    drawRawVertices(renderer, texture, verts[0].addr, 6)
+    # Emit a filled quad (two triangles) for an axis/transformed rect.
+    proc renderFilledRectTransformed(renderer: Renderer, transform: UiAffine2, pos, size: Vec2, color: UiColor, texture: nil Texture = nil) =
+      if size.x <= 0.0'f32 or size.y <= 0.0'f32:
+        return
+      let p0 = transform.transformPoint2(pos)
+      let p1 = transform.transformPoint2(pos + vec2(size.x, 0.0'f32))
+      let p2 = transform.transformPoint2(pos + size)
+      let p3 = transform.transformPoint2(pos + vec2(0.0'f32, size.y))
+      var verts = [
+        UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
+        UiVertex(pos: p1, uv: vec2(1.0'f32, 0.0'f32), color: color),
+        UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
+        UiVertex(pos: p0, uv: vec2(0.0'f32, 0.0'f32), color: color),
+        UiVertex(pos: p2, uv: vec2(1.0'f32, 1.0'f32), color: color),
+        UiVertex(pos: p3, uv: vec2(0.0'f32, 1.0'f32), color: color),
+      ]
+      drawRawVertices(renderer, texture, verts[0].addr, 6)
 
-  var transformStack: seq[UiAffine2] = @[identityAffine2()]
-  var clipStack: seq[Rect] = @[]
+    var transformStack: seq[UiAffine2] = @[identityAffine2()]
+    var clipStack: seq[Rect] = @[]
 
-  for cmd in frameOut.commands:
-    let transform = transformStack[^1]
-    case cmd.kind
-    of CmdTransformPush:
-      let nextTransform = applyNodeRenderTransform(
-        transform,
-        cmd.pivot,
-        cmd.offset,
-        cmd.rotation,
-        cmd.scale,
-      )
-      transformStack.add nextTransform
+    for cmd in frameOut.commands:
+      let transform = transformStack[^1]
+      case cmd.kind
+      of CmdTransformPush:
+        let nextTransform = applyNodeRenderTransform(
+          transform,
+          cmd.pivot,
+          cmd.offset,
+          cmd.rotation,
+          cmd.scale,
+        )
+        transformStack.add nextTransform
 
-    of CmdTransformPop:
-      if transformStack.len > 1:
-        discard transformStack.pop()
+      of CmdTransformPop:
+        if transformStack.len > 1:
+          discard transformStack.pop()
 
-    of CmdRectFill:
-      discard renderer.setRenderDrawColorFloat(cmd.color.r, cmd.color.g, cmd.color.b, cmd.color.a)
-      renderFilledRectTransformed(renderer, transform, cmd.pos, cmd.size, cmd.color)
+      of CmdRectFill:
+        discard renderer.setRenderDrawColorFloat(cmd.color.r, cmd.color.g, cmd.color.b, cmd.color.a)
+        renderFilledRectTransformed(renderer, transform, cmd.pos, cmd.size, cmd.color)
 
-    of CmdRawVertices:
-      if cmd.vertexData != nil and cmd.vertexCount > 0:
+      of CmdRawVertices:
+        if cmd.vertexData != nil and cmd.vertexCount > 0:
+          var texture: nil Texture = nil
+          if cmd.imageId.uint64 == 1:
+            texture = gFontAtlasTexture
+          else:
+            texture = cast[Texture](cmd.imageId)
+          # case cmd.imageId.imageIdKind()
+          # of imageTexture:
+          #   texture = cmd.imageId.imageIdToTexture()
+
+          # of imageGpuTexture:
+          #   texture = cmd.imageId.imageIdToGpuTexture()
+          # discard gRender2D.drawVertices(
+          #   cast[ptr UncheckedArray[Render2DVertex]](cmd.vertexData[0].addr).toOpenArray(0, cmd.vertexCount - 1),
+          #   texture,
+          #   cmd.samplerMode.toRender2DSamplerMode(),
+          #   materialId = cmd.materialId,
+          #   materialUniform = cmd.materialUniform,
+          # )
+          drawRawVertices(renderer, texture, cast[ptr UiVertex](cmd.vertexData), cmd.vertexCount)
+
+      of CmdRectStroke:
+        discard renderer.setRenderDrawColorFloat(cmd.color.r, cmd.color.g, cmd.color.b, cmd.color.a)
+        let scaledThickness = max(1.0'f32, cmd.thickness)
+        let thickness = min(scaledThickness, min(cmd.size.x, cmd.size.y) * 0.5'f32)
+        if thickness > 0:
+          let innerH = max(0.0'f32, cmd.size.y - thickness * 2.0'f32)
+          renderFilledRectTransformed(renderer, transform, cmd.pos, vec2(cmd.size.x, thickness), cmd.color)
+          renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x, cmd.pos.y + cmd.size.y - thickness), vec2(cmd.size.x, thickness), cmd.color)
+          renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
+          renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x + cmd.size.x - thickness, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
+
+      of CmdText:
+        var text: nil ptr UiNodeText = nil
+        if cmd.textIndex > 0 and b.frame.texts[cmd.textIndex - 1].text.len > 0:
+          text = b.frame.texts[cmd.textIndex - 1].addr
+
+        if text != nil:
+          let arrangement = b.getTextArrangement(text, -1)
+          if b.buildTextMesh != nil:
+            let (vertexData, vertexCount) = b.buildTextMesh(
+              arrangement[], cmd.pos, vec2(0.0'f32), text.textColor, transform)
+            if vertexData != nil and vertexCount > 0:
+              drawRawVertices(renderer, gFontAtlasTexture, cast[ptr UiVertex](vertexData), vertexCount)
+
+      of CmdClipPush:
+        let transformed = transformedRectAabb(transform, cmd.pos, cmd.size)
+        var clipRect = Rect(
+          x: floor(transformed.pos.x).cint,
+          y: floor(transformed.pos.y).cint,
+          w: max(0.0'f32, ceil(transformed.size.x)).cint,
+          h: max(0.0'f32, ceil(transformed.size.y)).cint,
+        )
+        if clipStack.len > 0:
+          clipRect = intersectRect(clipStack[^1], clipRect)
+        clipStack.add clipRect
+        discard renderer.setRenderClipRect(clipRect)
+
+      of CmdClipPop:
+        if clipStack.len > 0:
+          discard clipStack.pop()
+        if clipStack.len > 0:
+          discard renderer.setRenderClipRect(clipStack[^1])
+        else:
+          discard renderer.setRenderClipRect(nil)
+
+      of CmdLine:
+        let p0 = transform.transformPoint2(cmd.pos)
+        let p1 = transform.transformPoint2(cmd.pos2)
+        let dx = p1.x - p0.x
+        let dy = p1.y - p0.y
+        let len = sqrt(dx * dx + dy * dy)
+        let nx = if len > 0: -dy / len * cmd.thickness * 0.5'f32 else: 0.0'f32
+        let ny = if len > 0: dx / len * cmd.thickness * 0.5'f32 else: 0.0'f32
+        let c = cmd.color
+        var verts = [
+          UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
+          UiVertex(pos: vec2(p1.x + nx, p1.y + ny), uv: vec2(1.0'f32, 0.0'f32), color: c),
+          UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
+          UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
+          UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
+          UiVertex(pos: vec2(p0.x - nx, p0.y - ny), uv: vec2(0.0'f32, 1.0'f32), color: c),
+        ]
+        drawRawVertices(renderer, nil, verts[0].addr, 6)
+
+      of CmdImage:
+        # Textures ignored for now; draw as a plain filled rect.
         var texture: nil Texture = nil
         if cmd.imageId.uint64 == 1:
           texture = gFontAtlasTexture
         else:
           texture = cast[Texture](cmd.imageId)
-        # case cmd.imageId.imageIdKind()
-        # of imageTexture:
-        #   texture = cmd.imageId.imageIdToTexture()
+        renderFilledRectTransformed(renderer, transform, cmd.pos, cmd.size, cmd.color, texture)
 
-        # of imageGpuTexture:
-        #   texture = cmd.imageId.imageIdToGpuTexture()
-        # discard gRender2D.drawVertices(
-        #   cast[ptr UncheckedArray[Render2DVertex]](cmd.vertexData[0].addr).toOpenArray(0, cmd.vertexCount - 1),
-        #   texture,
-        #   cmd.samplerMode.toRender2DSamplerMode(),
-        #   materialId = cmd.materialId,
-        #   materialUniform = cmd.materialUniform,
-        # )
-        drawRawVertices(renderer, texture, cast[ptr UiVertex](cmd.vertexData), cmd.vertexCount)
-
-    of CmdRectStroke:
-      discard renderer.setRenderDrawColorFloat(cmd.color.r, cmd.color.g, cmd.color.b, cmd.color.a)
-      let scaledThickness = max(1.0'f32, cmd.thickness)
-      let thickness = min(scaledThickness, min(cmd.size.x, cmd.size.y) * 0.5'f32)
-      if thickness > 0:
-        let innerH = max(0.0'f32, cmd.size.y - thickness * 2.0'f32)
-        renderFilledRectTransformed(renderer, transform, cmd.pos, vec2(cmd.size.x, thickness), cmd.color)
-        renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x, cmd.pos.y + cmd.size.y - thickness), vec2(cmd.size.x, thickness), cmd.color)
-        renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
-        renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x + cmd.size.x - thickness, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
-
-    of CmdText:
-      var text: nil ptr UiNodeText = nil
-      if cmd.textIndex > 0 and b.frame.texts[cmd.textIndex - 1].text.len > 0:
-        text = b.frame.texts[cmd.textIndex - 1].addr
-
-      if text != nil:
-        let arrangement = b.getTextArrangement(text, -1)
-        if b.buildTextMesh != nil:
-          let (vertexData, vertexCount) = b.buildTextMesh(
-            arrangement[], cmd.pos, vec2(0.0'f32), text.textColor, transform)
-          if vertexData != nil and vertexCount > 0:
-            drawRawVertices(renderer, gFontAtlasTexture, cast[ptr UiVertex](vertexData), vertexCount)
-
-    of CmdClipPush:
-      let transformed = transformedRectAabb(transform, cmd.pos, cmd.size)
-      var clipRect = Rect(
-        x: floor(transformed.pos.x).cint,
-        y: floor(transformed.pos.y).cint,
-        w: max(0.0'f32, ceil(transformed.size.x)).cint,
-        h: max(0.0'f32, ceil(transformed.size.y)).cint,
-      )
-      if clipStack.len > 0:
-        clipRect = intersectRect(clipStack[^1], clipRect)
-      clipStack.add clipRect
-      discard renderer.setRenderClipRect(clipRect)
-
-    of CmdClipPop:
-      if clipStack.len > 0:
-        discard clipStack.pop()
-      if clipStack.len > 0:
-        discard renderer.setRenderClipRect(clipStack[^1])
       else:
-        discard renderer.setRenderClipRect(nil)
-
-    of CmdLine:
-      let p0 = transform.transformPoint2(cmd.pos)
-      let p1 = transform.transformPoint2(cmd.pos2)
-      let dx = p1.x - p0.x
-      let dy = p1.y - p0.y
-      let len = sqrt(dx * dx + dy * dy)
-      let nx = if len > 0: -dy / len * cmd.thickness * 0.5'f32 else: 0.0'f32
-      let ny = if len > 0: dx / len * cmd.thickness * 0.5'f32 else: 0.0'f32
-      let c = cmd.color
-      var verts = [
-        UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
-        UiVertex(pos: vec2(p1.x + nx, p1.y + ny), uv: vec2(1.0'f32, 0.0'f32), color: c),
-        UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
-        UiVertex(pos: vec2(p0.x + nx, p0.y + ny), uv: vec2(0.0'f32, 0.0'f32), color: c),
-        UiVertex(pos: vec2(p1.x - nx, p1.y - ny), uv: vec2(1.0'f32, 1.0'f32), color: c),
-        UiVertex(pos: vec2(p0.x - nx, p0.y - ny), uv: vec2(0.0'f32, 1.0'f32), color: c),
-      ]
-      drawRawVertices(renderer, nil, verts[0].addr, 6)
-
-    of CmdImage:
-      # Textures ignored for now; draw as a plain filled rect.
-      var texture: nil Texture = nil
-      if cmd.imageId.uint64 == 1:
-        texture = gFontAtlasTexture
-      else:
-        texture = cast[Texture](cmd.imageId)
-      renderFilledRectTransformed(renderer, transform, cmd.pos, cmd.size, cmd.color, texture)
-
-    else:
-      discard
+        discard
 
 proc mainLoop() {.cdecl.} =
   try:
@@ -911,12 +895,6 @@ proc mainLoop() {.cdecl.} =
             echo "EVENT_QUIT"
             running = false
             break
-
-          of EVENT_GAMEPAD_ADDED:
-            let gamepad = openGamepad(ev.gdevice.which)
-
-          of EVENT_GAMEPAD_REMOVED:
-            discard
 
           else:
             discard

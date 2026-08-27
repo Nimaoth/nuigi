@@ -70,14 +70,14 @@ when not defined(nimony):
     try:
       result = t[k]
     except:
-      discard
+      result = t.mgetOrPut(k, B.default)
 
   proc getOrQuit*[A, B](t: var OrderedTable[A, B]; k: A): var B {.raises: [].} =
     if not t.hasKey(k): quit "getOrQuit: missing key"
     try:
       result = t[k]
     except:
-      discard
+      result = t.mgetOrPut(k, B.default)
 
   proc getOrQuit*[A, B](t: Table[A, B]; k: A): B {.raises: [].} =
     ## Read-only variant for `let`-bound tables: nimony's `getOrQuit` takes

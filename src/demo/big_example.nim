@@ -1,7 +1,9 @@
-import std/[math, assertions]
+import std/[math]
 import "../nuigi", "../widgets", "../flex", "../grid"
 import "../mymath", "../arena", "../array_view"
 import "../profiler"
+
+include compat2
 
 # ---------------------------------------------------------------------------
 # Shared flex/grid option tables and helpers (mirrors ui_example.nim)

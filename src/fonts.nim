@@ -106,8 +106,8 @@ type
     vertices: seq[TextMeshVertex]
     lastUsedTick: uint64
     complete: bool
-    prev: TextMeshCacheEntry
-    next: TextMeshCacheEntry
+    prev {.cursor.}: TextMeshCacheEntry
+    next {.cursor.}: TextMeshCacheEntry
 
   FontRender* = object
     flags*: FontRenderFlags
@@ -829,17 +829,6 @@ proc textMeshCacheKey(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
   result.mixTextMeshHash(transform.ty)
   result.mixTextMeshHash(flags.textMeshFlagsBits)
   result.mixTextMeshHash(arrangement.glyphs.len.uint64)
-
-proc sameTextMeshRequest(entry: TextMeshCacheEntry, arrangement: UiTextArrangement,
-    pos, screenOffset: Vec2, color: FColor, transform: UiAffine2,
-    flags: FontRenderFlags): bool {.raises: [].} =
-  if entry.arrangement.fontSize != arrangement.fontSize or
-      entry.arrangement.glyphs.len != arrangement.glyphs.len or
-      entry.arrangement.contentHash != arrangement.contentHash or
-      entry.pos != pos or entry.screenOffset != screenOffset or
-      entry.color != color or entry.transform != transform or entry.flags != flags:
-    return false
-  true
 
 proc cachedTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangement,
     pos, screenOffset: Vec2, color: FColor, transform: UiAffine2): TextMesh {.raises: [].} =
