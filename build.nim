@@ -136,24 +136,6 @@ proc mesonCommand(args: string): string =
     return &"\"{windowsMesonPath}\" {args}"
   return &"meson {args}"
 
-proc ensureMeson() =
-  # Install meson (+ the ninja backend) via pip when missing, so the FriBidi
-  # build works on a fresh CI runner as well as locally.
-  let check = execCmdEx("meson --version", options = {poUsePath, poEvalCommand, poStdErrToStdOut})
-  if check.exitCode == 0:
-    return
-  echo "meson not found, installing via pip (meson + ninja)..."
-  for installer in @[
-    "python -m pip install meson ninja",
-    "py -m pip install meson ninja",
-    "pip install meson ninja"
-  ]:
-    let r = execCmdEx(installer, options = {poUsePath, poEvalCommand, poStdErrToStdOut})
-    if r.exitCode == 0:
-      return
-  echo "failed to install meson via pip"
-  quit(0)
-
 proc buildSdl3(debug = false) =
   echo "buildSdl3"
   createDir("vendor")
@@ -234,7 +216,6 @@ proc buildHarfbuzz() =
 
 proc buildFribidi() =
   echo "buildFribidi"
-  ensureMeson()
   createDir("vendor")
   if not dirExists("vendor/fribidi"):
     shell("git clone https://github.com/fribidi/fribidi", "vendor")

@@ -67,12 +67,15 @@ jobs:
       #     atlas rep
       #     atlas install
 
+      - name: install meson
+        run: python -m pip install meson ninja
+
       # 1) Build the build.nim tool itself (produces build.exe)
       - name: Compile build.nim
         run: nim c -o:build.exe build.nim
 
       - name: Build sdl
-        # if: ${{ steps.cache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.cache.outputs.cache-hit != 'true' }}
         run: ./build.exe deps
 
       - name: Build test nim2
