@@ -1438,6 +1438,8 @@ proc newTreeCursor*(childrenPerNode: seq[int]): TestTreeCursor =
   result.fieldName = treeName(result.path)
 
 var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+var treeTableShowColumnLines = true
+var treeTableShowIndentationLines = true
 proc buildTreeTableExample(b: var UiBuilder) =
   b.layoutVertical:
     b.debugName("tree-table-demo")
@@ -1445,6 +1447,10 @@ proc buildTreeTableExample(b: var UiBuilder) =
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     b.label("Tree Table"):
       discard b.fontSize(18)
+    b.layoutHorizontal("tree-table-options"):
+      discard b.fillX().fitY().gap(12)
+      if b.checkbox("Show column lines", treeTableShowColumnLines): discard
+      if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
     b.layoutVertical:
       b.debugName("tree-table-hosts")
       discard b.fillX().fitY().gap(12)
@@ -1460,16 +1466,22 @@ proc buildTreeTableExample(b: var UiBuilder) =
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
 
-            b.label("dummy value"):
-              discard b.fitX().fitY()
+            b.node:
+              discard b.fit().paddingX(10)
+              b.label("dummy value"):
+                discard b.fitX().fitY()
 
             b.node:
               discard b.fit().paddingX(10)
               b.label($cursor.childCount()):
                 discard b.anchorsX(1, 1).pivotX(1)
 
+          var opts = defaultTreeTableOptions()
+          opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit()]
+          opts.showColumnLines = treeTableShowColumnLines
+          opts.showIndentationLines = treeTableShowIndentationLines
           let testCursor = newTreeCursor(@[5, 5, 100])
-          b.treeTable(testCursor, [tableColumnFill(), tableColumnFill(), tableColumnFit()], renderRow)
+          b.treeTable(testCursor, opts, renderRow)
 
       block:
         b.layoutVertical:
@@ -1482,15 +1494,21 @@ proc buildTreeTableExample(b: var UiBuilder) =
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
 
-            b.label("bar"):
-              discard b.fitX().fitY()
+            b.node:
+              discard b.fit().paddingX(10)
+              b.label("bar"):
+                discard b.fitX().fitY()
 
             b.node:
               discard b.fit().paddingX(10)
               b.label($cursor.childCount()):
                 discard b.anchorsX(1, 1).pivotX(1)
 
-          b.treeTable(fsCursor, [tableColumnFit(), tableColumnFill(), tableColumnFit()], renderRow)
+          var opts = defaultTreeTableOptions()
+          opts.columns = @[tableColumnFit(), tableColumnFill(), tableColumnFit()]
+          opts.showColumnLines = treeTableShowColumnLines
+          opts.showIndentationLines = treeTableShowIndentationLines
+          b.treeTable(fsCursor, opts, renderRow)
 
 proc buildAllExamples(b: var UiBuilder)
 

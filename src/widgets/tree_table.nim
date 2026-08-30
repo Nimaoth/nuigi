@@ -42,7 +42,91 @@ type
 
   TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
 
+  TreeTableOptions* = object
+    ## Options for `treeTable`. All fields have sensible defaults; use
+    ## `defaultTreeTableOptions()` or a struct literal and override what you need.
+    columns*: seq[TableColumn]
+      ## Per-logical-column sizing (logical 0 = combined indent+name, logical N>=1 = physical N+1).
+      ## Same semantics as `widgets.tableColumn*` – Fixed/Fit/Fill/Proportional.
+    columnGap*: float32
+      ## Gap between logical columns (also the gap between indent and name inside logical 0).
+    showColumnLines*: bool
+      ## When true, vertical separator lines are drawn between logical columns.
+    columnLineThickness*: float32
+      ## Thickness of the vertical lines (px). Clamped to >= 1.
+    columnLineColor*: UiColor
+      ## Color of the vertical lines. When `hasCustomLineColor` is false the theme's
+      ## border color (`UiStyleIndexPanel` / `grayBorder`) is used.
+    hasCustomLineColor*: bool
+    showIndentationLines*: bool
+      ## When true, one vertical line per indentation level (depth) is drawn inside
+      ## the indent area. Lines span the full row height and thus connect across
+      ## neighboring rows that share the same depth level.
+    indentationLineThickness*: float32
+      ## Thickness of indentation lines (px).
+    indentationLineColor*: UiColor
+      ## Color of indentation lines. Falls back to theme border color when not custom.
+    hasCustomIndentationLineColor*: bool
+    indentationStep*: float32
+      ## Horizontal distance per depth level (default 20). The indent spacer is
+      ## `depth * indentationStep` wide; each guide is drawn centered in its step.
+
+  TreeTableLayout* = object
+    ## Internal layout payload passed as `userData` to `treeTableColumnLayout`.
+    ## Mirrors `TreeTableOptions` but stores columns as an arena pointer for the layout pass.
+    columnGap*: float32
+    columnCount*: int
+    columns*: ptr UncheckedArray[TableColumn]
+    showColumnLines*: bool
+    columnLineThickness*: float32
+    columnLineColor*: UiColor
+    hasCustomLineColor*: bool
+    showIndentationLines*: bool
+    indentationLineThickness*: float32
+    indentationLineColor*: UiColor
+    hasCustomIndentationLineColor*: bool
+    indentationStep*: float32
+
 func depth*(c: TreeCursor): int = c.path.len
+
+proc defaultTreeTableOptions*(): TreeTableOptions =
+  result = TreeTableOptions(
+    columns: @[],
+    columnGap: 4.0'f32,
+    showColumnLines: false,
+    columnLineThickness: 1.0'f32,
+    columnLineColor: UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomLineColor: false,
+    showIndentationLines: false,
+    indentationLineThickness: 1.0'f32,
+    indentationLineColor: UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomIndentationLineColor: false,
+    indentationStep: 20.0'f32,
+  )
+
+proc initTreeTableOptions*(
+    columns: openArray[TableColumn],
+    columnGap: float32 = 4.0'f32,
+    showColumnLines: bool = false,
+    columnLineThickness: float32 = 1.0'f32,
+    columnLineColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomLineColor: bool = false,
+    showIndentationLines: bool = false,
+    indentationLineThickness: float32 = 1.0'f32,
+    indentationLineColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomIndentationLineColor: bool = false,
+    indentationStep: float32 = 20.0'f32): TreeTableOptions =
+  result.columns = @columns
+  result.columnGap = columnGap
+  result.showColumnLines = showColumnLines
+  result.columnLineThickness = columnLineThickness
+  result.columnLineColor = columnLineColor
+  result.hasCustomLineColor = hasCustomLineColor or columnLineColor.a > 0.001'f32
+  result.showIndentationLines = showIndentationLines
+  result.indentationLineThickness = indentationLineThickness
+  result.indentationLineColor = indentationLineColor
+  result.hasCustomIndentationLineColor = hasCustomIndentationLineColor or indentationLineColor.a > 0.001'f32
+  result.indentationStep = if indentationStep > 0.001'f32: indentationStep else: 20.0'f32
 
 # Returns the editor state attached to `node`, creating it on first use.
 proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
@@ -378,11 +462,14 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
 # logical column N (N>=1) maps to physical child N+1. Only starting at the third
 # physical column (logical 1) are columns vertically aligned.
 #
-# When a column spec is supplied via userData (ptr UiTableLayout, same shape as
+# When a column spec is supplied via userData (ptr TreeTableLayout, same shape as
 # widgets.tableLayout), each logical column can be Fixed, Fit, Fill or
 # Proportional (see widgets.nim). Fixed/Fill/Proportional work for logical 0 as
 # well – the indent width is subtracted so the name column (physical 1) fills the
 # remainder of the allocated logical width.
+#
+# `TreeTableLayout.showColumnLines` draws vertical separator lines between
+# logical columns (inside the inter-column gap, centered).
 proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
   prof "treeTableColumnLayout"
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
@@ -450,67 +537,94 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
     return
 
   # -------------------------------------------------------------------------
-  # Spec path – Fixed / Fit / Fill / Proportional per logical column
+  # Spec path – Fixed / Fit / Fill / Proportional per logical column + lines
   # -------------------------------------------------------------------------
-  let data = cast[ptr UiTableLayout](userData)
+  let data = cast[ptr TreeTableLayout](userData)
   let logicalCount = max(0, data.columnCount)
-  if logicalCount == 0:
-    return
   let colGap = if data.columnGap > 0.0'f32: data.columnGap else: baseGap
+  # If no column spec but lines requested (columns empty), we still compute
+  # fitted widths dynamically so lines know where to go.
+  let useDynamicFit = logicalCount == 0
 
-  var colWidths = newSeq[float32](logicalCount)
-  var colWeights = newSeq[float32](logicalCount)
+  var colWidths: seq[float32]
+  var colWeights: seq[float32]
   var anyFit = false
-  for c in 0 ..< logicalCount:
-    let col = data.columns[c]
-    case col.kind
-    of TableColumnFixed:
-      colWidths[c] = max(0.0'f32, col.fixedWidth.round())
-      colWeights[c] = 0.0'f32
-    of TableColumnFit:
-      colWidths[c] = 0.0'f32
-      colWeights[c] = 0.0'f32
-      anyFit = true
-    of TableColumnFill:
-      colWidths[c] = 0.0'f32
-      colWeights[c] = 1.0'f32
-    of TableColumnProportional:
-      let w = max(0.0001'f32, col.proportional)
-      colWidths[c] = 0.0'f32
-      colWeights[c] = w
-
-  if anyFit:
+  if not useDynamicFit:
+    colWidths = newSeq[float32](logicalCount)
+    colWeights = newSeq[float32](logicalCount)
+    for c in 0 ..< logicalCount:
+      let col = data.columns[c]
+      case col.kind
+      of TableColumnFixed:
+        colWidths[c] = max(0.0'f32, col.fixedWidth.round())
+        colWeights[c] = 0.0'f32
+      of TableColumnFit:
+        colWidths[c] = 0.0'f32
+        colWeights[c] = 0.0'f32
+        anyFit = true
+      of TableColumnFill:
+        colWidths[c] = 0.0'f32
+        colWeights[c] = 1.0'f32
+      of TableColumnProportional:
+        let w = max(0.0001'f32, col.proportional)
+        colWidths[c] = 0.0'f32
+        colWeights[c] = w
+    if anyFit:
+      for rowIdx in b.children(nodeIdx):
+        var k = 0
+        var indentW: float32 = 0.0'f32
+        for childIdx in b.children(rowIdx):
+          let w = b.frame.nodes[childIdx].addr.size.x
+          if k == 0:
+            indentW = w
+          elif k == 1:
+            if colWeights[0] == 0.0'f32 and data.columns[0].kind == TableColumnFit:
+              let combined = indentW + colGap + w
+              colWidths[0] = max(colWidths[0], combined)
+          elif k - 1 < logicalCount:
+            let logical = k - 1
+            if colWeights[logical] == 0.0'f32 and data.columns[logical].kind == TableColumnFit:
+              colWidths[logical] = max(colWidths[logical], w)
+          k += 1
+    var usedByBase = 0.0'f32
+    var totalWeight = 0.0'f32
+    for c in 0 ..< logicalCount:
+      if colWeights[c] == 0.0'f32:
+        usedByBase += colWidths[c]
+      else:
+        totalWeight += colWeights[c]
+    let totalColGap = colGap * max(0, logicalCount - 1).float32
+    let freeSpace = contentW - totalColGap - usedByBase
+    if totalWeight > 0.0'f32 and freeSpace > 0.0'f32:
+      for c in 0 ..< logicalCount:
+        if colWeights[c] > 0.0'f32:
+          colWidths[c] = max(0.0'f32, freeSpace * (colWeights[c] / totalWeight)).round()
+  else:
+    # Dynamic fit fallback – mirrors the legacy path but we keep widths for line drawing.
+    colWidths = @[0.0'f32]
     for rowIdx in b.children(nodeIdx):
       var k = 0
-      var indentW: float32 = 0.0'f32
+      var firstTwo: float32 = 0.0'f32
       for childIdx in b.children(rowIdx):
         let w = b.frame.nodes[childIdx].addr.size.x
         if k == 0:
-          indentW = w
+          firstTwo += w
         elif k == 1:
-          if logicalCount > 0 and colWeights[0] == 0.0'f32 and data.columns[0].kind == TableColumnFit:
-            let combined = indentW + colGap + w
-            colWidths[0] = max(colWidths[0], combined)
-        elif k - 1 < logicalCount:
-          let logical = k - 1
-          if colWeights[logical] == 0.0'f32 and data.columns[logical].kind == TableColumnFit:
-            colWidths[logical] = max(colWidths[logical], w)
+          firstTwo += w
+          colWidths[0] = max(firstTwo, colWidths[0])
+        elif k - 1 >= colWidths.len:
+          colWidths.add(w)
+        elif w > colWidths[k - 1]:
+          colWidths[k - 1] = w
         k += 1
 
-  var usedByBase = 0.0'f32
-  var totalWeight = 0.0'f32
-  for c in 0 ..< logicalCount:
-    if colWeights[c] == 0.0'f32:
-      usedByBase += colWidths[c]
-    else:
-      totalWeight += colWeights[c]
-
-  let totalColGap = colGap * max(0, logicalCount - 1).float32
-  let freeSpace = contentW - totalColGap - usedByBase
-  if totalWeight > 0.0'f32 and freeSpace > 0.0'f32:
-    for c in 0 ..< logicalCount:
-      if colWeights[c] > 0.0'f32:
-        colWidths[c] = max(0.0'f32, freeSpace * (colWeights[c] / totalWeight)).round()
+  # Resolve helper for line drawing
+  let showLines = data.showColumnLines
+  let lineThickness = max(1.0'f32, data.columnLineThickness)
+  let lineColor: UiColor = if data.hasCustomLineColor:
+    data.columnLineColor
+  else:
+    b.themeStyle(UiStyleIndexPanel)[].borderColor
 
   # Position each row.
   for rowIdx in b.children(nodeIdx):
@@ -521,64 +635,183 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
     var k = 0
     var indentW: float32 = 0.0'f32
     var rowHeight = 0.0'f32
-    # First collect indent width for this row so logical-0 calc can use it.
-    # We do it on the fly in order, but need indentW before handling k==1.
-    for childIdx in b.children(rowIdx):
-      let child = b.frame.nodes[childIdx].addr
-      if k == 0:
-        child.pos.x = cursor
-        child.pos.y = 0.0'f32
-        indentW = child.size.x
-        rowHeight = max(rowHeight, child.size.y)
-        cursor += child.size.x + gap
-        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
-        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
-      elif k == 1:
-        let logical0W = if logicalCount > 0: colWidths[0] else: 0.0'f32
-        var nameW: float32
-        if logicalCount > 0:
-          nameW = max(0.0'f32, logical0W - indentW - gap)
+    if not useDynamicFit:
+      for childIdx in b.children(rowIdx):
+        let child = b.frame.nodes[childIdx].addr
+        if k == 0:
+          child.pos.x = cursor
+          child.pos.y = 0.0'f32
+          indentW = child.size.x
+          rowHeight = max(rowHeight, child.size.y)
+          cursor += child.size.x + gap
+          row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+          row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+        elif k == 1:
+          let logical0W = colWidths[0]
+          var nameW = max(0.0'f32, logical0W - indentW - gap)
+          let oldW = child.size.x
+          child.size.x = nameW
+          child.flags.incl SizeXKnown
+          if nameW != oldW:
+            b.postProcessChildren(childIdx)
+          child.pos.x = cursor
+          child.pos.y = 0.0'f32
+          rowHeight = max(rowHeight, child.size.y)
+          cursor += nameW + gap
+          row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+          row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+        elif k - 1 < logicalCount:
+          let logical = k - 1
+          let cw = colWidths[logical]
+          let oldW = child.size.x
+          child.size.x = cw
+          child.flags.incl SizeXKnown
+          if cw != oldW:
+            b.postProcessChildren(childIdx)
+          child.pos.x = cursor
+          child.pos.y = 0.0'f32
+          rowHeight = max(rowHeight, child.size.y)
+          cursor += cw + gap
+          row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+          row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
         else:
-          nameW = child.size.x
-        let oldW = child.size.x
-        # Always apply computed width for spec path – even for Fit it was already the max combined minus indent.
-        child.size.x = nameW
-        child.flags.incl SizeXKnown
-        if nameW != oldW:
-          b.postProcessChildren(childIdx)
+          child.pos.x = cursor
+          child.pos.y = 0.0'f32
+          rowHeight = max(rowHeight, child.size.y)
+          cursor += child.size.x + gap
+          row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+          row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+        k += 1
+    else:
+      # Dynamic fit positioning (same as legacy but we already computed colWidths)
+      for childIdx in b.children(rowIdx):
+        let child = b.frame.nodes[childIdx].addr
+        let cw = if k == 0: child.size.x
+          elif k == 1: gap + colWidths[0] - cursor
+          elif k - 1 < colWidths.len: colWidths[k - 1]
+          else: child.size.x
         child.pos.x = cursor
         child.pos.y = 0.0'f32
-        rowHeight = max(rowHeight, child.size.y)
-        cursor += nameW + gap
-        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
-        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
-      elif k - 1 < logicalCount:
-        let logical = k - 1
-        let cw = colWidths[logical]
-        let oldW = child.size.x
-        child.size.x = cw
-        child.flags.incl SizeXKnown
-        if cw != oldW:
-          b.postProcessChildren(childIdx)
-        child.pos.x = cursor
-        child.pos.y = 0.0'f32
+        if k > 1 and k - 1 < colWidths.len:
+          let oldSize = child.size.x
+          child.size.x = colWidths[k - 1]
+          child.flags.incl SizeXKnown
+          if child.size.x != oldSize:
+            b.postProcessChildren(childIdx)
         rowHeight = max(rowHeight, child.size.y)
         cursor += cw + gap
         row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
         row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
-      else:
-        # Extra physical column beyond spec – keep fit.
-        child.pos.x = cursor
-        child.pos.y = 0.0'f32
-        rowHeight = max(rowHeight, child.size.y)
-        cursor += child.size.x + gap
-        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
-        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
-      k += 1
+        k += 1
     for childIdx in b.children(rowIdx):
       let child = b.frame.nodes[childIdx].addr
       child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
     b.updateNodeFit(row)
+
+    # -------------------------------------------------------------------
+    # Vertical lines between logical columns (inside inter-column gap).
+    # -------------------------------------------------------------------
+    if showLines:
+      let logicalForLines = if useDynamicFit: colWidths.len else: logicalCount
+      if logicalForLines > 1:
+        let rowStyle = b.nodeStyle(row)
+        let padY = rowStyle.paddingY
+        # Count how many separators actually have both sides present in this row.
+        var sepCount = 0
+        let childCount = b.childCount(rowIdx)
+        for i in 0 ..< logicalForLines - 1:
+          let leftK = if i == 0: 1 else: i + 1
+          let rightK = leftK + 1
+          if rightK < childCount:
+            inc sepCount
+        if sepCount > 0:
+          var avail = b.frame.arena[].allocEmptyArray(sepCount, UiRenderCommand)
+          for i in 0 ..< logicalForLines - 1:
+            let leftK = if i == 0: 1 else: i + 1
+            let rightK = leftK + 1
+            let childCount = b.childCount(rowIdx)
+            if rightK >= childCount: continue
+            var leftIdx = -1
+            var rightIdx = -1
+            var kk = 0
+            for childIdx in b.children(rowIdx):
+              if kk == leftK: leftIdx = childIdx
+              if kk == rightK: rightIdx = childIdx
+              inc kk
+            if leftIdx < 0 or rightIdx < 0: continue
+            let left = b.frame.nodes[leftIdx].addr
+            let right = b.frame.nodes[rightIdx].addr
+            let leftEnd = left.pos.x + left.size.x
+            let rightStart = right.pos.x
+            let gapW = rightStart - leftEnd
+            let centerX = if gapW > 0.001'f32: (leftEnd + rightStart) * 0.5'f32 else: leftEnd + gapW * 0.5'f32
+            let x = centerX - lineThickness * 0.5'f32
+            avail.add UiRenderCommand(
+              kind: CmdRectFill,
+              color: lineColor,
+              pos: vec2(x, -padY),
+              size: vec2(lineThickness, row.size.y),
+              radius: 0.0'f32,
+            )
+          if avail.len > 0:
+            var existing = b.ensureNodeCustomCommands(row)
+            if existing.len > 0:
+              # Merge with any pre-existing custom commands on the row.
+              let total = existing.len + avail.len
+              var combined = b.frame.arena[].allocEmptyArray(total, UiRenderCommand)
+              for j in 0 ..< existing.len: combined.add existing[j]
+              for j in 0 ..< avail.len: combined.add avail[j]
+              b.ensureNodeCustomCommands(row) = combined
+            else:
+              b.ensureNodeCustomCommands(row) = avail
+
+    # -------------------------------------------------------------------
+    # Indentation guides – one vertical line per depth level, centered in
+    # each  `indentationStep` slot. Lines span the full row height so
+    # neighboring rows that share the same depth level appear connected.
+    # -------------------------------------------------------------------
+    if data.showIndentationLines:
+      let indentThickness = max(1.0'f32, data.indentationLineThickness)
+      let indentColor: UiColor = if data.hasCustomIndentationLineColor:
+        data.indentationLineColor
+      else:
+        b.themeStyle(UiStyleIndexPanel)[].borderColor
+      let step = if data.indentationStep > 0.001'f32: data.indentationStep else: 20.0'f32
+      var firstW: float32 = 0.0'f32
+      var containerIdx = -1
+      for childIdx in b.children(rowIdx):
+        containerIdx = childIdx
+        break
+      if containerIdx >= 0:
+        for indentChildIdx in b.children(containerIdx):
+          firstW = b.frame.nodes[indentChildIdx].addr.size.x
+          break
+      let depth = int((firstW / step) + 0.5'f32)
+      if depth > 0:
+        let rowStyle2 = b.nodeStyle(row)
+        let padY2 = rowStyle2.paddingY
+        var indentAvail = b.frame.arena[].allocEmptyArray(depth, UiRenderCommand)
+        for lvl in 0 ..< depth:
+          let x = lvl.float32 * step + step * 0.5'f32 - indentThickness * 0.5'f32
+          if x + indentThickness > firstW + 0.001'f32:
+            continue
+          indentAvail.add UiRenderCommand(
+            kind: CmdRectFill,
+            color: indentColor,
+            pos: vec2(x, -padY2),
+            size: vec2(indentThickness, row.size.y),
+            radius: 0.0'f32,
+          )
+        if indentAvail.len > 0:
+          var existing2 = b.ensureNodeCustomCommands(row)
+          if existing2.len > 0:
+            let total = existing2.len + indentAvail.len
+            var combined2 = b.frame.arena[].allocEmptyArray(total, UiRenderCommand)
+            for j in 0 ..< existing2.len: combined2.add existing2[j]
+            for j in 0 ..< indentAvail.len: combined2.add indentAvail[j]
+            b.ensureNodeCustomCommands(row) = combined2
+          else:
+            b.ensureNodeCustomCommands(row) = indentAvail
 
 # Builds the row at `itemIndex` by walking the visible preorder from the root.
 # `walkCursor` is cached across the deferred row builds within a frame (visited in
@@ -602,12 +835,12 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
       ctx.walkIndex += 1
   treeTableField(b, ctx, itemIndex)
 
-# Entry point with column spec: fixed/fit/fill/proportional per logical column.
+# Entry point with TreeTableOptions – all sizing and line options in one object.
 # Logical column 0 is the combined indent+name column (physical 0+1); logical N
 # (N>=1) maps to physical column N+1. Only starting at the third physical
 # column are columns vertically aligned; logical 0 takes the indent width into
 # account when sizing the name part.
-proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
+proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions, rowRenderer: TreeTableRowRenderer) =
   var ctx = b.getOrCreateStorage(b.currentNode)
   ctx.cursor = cursor
   ctx.walkCursor = nil
@@ -625,18 +858,36 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableCo
   let last = b.frame.nodes[b.lastNodeIndex].addr
   let containerIndex = b.frame.nodes[last.lastChild].nextSibling
 
-  if columns.len > 0:
-    var colArr = b.frame.arena[].allocArray(columns.len, TableColumn)
-    for i in 0 ..< columns.len:
-      colArr[i] = columns[i]
-    var tableDataArr = b.frame.arena[].allocArray(1, UiTableLayout)
-    tableDataArr[0] = UiTableLayout(
-      columnGap: columnGap,
-      rowGap: 0.0'f32,
-      columnCount: columns.len,
-      columns: colArr.data())
+  let hasColumns = options.columns.len > 0
+  let hasColumnLines = options.showColumnLines
+  let hasIndentLines = options.showIndentationLines
+  if hasColumns or hasColumnLines or hasIndentLines:
+    var colArr: ArrayView[TableColumn]
+    var colPtr: ptr UncheckedArray[TableColumn] = nil
+    var colCount = 0
+    if hasColumns:
+      colArr = b.frame.arena[].allocArray(options.columns.len, TableColumn)
+      for i in 0 ..< options.columns.len:
+        colArr[i] = options.columns[i]
+      colPtr = colArr.data
+      colCount = options.columns.len
+    var layoutArr = b.frame.arena[].allocArray(1, TreeTableLayout)
+    layoutArr[0] = TreeTableLayout(
+      columnGap: if options.columnGap > 0.001'f32: options.columnGap else: 4.0'f32,
+      columnCount: colCount,
+      columns: colPtr,
+      showColumnLines: hasColumnLines,
+      columnLineThickness: if options.columnLineThickness > 0.001'f32: options.columnLineThickness else: 1.0'f32,
+      columnLineColor: options.columnLineColor,
+      hasCustomLineColor: options.hasCustomLineColor,
+      showIndentationLines: hasIndentLines,
+      indentationLineThickness: if options.indentationLineThickness > 0.001'f32: options.indentationLineThickness else: 1.0'f32,
+      indentationLineColor: options.indentationLineColor,
+      hasCustomIndentationLineColor: options.hasCustomIndentationLineColor,
+      indentationStep: if options.indentationStep > 0.001'f32: options.indentationStep else: 20.0'f32,
+    )
     b.withParent(b.frame.nodes[containerIndex].id):
-      discard b.customLayout(treeTableColumnLayout, cast[int](tableDataArr.data()))
+      discard b.customLayout(treeTableColumnLayout, cast[int](layoutArr.data))
   else:
     b.withParent(b.frame.nodes[containerIndex].id):
       discard b.customLayout(treeTableColumnLayout, 0)
@@ -646,9 +897,15 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableCo
     ctx.pendingToggleCursor = nil
     b.anythingAnimating = true
 
+proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
+  var opts = defaultTreeTableOptions()
+  opts.columns = @columns
+  opts.columnGap = columnGap
+  b.treeTable(cursor, opts, rowRenderer)
+
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], rowRenderer: TreeTableRowRenderer) =
   b.treeTable(cursor, columns, 4.0'f32, rowRenderer)
 
 # Backwards-compatible entry point – all columns Fit (legacy behaviour).
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, rowRenderer: TreeTableRowRenderer) =
-  b.treeTable(cursor, [], 4.0'f32, rowRenderer)
+  b.treeTable(cursor, defaultTreeTableOptions(), rowRenderer)

@@ -27,7 +27,6 @@ proc listEntries(cache: FileSystemCache, path: string): lent seq[string] =
     return cache.listings[path]
   var entries: seq[string]
   if dirExists(path):
-    echo "walk ", path
     for kind, entryPath in walkDir(path):
       discard kind
       entries.add(extractFilename(entryPath))
