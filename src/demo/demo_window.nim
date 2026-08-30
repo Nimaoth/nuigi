@@ -1,9 +1,9 @@
 include "../compat2"
 
-import std/[math, assertions, random]
+import std/[math, assertions, random, os]
 import intro
 import big_example
-import "../nuigi", "../widgets", "../flex", "../plot"
+import "../nuigi", "../widgets", "../flex", "../plot", "../widgets/tree_table", "../widgets/file_system_cursor"
 import "../dynamic_virtuallist"
 import "../mymath", "../arena", "../array_view"
 import "../profiler"
@@ -1376,6 +1376,19 @@ proc buildCustomMaterialExample*(b: var UiBuilder) =
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       discard b.deferBuild(buildCustomDeferred)
 
+var cursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+proc buildTreeTableExample(b: var UiBuilder) =
+  b.layoutVertical:
+    b.debugName("tree-table-demo")
+    discard b.fillX().fillY().padding(8).gap(8)
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
+    b.label("Tree Table"):
+      discard b.fontSize(18)
+    b.layoutVertical:
+      b.debugName("tree-table-host")
+      discard b.fillX().fillY()
+      b.treeTable(cursor)
+
 proc buildAllExamples(b: var UiBuilder)
 
 var examples = [
@@ -1397,6 +1410,7 @@ var examples = [
   (fun: buildFlexLayoutExamples, scrollBox: true, title: "Flex"),
   (fun: buildGridLayoutExamples, scrollBox: true, title: "Grid"),
   (fun: buildTableLayoutExamples, scrollBox: true, title: "Table"),
+  (fun: buildTreeTableExample, scrollBox: false, title: "TreeTable"),
   (fun: buildUnicodeExamples, scrollBox: true, title: "Unicode"),
   (fun: buildSubpixelExamples, scrollBox: true, title: "Subpixel"),
   (fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),

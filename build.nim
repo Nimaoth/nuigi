@@ -298,6 +298,10 @@ proc buildUiTestNim2() =
     "ui-test-nim2"
   )
   shellCapture(
+    &"nim c -r -o:bin/ui-property-editor-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/property_editor_seek_test.nim",
+    "ui-property-editor-seek-test-nim2"
+  )
+  shellCapture(
     &"nim c -r -o:bin/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
     "ui-bench-nim2"
   )
@@ -321,6 +325,10 @@ proc buildUiTestNimony() =
   shellCapture(
     &"nimony c -r -o:bin/ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
     "ui-test-nimony"
+  )
+  shellCapture(
+    &"nimony c -r -o:bin/ui-property-editor-seek-test-nimony.exe --path:src {passthroughArgs} tests/property_editor_seek_test.nim",
+    "ui-property-editor-seek-test-nimony"
   )
   shellCapture(
     &"nimony c -r -o:bin/ui-bench-nimony.exe --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
