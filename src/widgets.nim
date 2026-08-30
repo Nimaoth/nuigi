@@ -892,64 +892,6 @@ template scrollBox*(b: var UiBuilder, body: untyped): untyped =
 
       discard b.deferBuild(scrollBoxDeferred, cast[int](storage.scrollOffset.addr))
 
-      # if viewportIdx >= 0 and contentIdx >= 0 and
-      #     viewportIdx < b.previousFrame.nodes.len and contentIdx < b.nodes.len:
-      #   let viewportNode = b.previousFrame.nodes[viewportIdx].addr
-      #   let contentNode = b.nodes[contentIdx].addr
-      #   let viewportHeight = max(0.0'f32, viewportNode.size.y)
-      #   let contentHeight = max(contentNode.size.y, contentNode.contentExtent.y)
-      #   let scrollRange = max(0.0'f32, contentHeight - viewportHeight)
-
-      #   if scrollRange > 0.0'f32:
-      #     let viewportHovered = b.wasHovered(viewportNode, includeChildren = true, viewportIdx)
-      #     if viewportHovered and abs(b.frameCtx.input.wheel.y) > 0.0001'f32:
-      #       scrollOffset += (b.frameCtx.input.wheel.y * scrollSpeed).float
-      #       b.frameCtx.input.wheel.y = 0
-
-      #   let minOffset = -scrollRange
-      #   scrollOffset = clamp(scrollOffset, minOffset.float, 0.0)
-      #   contentNode.pos.y = scrollOffset.float32
-
-      #   if scrollRange > 0.0'f32 and viewportHeight > 0.0'f32:
-      #     let trackX = max(0.0'f32, viewportNode.size.x - scrollbarWidth)
-      #     let thumbHeight = max(thumbMinHeight, viewportHeight * (viewportHeight / contentHeight))
-      #     let travel = max(0.0'f32, viewportHeight - thumbHeight)
-      #     let normalized = clamp((-scrollOffset.float32) / scrollRange, 0.0'f32, 1.0'f32)
-      #     let thumbY = travel * normalized
-
-      #     b.node("scrollbar-track"):
-      #       trackIdx = b.stack[^1]
-      #       discard b.styleIndex(UiStyleIndexScrollBar)
-      #       discard b.position(trackX, 0)
-      #       discard b.size(scrollbarWidth, viewportHeight)
-      #       discard b.fillBackground()
-
-      #       b.node("scrollbar-thumb"):
-      #         thumbIdx = b.stack[^1]
-      #         discard b.styleIndex(if b.wasHovered(thumbIdx, includeChildren = true): UiStyleIndexScrollBarHandleHover else: UiStyleIndexScrollBarHandle)
-      #         discard b.position(1, thumbY)
-      #         discard b.size(max(2.0'f32, scrollbarWidth - 2.0'f32), thumbHeight)
-      #         discard b.fillBackground()
-
-      #     let draggingThumb =
-      #       thumbIdx >= 0 and
-      #       MouseLeft in b.frameCtx.input.mouseDown and
-      #       b.wasHeld(thumbIdx, includeChildren = true)
-      #     let clickedTrack =
-      #       trackIdx >= 0 and
-      #       b.wasClicked(trackIdx, includeChildren = true)
-
-      #     if draggingThumb or clickedTrack:
-      #       let viewportId = b.previousFrame.nodes[viewportIdx].id
-      #       let viewportPos = b.absoluteNodePosPrev(viewportId, viewportIdx)
-      #       let pointerNorm =
-      #         if travel <= 0.0'f32:
-      #           0.0'f32
-      #         else:
-      #           clamp((b.frameCtx.input.mouse.y - viewportPos.y - thumbHeight * 0.5'f32) / travel, 0.0'f32, 1.0'f32)
-      #       scrollOffset = (-pointerNorm * scrollRange).float
-      #       contentNode.pos.y = scrollOffset.float32
-
 type
   TableColumnWidthKind* = enum
     TableColumnFixed

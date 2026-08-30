@@ -1,5 +1,7 @@
 import nuigi
 import mymath
+import mesh
+import arena, array_view
 
 import widgets
 import dynamic_virtuallist, profiler
@@ -36,6 +38,9 @@ type
     nodesIndex: int # Index into nodes where we currently are while rendering items
     searchFilter*: string
     scrollOffset*: Vec2
+    rowRenderer: TreeTableRowRenderer
+
+  TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
 
 func depth*(c: TreeCursor): int = c.path.len
 
@@ -150,7 +155,10 @@ proc seek*(e: TreeTable, targetRow: int): bool =
     # Step the remaining (usually short) distance from the anchor to the target.
     if e.walkIndex < targetRow:
       prof("slow step")
-      assert e.walkCursor.enterChild()
+      if not e.walkCursor.enterChild():
+        echo "failed to enter child ", e.walkIndex, " < ", targetRow, ", ", targetChild, ", ", e.walkCursor.path
+        e.walkIndex = targetRow
+        return false
       inc e.walkIndex
       if targetChild > 0:
         if not e.walkCursor.moveNext(targetChild):
@@ -290,14 +298,48 @@ proc expandAll*(e: TreeTable) =
       inc j
     e.nodes[i].totalChildren = e.nodes[i].childCount + sum
 
-# Renders a single row for the node under `cursor`. A leading symbol
+proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
+  ## Deferred builder for the expand/collapse chevron icon.
+  ## userData == 1 => expanded (down), 0 => collapsed (right)
+  let arena = b.frame.arena
+  if arena == nil:
+    return
+  if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return
+  let n = b.frame.nodes[nodeIdx].addr
+  let origin = b.absoluteNodePos(nodeIdx)
+  let size = n.size
+  if size.x <= 0.0'f32 or size.y <= 0.0'f32:
+    return
+  let inset = 2.0'f32
+  let innerPos = origin + vec2(inset, inset)
+  let innerSize = vec2(max(0.0'f32, size.x - inset * 2.0'f32), max(0.0'f32, size.y - inset * 2.0'f32))
+  if innerSize.x <= 0.0'f32 or innerSize.y <= 0.0'f32:
+    return
+  let dir = if userData == 1: vec2(0.0'f32, 1.0'f32) else: vec2(1.0'f32, 0.0'f32)
+  let color = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
+  let (data, count) = buildChevronVertices(arena, innerPos, innerSize, dir, color)
+  if data == nil or count == 0:
+    return
+  var cmds = arena[].allocEmptyArray(1, UiRenderCommand)
+  if cmds.data == nil:
+    return
+  cmds.add UiRenderCommand(
+    kind: CmdRawVertices,
+    vertexData: data,
+    vertexCount: count.int32,
+    color: color,
+  )
+  b.withParent(nodeIdx):
+    discard b.customRenderCommands(cmds)
+
+# Renders a single row for the node under `cursor`. A leading chevron mesh
 # indicates whether the node has children and its expanded/collapsed state.
-proc treeTableField*(b: var UiBuilder; e: var TreeTable) =
+# Collapsed points right (1,0), expanded points down (0,1).
+proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   prof("treeTableField")
   let hasChildren = e.walkCursor.childCount() > 0
-  var symbol = "• "
-  if hasChildren:
-    symbol = if nodeIsExpanded(e, e.walkCursor, 0): "▾ " else: "▸ "
+  let isExpanded = hasChildren and nodeIsExpanded(e, e.walkCursor, 0)
 
   let hovered = b.wasHovered(includeChildren = true)
   if hovered:
@@ -306,63 +348,236 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable) =
   # current node is table row, each node created here is one column
 
   b.debugName("tree-table-row")
-  discard b.fitY().gap(4)
+  discard b.fitY().gap(4).paddingY(2)
 
   b.layoutHorizontal:
     discard b.fit().gap(2)
     b.node:
       discard b.size(e.walkCursor.depth.float32 * 20, 1)
-  # discard b.fillX().fitY().padding(4).offsetsX(e.walkCursor.path.len.float32 * 12.0'f32, 0.0'f32).gap(8)
-    b.node:
-      b.debugName("symbol")
-      discard b.fitX().fitY()
-      if hasChildren and b.wasClicked(includeChildren = true):
-        e.pendingToggleCursor = e.walkCursor.clone()
-      b.label(symbol):
-        discard b.fitX().fitY()
-    b.label(e.walkCursor.fieldName & ":"):
-      discard b.fitX().fitY()
+    if hasChildren:
+      b.node:
+        b.debugName("symbol")
+        discard b.size(14, 14).alignCenter()
+        if b.wasClicked(includeChildren = true):
+          e.pendingToggleCursor = e.walkCursor.clone()
+        # chevron mesh via custom render command (right when collapsed, down when expanded)
+        discard b.deferBuild(buildChevronDeferred, if isExpanded: 1 else: 0)
 
-  b.label("dummy value"):
-    discard b.fillX().fitY()
+  e.rowRenderer(b, e.walkCursor, index)
 
 # Custom layout for the virtual list viewport: lays out every row's children as
 # columns, table-style. First pass measures the maximum width of each column index
 # across all visible rows; the second pass positions each row's columns using those
 # shared widths so columns line up vertically. Each column is fit-sized; the row
 # height follows the tallest column in that row.
+#
+# Columns 0 and 1 (indent/chevron container + first renderer column) are treated as
+# a single logical column 0, so the second column lives right next to the indent
+# instead of being vertically aligned across rows. Logical column 0's width is the
+# combined width of those two physical children (including the gap between them);
+# logical column N (N>=1) maps to physical child N+1. Only starting at the third
+# physical column (logical 1) are columns vertically aligned.
+#
+# When a column spec is supplied via userData (ptr UiTableLayout, same shape as
+# widgets.tableLayout), each logical column can be Fixed, Fit, Fill or
+# Proportional (see widgets.nim). Fixed/Fill/Proportional work for logical 0 as
+# well – the indent width is subtracted so the name column (physical 1) fills the
+# remainder of the allocated logical width.
 proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
   prof "treeTableColumnLayout"
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
     return
   let n = b.frame.nodes[nodeIdx].addr
-  let gap = b.nodeGap(n)
-  # Pass 1: widest column per column index, across all rows (table alignment).
-  var colWidths: seq[float32]
-  for rowIdx in b.children(nodeIdx):
-    var k = 0
-    for childIdx in b.children(rowIdx):
-      let w = b.frame.nodes[childIdx].addr.size.x
-      if k >= colWidths.len:
-        colWidths.add(w)
-      elif w > colWidths[k]:
-        colWidths[k] = w
-      k += 1
-  # Pass 2: position each row's columns left-to-right using the shared widths.
+  let baseGap = b.nodeGap(n)
+  let nodeStyle = b.nodeStyle(n)
+  let contentW = max(0.0'f32, n.size.x - nodeStyle.paddingX * 2.0'f32)
+
+  # -------------------------------------------------------------------------
+  # No spec – legacy Fit-only path (backwards compatible)
+  # -------------------------------------------------------------------------
+  if userData == 0:
+    let gap = baseGap
+    var colWidths: seq[float32] = @[0]
+    for rowIdx in b.children(nodeIdx):
+      var k = 0
+      var firstTwoColumns: float32 = 0.0
+      for childIdx in b.children(rowIdx):
+        let w = b.frame.nodes[childIdx].addr.size.x
+        if k == 0:
+          firstTwoColumns += w
+        elif k == 1:
+          firstTwoColumns += w
+          colWidths[0] = max(firstTwoColumns, colWidths[0])
+        elif k - 1 >= colWidths.len:
+          colWidths.add(w)
+        elif w > colWidths[k - 1]:
+          colWidths[k - 1] = w
+        k += 1
+
+    for rowIdx in b.children(nodeIdx):
+      let row = b.frame.nodes[rowIdx].addr
+      let rowGap = b.nodeGap(row)
+      var cursor = 0.0'f32
+      var k = 0
+      var rowHeight = 0.0'f32
+      for childIdx in b.children(rowIdx):
+        let child = b.frame.nodes[childIdx].addr
+        let cw = if k == 0:
+          child.size.x
+        elif k == 1:
+          rowGap + colWidths[0] - cursor
+        elif k - 1 < colWidths.len:
+          colWidths[k - 1]
+        else: child.size.x
+
+        child.pos.x = cursor
+        child.pos.y = 0.0'f32
+        if k > 1 and k - 1 < colWidths.len:
+          let oldSize = child.size.x
+          child.size.x = colWidths[k - 1]
+          child.flags.incl SizeXKnown
+          if child.size.x != oldSize:
+            b.postProcessChildren(childIdx)
+        rowHeight = max(rowHeight, child.size.y)
+        cursor += cw + rowGap
+        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+        k += 1
+      for childIdx in b.children(rowIdx):
+        let child = b.frame.nodes[childIdx].addr
+        child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
+      b.updateNodeFit(row)
+    return
+
+  # -------------------------------------------------------------------------
+  # Spec path – Fixed / Fit / Fill / Proportional per logical column
+  # -------------------------------------------------------------------------
+  let data = cast[ptr UiTableLayout](userData)
+  let logicalCount = max(0, data.columnCount)
+  if logicalCount == 0:
+    return
+  let colGap = if data.columnGap > 0.0'f32: data.columnGap else: baseGap
+
+  var colWidths = newSeq[float32](logicalCount)
+  var colWeights = newSeq[float32](logicalCount)
+  var anyFit = false
+  for c in 0 ..< logicalCount:
+    let col = data.columns[c]
+    case col.kind
+    of TableColumnFixed:
+      colWidths[c] = max(0.0'f32, col.fixedWidth.round())
+      colWeights[c] = 0.0'f32
+    of TableColumnFit:
+      colWidths[c] = 0.0'f32
+      colWeights[c] = 0.0'f32
+      anyFit = true
+    of TableColumnFill:
+      colWidths[c] = 0.0'f32
+      colWeights[c] = 1.0'f32
+    of TableColumnProportional:
+      let w = max(0.0001'f32, col.proportional)
+      colWidths[c] = 0.0'f32
+      colWeights[c] = w
+
+  if anyFit:
+    for rowIdx in b.children(nodeIdx):
+      var k = 0
+      var indentW: float32 = 0.0'f32
+      for childIdx in b.children(rowIdx):
+        let w = b.frame.nodes[childIdx].addr.size.x
+        if k == 0:
+          indentW = w
+        elif k == 1:
+          if logicalCount > 0 and colWeights[0] == 0.0'f32 and data.columns[0].kind == TableColumnFit:
+            let combined = indentW + colGap + w
+            colWidths[0] = max(colWidths[0], combined)
+        elif k - 1 < logicalCount:
+          let logical = k - 1
+          if colWeights[logical] == 0.0'f32 and data.columns[logical].kind == TableColumnFit:
+            colWidths[logical] = max(colWidths[logical], w)
+        k += 1
+
+  var usedByBase = 0.0'f32
+  var totalWeight = 0.0'f32
+  for c in 0 ..< logicalCount:
+    if colWeights[c] == 0.0'f32:
+      usedByBase += colWidths[c]
+    else:
+      totalWeight += colWeights[c]
+
+  let totalColGap = colGap * max(0, logicalCount - 1).float32
+  let freeSpace = contentW - totalColGap - usedByBase
+  if totalWeight > 0.0'f32 and freeSpace > 0.0'f32:
+    for c in 0 ..< logicalCount:
+      if colWeights[c] > 0.0'f32:
+        colWidths[c] = max(0.0'f32, freeSpace * (colWeights[c] / totalWeight)).round()
+
+  # Position each row.
   for rowIdx in b.children(nodeIdx):
     let row = b.frame.nodes[rowIdx].addr
-    let rowGap = b.nodeGap(row)
+    # Use the spec gap for inter-logical-column spacing; intra-logical-0 gap is colGap as well.
+    let gap = colGap
     var cursor = 0.0'f32
     var k = 0
+    var indentW: float32 = 0.0'f32
+    var rowHeight = 0.0'f32
+    # First collect indent width for this row so logical-0 calc can use it.
+    # We do it on the fly in order, but need indentW before handling k==1.
     for childIdx in b.children(rowIdx):
       let child = b.frame.nodes[childIdx].addr
-      let cw = if k < colWidths.len: colWidths[k] else: child.size.x
-      child.pos.x = cursor
-      child.pos.y = 0.0'f32
-      cursor += cw + rowGap
-      row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
-      row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+      if k == 0:
+        child.pos.x = cursor
+        child.pos.y = 0.0'f32
+        indentW = child.size.x
+        rowHeight = max(rowHeight, child.size.y)
+        cursor += child.size.x + gap
+        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+      elif k == 1:
+        let logical0W = if logicalCount > 0: colWidths[0] else: 0.0'f32
+        var nameW: float32
+        if logicalCount > 0:
+          nameW = max(0.0'f32, logical0W - indentW - gap)
+        else:
+          nameW = child.size.x
+        let oldW = child.size.x
+        # Always apply computed width for spec path – even for Fit it was already the max combined minus indent.
+        child.size.x = nameW
+        child.flags.incl SizeXKnown
+        if nameW != oldW:
+          b.postProcessChildren(childIdx)
+        child.pos.x = cursor
+        child.pos.y = 0.0'f32
+        rowHeight = max(rowHeight, child.size.y)
+        cursor += nameW + gap
+        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+      elif k - 1 < logicalCount:
+        let logical = k - 1
+        let cw = colWidths[logical]
+        let oldW = child.size.x
+        child.size.x = cw
+        child.flags.incl SizeXKnown
+        if cw != oldW:
+          b.postProcessChildren(childIdx)
+        child.pos.x = cursor
+        child.pos.y = 0.0'f32
+        rowHeight = max(rowHeight, child.size.y)
+        cursor += cw + gap
+        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
+      else:
+        # Extra physical column beyond spec – keep fit.
+        child.pos.x = cursor
+        child.pos.y = 0.0'f32
+        rowHeight = max(rowHeight, child.size.y)
+        cursor += child.size.x + gap
+        row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
+        row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
       k += 1
+    for childIdx in b.children(rowIdx):
+      let child = b.frame.nodes[childIdx].addr
+      child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
     b.updateNodeFit(row)
 
 # Builds the row at `itemIndex` by walking the visible preorder from the root.
@@ -385,16 +600,20 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
       if not stepForward(ctx.walkCursor, ctx, ctx.walkNode):
         break
       ctx.walkIndex += 1
-  treeTableField(b, ctx)
+  treeTableField(b, ctx, itemIndex)
 
-# Entry point: attaches state, ensures the node list is seeded, then renders the
-# visible rows through a dynamic virtual list.
-proc treeTable*(b: var UiBuilder; cursor: TreeCursor) =
+# Entry point with column spec: fixed/fit/fill/proportional per logical column.
+# Logical column 0 is the combined indent+name column (physical 0+1); logical N
+# (N>=1) maps to physical column N+1. Only starting at the third physical
+# column are columns vertically aligned; logical 0 takes the indent width into
+# account when sizing the name part.
+proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
   var ctx = b.getOrCreateStorage(b.currentNode)
   ctx.cursor = cursor
   ctx.walkCursor = nil
+  ctx.rowRenderer = rowRenderer
   ensureNodes(ctx)
-  let count = if ctx.nodes.len == 0: 1 else: ctx.nodes[0].totalChildren
+  let count = if ctx.nodes.len == 0: 1 else: 1 + ctx.nodes[0].totalChildren
   b.layoutHorizontal:
     discard b.fit().gap(2)
     if b.button("Expand all"):
@@ -406,12 +625,30 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor) =
   let last = b.frame.nodes[b.lastNodeIndex].addr
   let containerIndex = b.frame.nodes[last.lastChild].nextSibling
 
-  # The virtual list viewport's children are rows; give it a table-style column
-  # layout so every row's columns align.
-  b.withParent(b.frame.nodes[containerIndex].id):
-    discard b.customLayout(treeTableColumnLayout, 0)
+  if columns.len > 0:
+    var colArr = b.frame.arena[].allocArray(columns.len, TableColumn)
+    for i in 0 ..< columns.len:
+      colArr[i] = columns[i]
+    var tableDataArr = b.frame.arena[].allocArray(1, UiTableLayout)
+    tableDataArr[0] = UiTableLayout(
+      columnGap: columnGap,
+      rowGap: 0.0'f32,
+      columnCount: columns.len,
+      columns: colArr.data())
+    b.withParent(b.frame.nodes[containerIndex].id):
+      discard b.customLayout(treeTableColumnLayout, cast[int](tableDataArr.data()))
+  else:
+    b.withParent(b.frame.nodes[containerIndex].id):
+      discard b.customLayout(treeTableColumnLayout, 0)
 
   if ctx.pendingToggleCursor != nil:
     toggleNode(ctx, ctx.pendingToggleCursor)
     ctx.pendingToggleCursor = nil
     b.anythingAnimating = true
+
+proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], rowRenderer: TreeTableRowRenderer) =
+  b.treeTable(cursor, columns, 4.0'f32, rowRenderer)
+
+# Backwards-compatible entry point – all columns Fit (legacy behaviour).
+proc treeTable*(b: var UiBuilder; cursor: TreeCursor, rowRenderer: TreeTableRowRenderer) =
+  b.treeTable(cursor, [], 4.0'f32, rowRenderer)

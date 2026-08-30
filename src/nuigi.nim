@@ -4391,13 +4391,13 @@ proc applyImmediateFillFromParent(b: var UiBuilder, idx: int) =
     else:
       max(0.0'f32, contentH - n.pos.y)
 
-  if FillX in n.flags:
-    n.size.x = remainingW
-    if SizeXKnown in p.flags:
+  if SizeXKnown in p.flags:
+    if FillX in n.flags:
+      n.size.x = remainingW
       n.flags.incl SizeXKnown
-  if FillY in n.flags:
-    n.size.y = remainingH
-    if SizeYKnown in p.flags:
+  if SizeYKnown in p.flags:
+    if FillY in n.flags:
+      n.size.y = remainingH
       n.flags.incl SizeYKnown
 
   b.clampNodeSize(n)
@@ -4799,7 +4799,7 @@ proc sizeToParentX*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if parentHasFitX:
     discard b.fitX()
   if not parentHasFillX and not parentHasFitX:
-    b.currentNode.size.x = parent.size.x - nodeStyle.paddingX * 2
+    discard b.fillX()
     if SizeXKnown in parent.flags:
       b.currentNode.flags.incl SizeXKnown
   b
@@ -4843,7 +4843,7 @@ proc sizeToParentY*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if parentHasFitY:
     discard b.fitY()
   if not parentHasFillY and not parentHasFitY:
-    b.currentNode.size.y = parent.size.y - nodeStyle.paddingY * 2
+    discard b.fillY()
     if SizeYKnown in parent.flags:
       b.currentNode.flags.incl SizeYKnown
   b
@@ -5649,6 +5649,22 @@ proc padding*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Set uniform padding on all sides. Triggers size-to-content and layout cursor update.
   let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
   nodeStyle.paddingX = value
+  nodeStyle.paddingY = value
+  b.updateNodeFit(b.currentNode)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc paddingX*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set horizontal padding. Triggers size-to-content and layout cursor update.
+  let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
+  nodeStyle.paddingX = value
+  b.updateNodeFit(b.currentNode)
+  b.frame.initCursorForLayout(b.currentNode)
+  b
+
+proc paddingY*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set vertical padding. Triggers size-to-content and layout cursor update.
+  let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
   nodeStyle.paddingY = value
   b.updateNodeFit(b.currentNode)
   b.frame.initCursorForLayout(b.currentNode)

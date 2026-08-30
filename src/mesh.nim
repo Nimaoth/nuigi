@@ -376,6 +376,130 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
   buildRectStrokeVertices(arena, pos, size, uniformBorderColors(color),
     uniformCornerRadii(radius), uniformBorderWidths(thickness))
 
+proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
+    color: UiColor, thickness: float32 = -1.0'f32, angle: float32 = PI * 0.5'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+  ## Build a thick "V" / ">" chevron symbol.
+  ##
+  ## `pos`/`size` define the bounding box of the symbol (top-left + extent).
+  ## `direction` is the Vec2 the chevron points toward (`(1,0)` = `>`,
+  ## `(0,1)` = `V`, `(-1,0)` = `<`, etc.). It is normalized internally; a zero
+  ## vector defaults to `(1,0)`. `angle` is the opening angle at the tip in
+  ## radians (default `PI/2` = 90°); it is clamped to `(0, PI)` and preserved
+  ## by uniformly scaling the chevron to fit inside `size`. Collapsed should
+  ## use `vec2(1,0)`, expanded `vec2(0,1)`.
+  ##
+  ## `color` tints all vertices, `thickness` is the stroke width in pixels.
+  ## When `thickness <= 0` it defaults to `min(size.x,size.y) * 0.18`.
+  ## Returns a triangle list (`count` vertices, `count mod 3 == 0`) allocated
+  ## from `arena`, or `(nil,0)` on failure.
+  if arena == nil:
+    return (nil, 0)
+  prof("buildChevronVertices")
+  let w = size.x
+  let h = size.y
+  if w <= 0.0'f32 or h <= 0.0'f32:
+    return (nil, 0)
+  let dirLenSq = direction.x * direction.x + direction.y * direction.y
+  var dir: Vec2
+  if dirLenSq < 1e-8'f32:
+    dir = vec2(1.0'f32, 0.0'f32)
+  else:
+    dir = direction.normalize()
+  let perp = vec2(-dir.y, dir.x)
+  var t = thickness
+  if t <= 0.0'f32:
+    t = min(w, h) * 0.18'f32
+  t = clamp(t, 1.0'f32, min(w, h) * 0.45'f32)
+  # angle handling: preserve angle by scaling chevron to fit
+  var effAngle = angle
+  if effAngle <= 0.05'f32 or effAngle >= PI - 0.05'f32 or effAngle != effAngle:
+    effAngle = PI * 0.5'f32
+  effAngle = clamp(effAngle, 0.1'f32, PI - 0.1'f32)
+  let halfAngle = effAngle * 0.5'f32
+  let tanHalf = tan(halfAngle.float64).float32
+  var effW = w
+  var desiredHalfH = effW * tanHalf
+  # scale uniformly to fit inside h if needed (preserves angle)
+  let totalH = desiredHalfH * 2.0'f32
+  if totalH > h and totalH > 1e-5'f32:
+    let scale = h / totalH
+    effW *= scale
+    desiredHalfH *= scale
+    # also scale thickness to keep proportion? keep as is but clamp again
+    t = clamp(t, 1.0'f32, min(effW, desiredHalfH * 2.0'f32) * 0.45'f32)
+  let center = pos + size * 0.5'f32
+  let halfW = effW * 0.5'f32
+  let halfH = desiredHalfH
+  let tip = center + dir * halfW
+  let backCenter = center - dir * halfW
+  let backTop = backCenter + perp * halfH
+  let backBottom = backCenter - perp * halfH
+
+  var topDir = backTop - tip
+  var bottomDir = backBottom - tip
+  let topLen = topDir.length
+  let bottomLen = bottomDir.length
+  if topLen < 1e-5'f32 or bottomLen < 1e-5'f32:
+    return (nil, 0)
+  topDir = topDir / topLen
+  bottomDir = bottomDir / bottomLen
+
+  # interior normals (point inside the V)
+  var nTop = vec2(-topDir.y, topDir.x)
+  let midTop = (tip + backTop) * 0.5'f32
+  if (center - midTop).dot(nTop) < 0.0'f32:
+    nTop = -nTop
+  var nBottom = vec2(-bottomDir.y, bottomDir.x)
+  let midBottom = (tip + backBottom) * 0.5'f32
+  if (center - midBottom).dot(nBottom) < 0.0'f32:
+    nBottom = -nBottom
+
+  # inner lines: offset outer lines by thickness along interior normal
+  let p1 = tip + nTop * t
+  let p2 = tip + nBottom * t
+  # intersection of p1 + topDir * s  and  p2 + bottomDir * s2
+  let crossDir = topDir.x * bottomDir.y - topDir.y * bottomDir.x
+  var innerNotch: Vec2
+  if abs(crossDir) < 1e-6'f32:
+    innerNotch = tip - dir * t
+  else:
+    let delta = p2 - p1
+    let s = (delta.x * bottomDir.y - delta.y * bottomDir.x) / crossDir
+    innerNotch = p1 + topDir * s
+    # clamp notch to not pass behind backCenter when thickness is huge
+    if (innerNotch - tip).dot(dir) > 0.0'f32:
+      innerNotch = tip - dir * t
+    let maxBack = (backCenter - tip).dot(dir)
+    if (innerNotch - tip).dot(dir) < maxBack:
+      # keep inside
+      discard
+
+  let outerTip = tip
+  let outerBackTop = backTop
+  let outerBackBottom = backBottom
+  let innerBackTop = backTop + nTop * t
+  let innerBackBottom = backBottom + nBottom * t
+
+  const vertexCount = 12 # 4 triangles
+  let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+  if data == nil:
+    return (nil, 0)
+  var i = 0
+  template emit(p: Vec2) =
+    data[i] = UiVertex(pos: p, color: color); inc i
+  # top arm quad (outerTip, outerBackTop, innerBackTop, innerNotch)
+  emit(outerTip); emit(outerBackTop); emit(innerBackTop)
+  emit(outerTip); emit(innerBackTop); emit(innerNotch)
+  # bottom arm quad (outerTip, innerNotch, innerBackBottom, outerBackBottom)
+  emit(outerTip); emit(innerNotch); emit(innerBackBottom)
+  emit(outerTip); emit(innerBackBottom); emit(outerBackBottom)
+  return (data, vertexCount)
+
+proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2,
+    direction: Vec2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+  ## Convenience overload with default white color and auto thickness.
+  buildChevronVertices(arena, pos, size, direction, UiColor(r: 1.0'f32, g: 1.0'f32, b: 1.0'f32, a: 1.0'f32), -1.0'f32)
+
 when not defined(nimony):
   static:
     doAssert sizeof(UiVertex) == sizeof(float32) * 8

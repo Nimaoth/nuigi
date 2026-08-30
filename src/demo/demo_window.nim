@@ -1376,18 +1376,121 @@ proc buildCustomMaterialExample*(b: var UiBuilder) =
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
       discard b.deferBuild(buildCustomDeferred)
 
-var cursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+type
+  TestTreeCursor* = ref object of TreeCursor
+    childrenPerNode*: seq[int]
+
+proc treeName(path: seq[int]): string =
+  if path.len == 0:
+    return "root"
+  result = "n"
+  for p in path:
+    result.add("_")
+    result.add($p)
+
+method clone*(c: TestTreeCursor): TreeCursor =
+  let r = TestTreeCursor()
+  r.fieldName = c.fieldName
+  r.index = c.index
+  # Deep copy the path: Nim seq assignment aliases the backing array, and
+  # stepForward mutates `path` in place (`path[^1] = ...`, `setLen`), so a
+  # shallow clone would corrupt the original (e.g. the stored anchor cursors).
+  r.path = c.path
+  r.childrenPerNode = c.childrenPerNode
+  return r
+
+method childCount*(c: TestTreeCursor): int =
+  if c.path.len < c.childrenPerNode.len:
+    return c.childrenPerNode[c.path.len]
+  return 0
+
+method enterChild*(c: TestTreeCursor): bool =
+  if c.path.len >= c.childrenPerNode.len:
+    return false
+  c.path.add(0)
+  c.index = 0
+  c.fieldName = treeName(c.path)
+  return true
+
+method moveNext*(c: TestTreeCursor, count: int = 1): bool =
+  if c.path.len == 0:
+    return false
+  let parentChildCount = if (c.path.len - 1) < c.childrenPerNode.len: c.childrenPerNode[c.path.len - 1] else: 0
+  if c.index + count < parentChildCount:
+    c.index += count
+    c.path[^1] = c.index
+    c.fieldName = treeName(c.path)
+    return true
+  return false
+
+method exitChild*(c: TestTreeCursor): bool =
+  if c.path.len == 0:
+    return false
+  c.path.setLen(c.path.len - 1)
+  c.index = if c.path.len > 0: c.path[^1] else: 0
+  c.fieldName = treeName(c.path)
+  return true
+
+proc newTreeCursor*(childrenPerNode: seq[int]): TestTreeCursor =
+  result = TestTreeCursor(childrenPerNode: childrenPerNode)
+  result.path = @[]
+  result.index = 0
+  result.fieldName = treeName(result.path)
+
+var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
 proc buildTreeTableExample(b: var UiBuilder) =
   b.layoutVertical:
     b.debugName("tree-table-demo")
-    discard b.fillX().fillY().padding(8).gap(8)
+    discard b.fillX().fitY().padding(8).gap(8)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     b.label("Tree Table"):
       discard b.fontSize(18)
     b.layoutVertical:
-      b.debugName("tree-table-host")
-      discard b.fillX().fillY()
-      b.treeTable(cursor)
+      b.debugName("tree-table-hosts")
+      discard b.fillX().fitY().gap(12)
+
+      block:
+        b.layoutVertical:
+          b.debugName("test-tree-table-host")
+          discard b.fillX().height(500)
+          b.label("UiBuilder Tree (live)"):
+            discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+            b.label(cursor.fieldName & ":"):
+              discard b.fitX().fitY()
+
+            b.label("dummy value"):
+              discard b.fitX().fitY()
+
+            b.node:
+              discard b.fit().paddingX(10)
+              b.label($cursor.childCount()):
+                discard b.anchorsX(1, 1).pivotX(1)
+
+          let testCursor = newTreeCursor(@[5, 5, 100])
+          b.treeTable(testCursor, [tableColumnFill(), tableColumnFill(), tableColumnFit()], renderRow)
+
+      block:
+        b.layoutVertical:
+          b.debugName("fs-tree-table-host")
+          discard b.fillX().height(500)
+          b.label("File System (fs-demo)"):
+            discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+            b.label(cursor.fieldName & ":"):
+              discard b.fitX().fitY()
+
+            b.label("bar"):
+              discard b.fitX().fitY()
+
+            b.node:
+              discard b.fit().paddingX(10)
+              b.label($cursor.childCount()):
+                discard b.anchorsX(1, 1).pivotX(1)
+
+          b.treeTable(fsCursor, [tableColumnFit(), tableColumnFill(), tableColumnFit()], renderRow)
 
 proc buildAllExamples(b: var UiBuilder)
 
@@ -1410,7 +1513,7 @@ var examples = [
   (fun: buildFlexLayoutExamples, scrollBox: true, title: "Flex"),
   (fun: buildGridLayoutExamples, scrollBox: true, title: "Grid"),
   (fun: buildTableLayoutExamples, scrollBox: true, title: "Table"),
-  (fun: buildTreeTableExample, scrollBox: false, title: "TreeTable"),
+  (fun: buildTreeTableExample, scrollBox: true, title: "TreeTable"),
   (fun: buildUnicodeExamples, scrollBox: true, title: "Unicode"),
   (fun: buildSubpixelExamples, scrollBox: true, title: "Subpixel"),
   (fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),

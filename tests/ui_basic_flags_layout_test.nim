@@ -1,4 +1,6 @@
-import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/property_editor
+import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/tree_table
+
+include compat2
 
 {.passL: "-Lbuild".}
 
@@ -37,7 +39,7 @@ proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
 # children, down to `maxDepth` levels. Used to verify the property editor
 # renders the expected property name labels for a known tree shape.
 type
-  TreeCursor* = ref object of PropertyCursor
+  TestTreeCursor* = ref object of TreeCursor
     maxDepth*: int
     childrenPerNode*: int
 
@@ -49,8 +51,8 @@ proc treeName(path: seq[int]): string =
     result.add("_")
     result.add($p)
 
-method clone*(c: TreeCursor): PropertyCursor =
-  let r = TreeCursor()
+method clone*(c: TestTreeCursor): TreeCursor =
+  let r = TestTreeCursor()
   r.fieldName = c.fieldName
   r.index = c.index
   r.path = c.path
@@ -58,12 +60,12 @@ method clone*(c: TreeCursor): PropertyCursor =
   r.childrenPerNode = c.childrenPerNode
   return r
 
-method childCount*(c: TreeCursor): int =
+method childCount*(c: TestTreeCursor): int =
   if c.path.len < c.maxDepth:
     return c.childrenPerNode
   return 0
 
-method enterChild*(c: TreeCursor): bool =
+method enterChild*(c: TestTreeCursor): bool =
   if c.path.len >= c.maxDepth:
     return false
   c.path.add(0)
@@ -71,19 +73,19 @@ method enterChild*(c: TreeCursor): bool =
   c.fieldName = treeName(c.path)
   return true
 
-method moveNext*(c: TreeCursor): bool =
+method moveNext*(c: TestTreeCursor, count: int = 1): bool =
   if c.path.len == 0:
     return false
   # Advance among siblings: the parent's child count, not this node's own.
   let parentChildCount = if (c.path.len - 1) < c.maxDepth: c.childrenPerNode else: 0
-  if c.index + 1 < parentChildCount:
-    c.index += 1
+  if c.index + count < parentChildCount:
+    c.index += count
     c.path[^1] = c.index
     c.fieldName = treeName(c.path)
     return true
   return false
 
-method exitChild*(c: TreeCursor): bool =
+method exitChild*(c: TestTreeCursor): bool =
   if c.path.len == 0:
     return false
   c.path.setLen(c.path.len - 1)
@@ -91,8 +93,8 @@ method exitChild*(c: TreeCursor): bool =
   c.fieldName = treeName(c.path)
   return true
 
-proc newTreeCursor*(maxDepth, childrenPerNode: int): TreeCursor =
-  result = TreeCursor(maxDepth: maxDepth, childrenPerNode: childrenPerNode)
+proc newTreeCursor*(maxDepth, childrenPerNode: int): TestTreeCursor =
+  result = TestTreeCursor(maxDepth: maxDepth, childrenPerNode: childrenPerNode)
   result.path = @[]
   result.index = 0
   result.fieldName = treeName(result.path)
@@ -1443,7 +1445,7 @@ proc testRenderTransformIsAnimatable() =
   require(secondOffsetX > firstOffsetX, "animated transform offset should progress toward target")
   require(secondOffsetX < firstOffsetX + 20.0'f32, "animated transform offset should blend toward target")
 
-proc testPropertyEditorTreeTexts() =
+proc testTreeTableTreeTexts() =
   # Build a 3-deep tree (levels 0..3) with 2 children per node => 15 nodes.
   let maxDepth = 3
   let branching = 2
@@ -1453,17 +1455,21 @@ proc testPropertyEditorTreeTexts() =
     discard b.size(800.0, 800.0)
     var cursor = newTreeCursor(maxDepth, branching)
     # Pre-expand the whole tree by attaching an already-expanded editor storage.
-    var storage = PropertyEditor()
+    var storage = TreeTable()
     storage.cursor = cursor
     storage.initialized = true
     expandAll(storage)
     b.nodeStorage(b.currentNode, storage)
-    b.propertyEditorDraw(cursor)
+    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+      b.label(cursor.fieldName & ":"):
+        discard b.fitX().fitY()
+
+    b.treeTable(cursor, renderRow)
 
   # The virtual list builds its rows in a deferred pass.
   b.flushDeferredNodes()
 
-  # Collect every property-name label (texts ending with ':').
+  # Collect every tree-name label (texts ending with ':').
   var foundNames: seq[string]
   for i in 0 ..< b.frame.texts.len:
     let t = b.frame.texts[i].text.value
@@ -1471,25 +1477,25 @@ proc testPropertyEditorTreeTexts() =
       foundNames.add(t[0 .. ^2])
 
   let expected = expectedTreeNames(maxDepth, branching)
-  require(foundNames.len == expected.len, "expected " & $expected.len & " property names, got " & $foundNames.len)
+  require(foundNames.len == expected.len, "expected " & $expected.len & " tree names, got " & $foundNames.len)
   for e in expected:
-    require(e in foundNames, "missing property name: " & e)
+    require(e in foundNames, "missing tree name: " & e)
 
   # The first row is the root: verify its children are laid out as columns
   # (left-to-right, strictly increasing x) and the row height fits the columns.
   var rowNodeIdx = -1
   for i in 0 ..< b.nodes.len:
-    if b.nodes[i].nodeDebugName() == "property-row":
+    if b.nodes[i].nodeDebugName() == "tree-table-row":
       rowNodeIdx = i
       break
-  require(rowNodeIdx >= 0, "expected at least one property row node")
+  require(rowNodeIdx >= 0, "expected at least one tree row node")
 
   var colXs: seq[float32]
   var colHeights: seq[float32]
   for childIdx in b.children(rowNodeIdx):
     colXs.add(b.nodes[childIdx].pos.x)
     colHeights.add(b.nodes[childIdx].size.y)
-  require(colXs.len == 3, "expected 3 columns per row (symbol, name, value), got " & $colXs.len)
+  require(colXs.len == 2, "expected 2 columns per row (symbol, name), got " & $colXs.len)
   for i in 1 ..< colXs.len:
     require(colXs[i] > colXs[i - 1] - 0.5, "columns must be laid out left-to-right")
   let rowH = b.nodes[rowNodeIdx].size.y
@@ -1559,7 +1565,7 @@ proc runTests() =
   testRenderTransformDoesNotAffectLayout()
   testRenderTransformAppliesToSubtreeCommands()
   testRenderTransformIsAnimatable()
-  testPropertyEditorTreeTexts()
+  testTreeTableTreeTexts()
 
 when isMainModule:
   runTests()
