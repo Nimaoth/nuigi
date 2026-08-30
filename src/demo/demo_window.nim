@@ -1440,6 +1440,8 @@ proc newTreeCursor*(childrenPerNode: seq[int]): TestTreeCursor =
 var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
 var treeTableShowColumnLines = true
 var treeTableShowIndentationLines = true
+var treeTableAlternatingRowColors = true
+var treeTableAlternatingRowHeights = false
 proc buildTreeTableExample(b: var UiBuilder) =
   b.layoutVertical:
     b.debugName("tree-table-demo")
@@ -1447,10 +1449,13 @@ proc buildTreeTableExample(b: var UiBuilder) =
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     b.label("Tree Table"):
       discard b.fontSize(18)
-    b.layoutHorizontal("tree-table-options"):
-      discard b.fillX().fitY().gap(12)
+    b.layoutVertical("tree-table-options"):
+      discard b.fitX().fitY().gap(12)
       if b.checkbox("Show column lines", treeTableShowColumnLines): discard
       if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
+      if b.checkbox("Alternating background colors", treeTableAlternatingRowColors): discard
+      if b.checkbox("Alternating row heights", treeTableAlternatingRowHeights): discard
+
     b.layoutVertical:
       b.debugName("tree-table-hosts")
       discard b.fillX().fitY().gap(12)
@@ -1469,7 +1474,11 @@ proc buildTreeTableExample(b: var UiBuilder) =
             b.node:
               discard b.fit().paddingX(10)
               b.label("dummy value"):
-                discard b.fitX().fitY()
+                discard b.fitX().fitY().alignCenter()
+
+              if treeTableAlternatingRowHeights:
+                b.node:
+                  discard b.size(2, (index mod 4 + 1).float32 * 15)
 
             b.node:
               discard b.fit().paddingX(10)
@@ -1477,13 +1486,15 @@ proc buildTreeTableExample(b: var UiBuilder) =
                 discard b.anchorsX(1, 1).pivotX(1)
 
           var opts = defaultTreeTableOptions()
-          opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit()]
+          opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit(), tableColumnFit()]
           opts.showColumnLines = treeTableShowColumnLines
           opts.showIndentationLines = treeTableShowIndentationLines
+          opts.alternatingRowBackground = treeTableAlternatingRowColors
           let testCursor = newTreeCursor(@[5, 5, 100])
           b.treeTable(testCursor, opts, renderRow)
 
-      block:
+
+      when not defined(wasm):
         b.layoutVertical:
           b.debugName("fs-tree-table-host")
           discard b.fillX().height(500)

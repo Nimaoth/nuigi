@@ -39,6 +39,12 @@ type
     searchFilter*: string
     scrollOffset*: Vec2
     rowRenderer: TreeTableRowRenderer
+    alternatingRowBackground*: bool
+    alternatingColorEven*: UiColor
+    alternatingColorOdd*: UiColor
+    hasCustomAlternatingColors*: bool
+    hoverColor*: UiColor
+    hasCustomHoverColor*: bool
 
   TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
 
@@ -70,6 +76,17 @@ type
     indentationStep*: float32
       ## Horizontal distance per depth level (default 20). The indent spacer is
       ## `depth * indentationStep` wide; each guide is drawn centered in its step.
+    alternatingRowBackground*: bool
+      ## When true, rows get alternating background colors (zebra stripes) for readability.
+    alternatingColorEven*: UiColor
+      ## Background for even rows (index % 2 == 0). Falls back to `UiStyleIndexRow`.
+    alternatingColorOdd*: UiColor
+      ## Background for odd rows (index % 2 == 1). Falls back to `UiStyleIndexRowAlt`.
+    hasCustomAlternatingColors*: bool
+    hoverColor*: UiColor
+      ## Hover highlight. When custom, used verbatim; otherwise a theme hover
+      ## color distinct from both alternating colors (`ButtonHover`).
+    hasCustomHoverColor*: bool
 
   TreeTableLayout* = object
     ## Internal layout payload passed as `userData` to `treeTableColumnLayout`.
@@ -86,6 +103,12 @@ type
     indentationLineColor*: UiColor
     hasCustomIndentationLineColor*: bool
     indentationStep*: float32
+    alternatingRowBackground*: bool
+    alternatingColorEven*: UiColor
+    alternatingColorOdd*: UiColor
+    hasCustomAlternatingColors*: bool
+    hoverColor*: UiColor
+    hasCustomHoverColor*: bool
 
 func depth*(c: TreeCursor): int = c.path.len
 
@@ -102,6 +125,12 @@ proc defaultTreeTableOptions*(): TreeTableOptions =
     indentationLineColor: UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomIndentationLineColor: false,
     indentationStep: 20.0'f32,
+    alternatingRowBackground: false,
+    alternatingColorEven: UiColor(r: 0, g: 0, b: 0, a: 0),
+    alternatingColorOdd: UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomAlternatingColors: false,
+    hoverColor: UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomHoverColor: false,
   )
 
 proc initTreeTableOptions*(
@@ -115,7 +144,13 @@ proc initTreeTableOptions*(
     indentationLineThickness: float32 = 1.0'f32,
     indentationLineColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomIndentationLineColor: bool = false,
-    indentationStep: float32 = 20.0'f32): TreeTableOptions =
+    indentationStep: float32 = 20.0'f32,
+    alternatingRowBackground: bool = false,
+    alternatingColorEven: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
+    alternatingColorOdd: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomAlternatingColors: bool = false,
+    hoverColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
+    hasCustomHoverColor: bool = false): TreeTableOptions =
   result.columns = @columns
   result.columnGap = columnGap
   result.showColumnLines = showColumnLines
@@ -127,6 +162,13 @@ proc initTreeTableOptions*(
   result.indentationLineColor = indentationLineColor
   result.hasCustomIndentationLineColor = hasCustomIndentationLineColor or indentationLineColor.a > 0.001'f32
   result.indentationStep = if indentationStep > 0.001'f32: indentationStep else: 20.0'f32
+  result.alternatingRowBackground = alternatingRowBackground
+  result.alternatingColorEven = alternatingColorEven
+  result.alternatingColorOdd = alternatingColorOdd
+  result.hasCustomAlternatingColors = hasCustomAlternatingColors or
+    (alternatingColorEven.a > 0.001'f32 or alternatingColorOdd.a > 0.001'f32)
+  result.hoverColor = hoverColor
+  result.hasCustomHoverColor = hasCustomHoverColor or hoverColor.a > 0.001'f32
 
 # Returns the editor state attached to `node`, creating it on first use.
 proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
@@ -425,9 +467,22 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   let hasChildren = e.walkCursor.childCount() > 0
   let isExpanded = hasChildren and nodeIsExpanded(e, e.walkCursor, 0)
 
+  # Alternating row background (zebra) – drawn first so hover can override.
+  if e.alternatingRowBackground:
+    let isOdd = (index mod 2) == 1
+    let bg = if isOdd:
+      if e.hasCustomAlternatingColors: e.alternatingColorOdd
+      else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor
+    else:
+      if e.hasCustomAlternatingColors: e.alternatingColorEven
+      else: b.themeStyle(UiStyleIndexRow)[].fillColor
+    discard b.fillBackground().backgroundColor(bg)
+
   let hovered = b.wasHovered(includeChildren = true)
   if hovered:
-    discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
+    let hoverBg = if e.hasCustomHoverColor: e.hoverColor
+      else: b.themeStyle(UiStyleIndexButtonHover)[].fillColor
+    discard b.fillBackground().backgroundColor(hoverBg)
 
   # current node is table row, each node created here is one column
 
@@ -845,14 +900,20 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.cursor = cursor
   ctx.walkCursor = nil
   ctx.rowRenderer = rowRenderer
+  ctx.alternatingRowBackground = options.alternatingRowBackground
+  ctx.alternatingColorEven = options.alternatingColorEven
+  ctx.alternatingColorOdd = options.alternatingColorOdd
+  ctx.hasCustomAlternatingColors = options.hasCustomAlternatingColors
+  ctx.hoverColor = options.hoverColor
+  ctx.hasCustomHoverColor = options.hasCustomHoverColor
   ensureNodes(ctx)
   let count = if ctx.nodes.len == 0: 1 else: 1 + ctx.nodes[0].totalChildren
   b.layoutHorizontal:
     discard b.fit().gap(2)
     if b.button("Expand all"):
       expandAll(ctx)
-  if b.button("Collapse all"):
-    collapseAll(ctx)
+    if b.button("Collapse all"):
+      collapseAll(ctx)
 
   discard b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
   let last = b.frame.nodes[b.lastNodeIndex].addr
@@ -885,6 +946,12 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       indentationLineColor: options.indentationLineColor,
       hasCustomIndentationLineColor: options.hasCustomIndentationLineColor,
       indentationStep: if options.indentationStep > 0.001'f32: options.indentationStep else: 20.0'f32,
+      alternatingRowBackground: options.alternatingRowBackground,
+      alternatingColorEven: options.alternatingColorEven,
+      alternatingColorOdd: options.alternatingColorOdd,
+      hasCustomAlternatingColors: options.hasCustomAlternatingColors,
+      hoverColor: options.hoverColor,
+      hasCustomHoverColor: options.hasCustomHoverColor,
     )
     b.withParent(b.frame.nodes[containerIndex].id):
       discard b.customLayout(treeTableColumnLayout, cast[int](layoutArr.data))
