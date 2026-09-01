@@ -2,7 +2,7 @@ import nuigi
 import mymath
 import mesh
 import arena, array_view
-import tables
+import std/[monotimes, tables, times]
 
 import widgets
 import dynamic_virtuallist, profiler
@@ -31,6 +31,10 @@ type
     previousSibling*: int
     nextFree: int
 
+  ExpandAllWork = object
+    nextChild: TreeCursor
+    parentIndex: int
+
   # Per-instance state for one tree table, kept in the builder's node storage.
   TreeTable* = ref object of UiNodeStorageData
     cursor*: TreeCursor
@@ -41,6 +45,8 @@ type
     nodeByKey: Table[string, int]
     initialized*: bool
     pendingToggleCursor*: TreeCursor
+    expandAllWork: seq[ExpandAllWork]
+    expandingAll: bool
     walkCursor*: TreeCursor
     walkIndex*: int
     walkNode*: int # Index into TreeTable.nodes which is the walkCursors ExpandedNode or the parents ExpandedNode
@@ -119,6 +125,9 @@ type
     hasCustomAlternatingColors*: bool
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
+
+const TreeTableExpandAllBudgetNanoseconds* = 4_000_000'i64
+  ## Default time spent expanding tree-table items per frame.
 
 func depth*(c: TreeCursor): int =
   ## Returns the cursor's depth below the root.
@@ -361,6 +370,8 @@ proc initializeTopology(e: TreeTable) =
   e.rootNode = -1
   e.freeNode = -1
   e.expandedCount = 0
+  e.expandAllWork.setLen(0)
+  e.expandingAll = false
 
 proc addExpandedNode(e: TreeTable, cursor: TreeCursor, parentIndex: int): int =
   ## Caches a newly expanded cursor and links it below its expanded parent.
@@ -637,6 +648,8 @@ func preorderLess*(a, b: TreeCursor): bool =
 proc toggleNode*(e: var TreeTable, cursor: TreeCursor) =
   ## Toggles expansion while preserving stable slots and linked logical order.
   prof("toggleNode")
+  e.expandAllWork.setLen(0)
+  e.expandingAll = false
   if not e.initialized:
     e.initialized = true
     e.initializeTopology()
@@ -666,6 +679,8 @@ proc ensureNodes(e: var TreeTable) =
 
 proc collapseAll*(e: var TreeTable) =
   ## Collapses the tree back to the root while keeping storage initialized.
+  e.expandAllWork.setLen(0)
+  e.expandingAll = false
   if e.rootNode < 0:
     e.initializeTopology()
     discard e.addExpandedNode(e.cursor, -1)
@@ -703,6 +718,53 @@ proc expandAll*(e: TreeTable) =
           if not child.moveNext():
             break
   e.recomputeTotals()
+
+proc startExpandAll*(e: TreeTable) =
+  ## Starts a resumable expansion from the root, replacing current expansion state.
+  e.initializeTopology()
+  let rootIndex = e.addExpandedNode(e.cursor, -1)
+  var firstChild = e.cursor.clone()
+  if firstChild.enterChild():
+    e.expandAllWork.add(ExpandAllWork(
+      nextChild: firstChild,
+      parentIndex: rootIndex))
+  e.expandingAll = e.expandAllWork.len > 0
+
+proc isExpandingAll*(e: TreeTable): bool =
+  ## Returns whether an incremental expand-all traversal has unfinished work.
+  e.expandingAll
+
+proc continueExpandAll*(e: TreeTable,
+  budgetNanoseconds = TreeTableExpandAllBudgetNanoseconds): bool =
+  ## Expands nodes until the monotonic time budget expires and returns whether work remains.
+  if not e.expandingAll:
+    return false
+  let started = getMonoTime()
+  while e.expandAllWork.len > 0:
+    let workIndex = e.expandAllWork.high
+    let child = e.expandAllWork[workIndex].nextChild.clone()
+    let parentIndex = e.expandAllWork[workIndex].parentIndex
+    if not e.expandAllWork[workIndex].nextChild.moveNext():
+      e.expandAllWork.setLen(workIndex)
+
+    if child.childCount() > 0:
+      let childIndex = e.addExpandedNode(child, parentIndex)
+      var ancestorIndex = parentIndex
+      while ancestorIndex >= 0:
+        e.nodes[ancestorIndex].totalChildren += e.nodes[childIndex].childCount
+        ancestorIndex = e.nodes[ancestorIndex].parent
+      var grandchild = child.clone()
+      if grandchild.enterChild():
+        e.expandAllWork.add(ExpandAllWork(
+          nextChild: grandchild,
+          parentIndex: childIndex))
+
+    if budgetNanoseconds >= 0 and
+        (getMonoTime() - started).inNanoseconds >= budgetNanoseconds:
+      break
+
+  e.expandingAll = e.expandAllWork.len > 0
+  e.expandingAll
 
 proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   ## Builds the deferred chevron; userData selects expanded/down or collapsed/right.
@@ -1190,14 +1252,21 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   except:
     return
 
-  let count = if ctx.rootNode < 0: 1 else: 1 + ctx.nodes[ctx.rootNode].totalChildren
   b.layoutHorizontal:
     discard b.fit().gap(2)
     if b.button("Expand all"):
-      expandAll(ctx)
+      startExpandAll(ctx)
     if b.button("Collapse all"):
       collapseAll(ctx)
+    if ctx.isExpandingAll():
+      b.label("Expanding..."):
+        discard b.alignCenter()
 
+  if ctx.isExpandingAll():
+    if ctx.continueExpandAll():
+      b.anythingAnimating = true
+
+  let count = if ctx.rootNode < 0: 1 else: 1 + ctx.nodes[ctx.rootNode].totalChildren
   discard b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
   let last = b.frame.nodes[b.lastNodeIndex].addr
   let containerIndex = b.frame.nodes[last.lastChild].nextSibling

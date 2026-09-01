@@ -247,12 +247,39 @@ proc testSharedParentChainsResolveExpandedEdgesOnce() =
   require(mutableTree.exitCalls == 5,
     "the second rendered chain should stop ascending at its refreshed parent")
 
+proc testIncrementalExpandAllCompletesAcrossBudgets() =
+  let cursor = newTreeCursor(4, 4)
+  var expected = TreeTable(cursor: cursor)
+  expected.expandAll()
+
+  var incremental = TreeTable(cursor: cursor)
+  incremental.startExpandAll()
+  require(incremental.isExpandingAll(),
+    "incremental expand all should retain work after initialization")
+  require(incremental.continueExpandAll(0),
+    "a zero budget should process one item and leave larger trees unfinished")
+  require(incremental.expandedCount < expected.expandedCount,
+    "the first incremental step should not synchronously expand the whole tree")
+
+  var stepCount = 1
+  while incremental.continueExpandAll(0):
+    inc stepCount
+    require(stepCount < 10_000, "incremental expand all should terminate")
+
+  require(stepCount > 1, "incremental expansion should span multiple budget steps")
+  require(incremental.expandedCount == expected.expandedCount,
+    "incremental expansion should create the same expanded nodes")
+  require(incremental.nodes[incremental.rootNode].totalChildren ==
+      expected.nodes[expected.rootNode].totalChildren,
+    "incremental expansion should produce the same visible row count")
+
 proc runTests() =
   echo "tree table refresh tests"
   testVisibleChainRebasesShiftedIndices()
   testVisibleChainPrunesDeletedAncestor()
   testExpandedSlotsRemainStableAndReuseFreeSlots()
   testSharedParentChainsResolveExpandedEdgesOnce()
+  testIncrementalExpandAllCompletesAcrossBudgets()
   runTreeTableSeekTests()
   echo "tree table refresh tests succeeded"
 
