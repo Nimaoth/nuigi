@@ -1266,7 +1266,9 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
     if ctx.continueExpandAll():
       b.anythingAnimating = true
 
-  let count = if ctx.rootNode < 0: 1 else: 1 + ctx.nodes[ctx.rootNode].totalChildren
+  let count = ctx.countVisible()
+  b.label("Items: " & $count):
+    discard b.fitX()
   discard b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
   let last = b.frame.nodes[b.lastNodeIndex].addr
   let containerIndex = b.frame.nodes[last.lastChild].nextSibling

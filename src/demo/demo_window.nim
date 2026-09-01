@@ -1703,8 +1703,13 @@ proc buildTreeTableExample(b: var UiBuilder) =
               b.label($cursor.childCount()):
                 discard b.anchorsX(1, 1).pivotX(1)
 
+            b.node:
+              discard b.fit().paddingX(10)
+              b.label($index):
+                discard b.anchorsX(1, 1).pivotX(1)
+
           var opts = defaultTreeTableOptions()
-          opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit(), tableColumnFit()]
+          opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit(), tableColumnFit(), tableColumnFit()]
           opts.showColumnLines = treeTableShowColumnLines
           opts.showIndentationLines = treeTableShowIndentationLines
           opts.alternatingRowBackground = treeTableAlternatingRowColors
