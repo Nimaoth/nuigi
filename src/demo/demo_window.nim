@@ -1,12 +1,16 @@
 include "../compat2"
 
-import std/[math, assertions, random, os]
+import std/[math, assertions, random]
 import intro
 import big_example
-import "../nuigi", "../widgets", "../flex", "../plot", "../widgets/tree_table", "../widgets/file_system_cursor"
+import "../nuigi", "../widgets", "../flex", "../plot", "../widgets/tree_table"
 import "../dynamic_virtuallist"
 import "../mymath", "../arena", "../array_view"
 import "../profiler"
+
+when not defined(wasm):
+  import std/os
+  import "../widgets/file_system_cursor"
 
 {.passL: "-Lbuild".}
 
@@ -1581,29 +1585,35 @@ proc buildDemoTreeDropGradient(b: var UiBuilder, nodeIdx: int, userData: int) =
   b.withParent(nodeIdx):
     discard b.customRenderCommands(commands)
 
-var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
-type
-  FileDragUserData = ref object of UiDragUserData
-    cursor: FileSystemCursor
+when not defined(wasm):
+  var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+  type
+    FileDragUserData = ref object of UiDragUserData
+      cursor: FileSystemCursor
 
-proc buildFileDragTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
-  if userData == nil or not (userData of FileDragUserData):
-    return
-  let dragData = FileDragUserData(userData)
-  discard b.fit().padding(6).gap(4)
-  discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
-  discard b.text(dragData.cursor.fieldName & (if canDrop: " - move here" else: " - cannot move here")).fit()
+  proc buildFileDragTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
+    if userData == nil or not (userData of FileDragUserData):
+      return
+    let dragData = FileDragUserData(userData)
+    discard b.fit().padding(6).gap(4)
+    discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
+    discard b.text(dragData.cursor.fieldName & (if canDrop: " - move here" else: " - cannot move here")).fit()
 
 var treeTableShowColumnLines = true
 var treeTableShowIndentationLines = true
 var treeTableAlternatingRowColors = true
 var treeTableAlternatingRowHeights = false
 proc buildTreeTableExample(b: var UiBuilder) =
+  let parent = b.currentNode
   if demoTreeRoot == nil:
     resetDemoTree()
   b.layoutVertical:
     b.debugName("tree-table-demo")
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().padding(8).gap(8)
+    if FitY in parent.flags:
+      discard b.height(500)
+    else:
+      discard b.fillY()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     b.label("Tree Table"):
       discard b.fontSize(18)
@@ -1621,12 +1631,12 @@ proc buildTreeTableExample(b: var UiBuilder) =
 
     b.layoutVertical:
       b.debugName("tree-table-hosts")
-      discard b.fillX().fitY().gap(12)
+      discard b.fillX().sizeToParentY().gap(12)
 
       block:
         b.layoutVertical:
           b.debugName("test-tree-table-host")
-          discard b.fillX().height(500)
+          discard b.fillX().sizeToParentY()
           b.label("Mutable Tree"):
             discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
           b.labelWrapped("Drag any row onto another row to make it the target's last child. Drop on the highlighted strip above or below a row to move it beside that row, reparenting it when necessary. Use Reset tree to restore the original hierarchy."):
@@ -1680,6 +1690,7 @@ proc buildTreeTableExample(b: var UiBuilder) =
                     b.themeStyle(UiStyleIndexAccent)[].fillColor)
                 if b.endDrop(canDrop):
                   reparentDemoTreeNode(DemoTreeDragUserData(userData).node, treeCursor.node)
+                  discard b.requestTreeTableExpand(treeCursor)
 
               let (dragging, began) = b.beginDrag()
               if began:
@@ -1716,16 +1727,37 @@ proc buildTreeTableExample(b: var UiBuilder) =
           let testCursor = demoTreeCursor(demoTreeRoot)
           b.treeTable(testCursor, opts, renderRow)
 
+proc buildFileSystemTreeExample(b: var UiBuilder) =
+  let parent = b.currentNode
+  b.layoutVertical:
+    b.debugName("file-system-tree-demo")
+    discard b.fillX().padding(8).gap(8)
+    if FitY in parent.flags:
+      discard b.height(500)
+    else:
+      discard b.fillY()
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
+    b.label("File System Tree"):
+      discard b.fontSize(18)
+    when defined(wasm):
+      b.labelWrapped("The file system tree demo is only available in native builds."):
+        discard b.fillX().fontSize(13)
+          .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    else:
+      b.labelWrapped("Drag a file or folder onto a folder to move it there. Invalid moves, including dropping a folder into its own descendant or onto its current parent, are rejected."):
+        discard b.fillX().fontSize(13)
+          .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+      b.layoutVertical("file-system-tree-options"):
+        discard b.fitX().fitY().gap(12)
+        if b.checkbox("Show column lines", treeTableShowColumnLines): discard
+        if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
 
-      when not defined(wasm):
+      block:
         b.layoutVertical:
           b.debugName("fs-tree-table-host")
-          discard b.fillX().height(500)
-          b.label("File System (fs-demo)"):
+          discard b.fillX().sizeToParentY()
+          b.label("fs-demo"):
             discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
-          b.labelWrapped("Drag a file or folder onto a folder to move it there. Invalid moves, including dropping a folder into its own descendant or onto its current parent, are rejected."):
-            discard b.fillX().fontSize(13)
-              .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
           proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
             b.label(cursor.fieldName & ":"):
@@ -1738,7 +1770,8 @@ proc buildTreeTableExample(b: var UiBuilder) =
                 if canDrop:
                   discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexAccent)[].fillColor)
                 if b.endDrop(canDrop):
-                  discard FileDragUserData(userData).cursor.moveTo(fileCursor)
+                  if FileDragUserData(userData).cursor.moveTo(fileCursor):
+                    discard b.requestTreeTableExpand(fileCursor)
 
               let (dragging, began) = b.beginDrag()
               if began:
@@ -1896,7 +1929,8 @@ var examples = [
   (fun: buildFlexLayoutExamples, scrollBox: true, title: "Flex"),
   (fun: buildGridLayoutExamples, scrollBox: true, title: "Grid"),
   (fun: buildTableLayoutExamples, scrollBox: true, title: "Table"),
-  (fun: buildTreeTableExample, scrollBox: true, title: "TreeTable"),
+  (fun: buildTreeTableExample, scrollBox: false, title: "TreeTable"),
+  (fun: buildFileSystemTreeExample, scrollBox: false, title: "FileSystem"),
   (fun: buildUnicodeExamples, scrollBox: true, title: "Unicode"),
   (fun: buildSubpixelExamples, scrollBox: true, title: "Subpixel"),
   (fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),

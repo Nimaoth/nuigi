@@ -45,6 +45,7 @@ type
     nodeByKey: Table[string, int]
     initialized*: bool
     pendingToggleCursor*: TreeCursor
+    pendingExpandCursor: TreeCursor
     expandAllWork: seq[ExpandAllWork]
     expandingAll: bool
     walkCursor*: TreeCursor
@@ -669,6 +670,38 @@ proc toggleNode*(e: var TreeTable, cursor: TreeCursor) =
     discard e.addExpandedNode(cursor, parentIndex)
   e.recomputeTotals()
 
+proc expandNode*(e: TreeTable, cursor: TreeCursor) =
+  ## Expands one node if needed while preserving already-expanded descendants.
+  e.expandAllWork.setLen(0)
+  e.expandingAll = false
+  if not e.initialized:
+    e.initializeTopology()
+    discard e.addExpandedNode(e.cursor, -1)
+  if e.findExpandedNode(cursor.cursorKey()) >= 0:
+    return
+  var parentIndex = -1
+  var resolvedCursor = cursor.clone()
+  if cursor.path.len > 0:
+    var parentCursor = cursor.clone()
+    if not parentCursor.exitChild():
+      return
+    parentIndex = e.findExpandedNode(parentCursor.cursorKey())
+    if parentIndex < 0:
+      return
+    resolvedCursor = parentCursor.resolveChild(cursor)
+    if resolvedCursor == nil:
+      return
+  discard e.addExpandedNode(resolvedCursor, parentIndex)
+  e.recomputeTotals()
+
+proc requestTreeTableExpand*(b: var UiBuilder, cursor: TreeCursor): bool =
+  ## Queues expansion on the nearest tree table owning the current deferred row.
+  for storage in b.nodeStorageParents():
+    if storage of TreeTable:
+      TreeTable(storage).pendingExpandCursor = cursor.clone()
+      return true
+  return false
+
 proc ensureNodes(e: var TreeTable) =
   ## Seeds expanded-node storage with only the root on first use.
   if e.initialized:
@@ -1230,6 +1263,8 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ## Logical column zero combines indentation and the first renderer cell.
   prof("treeTable")
   var ctx = b.getOrCreateStorage(b.currentNode)
+  if NodeStorageParent notin b.currentNode.flags:
+    b.nodeStorageParent()
   ctx.cursor = cursor
   ctx.walkCursor = nil
   ctx.rowRenderer = rowRenderer
@@ -1245,6 +1280,10 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.renderedCursors.setLen(0)
 
   try:
+    if ctx.pendingExpandCursor != nil:
+      ctx.expandNode(ctx.pendingExpandCursor)
+      ctx.pendingExpandCursor = nil
+      b.anythingAnimating = true
     if ctx.pendingToggleCursor != nil:
       toggleNode(ctx, ctx.pendingToggleCursor)
       ctx.pendingToggleCursor = nil

@@ -273,6 +273,29 @@ proc testIncrementalExpandAllCompletesAcrossBudgets() =
       expected.nodes[expected.rootNode].totalChildren,
     "incremental expansion should produce the same visible row count")
 
+proc testExpandNodeIsIdempotent() =
+  let leaf = MutableNode(key: "leaf")
+  let branch = MutableNode(key: "branch", children: @[leaf])
+  let root = MutableNode(key: "root", children: @[branch])
+  let mutableTree = MutableTree()
+  let rootCursor = newCursor(root, mutableTree)
+  let branchCursor = rootCursor.childCursor(0)
+  var treeTable = TreeTable(cursor: rootCursor)
+
+  treeTable.expandNode(branchCursor)
+  let expandedCount = treeTable.expandedCount
+  let visibleCount = treeTable.nodes[treeTable.rootNode].totalChildren
+  require(treeTable.expandedIndex("branch") >= 0,
+    "requested node should become expanded")
+  require(visibleCount == 2,
+    "expanded branch should expose its child in the visible total")
+
+  treeTable.expandNode(branchCursor)
+  require(treeTable.expandedCount == expandedCount,
+    "expanding an expanded node should not create another slot")
+  require(treeTable.nodes[treeTable.rootNode].totalChildren == visibleCount,
+    "expanding an expanded node should not change visible totals")
+
 proc runTests() =
   echo "tree table refresh tests"
   testVisibleChainRebasesShiftedIndices()
@@ -280,6 +303,7 @@ proc runTests() =
   testExpandedSlotsRemainStableAndReuseFreeSlots()
   testSharedParentChainsResolveExpandedEdgesOnce()
   testIncrementalExpandAllCompletesAcrossBudgets()
+  testExpandNodeIsIdempotent()
   runTreeTableSeekTests()
   echo "tree table refresh tests succeeded"
 

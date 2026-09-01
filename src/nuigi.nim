@@ -1236,6 +1236,16 @@ proc nodeStorageGet*(b: var UiBuilder, node: ptr UiNode): nil UiNodeStorageData 
     return found.data
   return nil
 
+iterator nodeStorageParents*(b: var UiBuilder): UiNodeStorageData =
+  ## Iterate active storage-parent data from innermost to outermost.
+  for index in countdown(b.storageParentStack.high, 0):
+    let nodeId = b.storageParentStack[index].uint64
+    if b.nodeStorage.hasKey(nodeId):
+      var found = b.nodeStorage.getOrQuit(nodeId).addr
+      found.lastAccess = b.frameCtx.input.frameIndex
+      if found.data != nil:
+        yield found.data
+
 proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's text data.
   if node.textIndex == 0:
