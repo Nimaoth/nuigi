@@ -844,6 +844,19 @@ proc testFileSystemCursorDragAndDrop() =
     require(sourceNav.enterChild(), "source folder should be reachable from root")
     var sourceFolderNav = FileSystemCursor(sourceNav.clone())
     require(sourceFolderNav.enterChild(), "dragged folder should be reachable from source")
+    let sourceFolderNavPath = sourceFolderNav.fullPath
+    var sourceFolderParent = FileSystemCursor(sourceFolderNav.clone())
+    require(sourceFolderParent.exitChild(), "cloned child cursor should restore its parent")
+    require(sourceFolderParent.fullPath == sourceParentPath,
+      "restored filesystem parent should retain its cached full path")
+    require(sourceFolderNav.parentPath == sourceParentPath,
+      "filesystem child should expose its parent location path")
+    require(sourceFolderNav.rootPath == root,
+      "filesystem child should derive its original root from its location chain")
+    require(sourceFolderParent.fieldName == extractFilename(sourceParentPath),
+      "restored filesystem parent should retain its cached name")
+    require(sourceFolderNav.fullPath == sourceFolderNavPath,
+      "ascending a clone should not mutate the original cursor")
     var targetNav = FileSystemCursor(rootCursor.clone())
     require(targetNav.enterChild() and targetNav.moveNext(), "target folder should be reachable from root")
 
@@ -855,7 +868,7 @@ proc testFileSystemCursorDragAndDrop() =
 
     proc expandedIndex(key: string): int =
       for i in 0 .. tree.nodes.high:
-        if tree.nodes[i].cursor.cursorKey() == key:
+        if tree.nodes[i].cursor != nil and tree.nodes[i].cursor.cursorKey() == key:
           return i
       return -1
 

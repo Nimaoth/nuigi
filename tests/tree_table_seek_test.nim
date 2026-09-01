@@ -86,7 +86,7 @@ proc newTreeCursor*(maxDepth, childrenPerNode: int): TestTreeCursor =
 proc isExpanded(e: TreeTable, c: TreeCursor, startIndex: int): bool =
   let key = c.cursorKey()
   for i in startIndex .. e.nodes.high:
-    if e.nodes[i].cursor.cursorKey() == key:
+    if e.nodes[i].cursor != nil and e.nodes[i].cursor.cursorKey() == key:
       return true
   return false
 
@@ -241,10 +241,10 @@ proc testSeekSparseExpansion() =
   ]
   runScenario("one-branch-3x2", 3, 2, branch)
 
-proc runTests() =
-  echo "property_editor seek tests"
+proc runTreeTableSeekTests*() =
+  echo "tree table seek tests"
   testSeekFullExpansion()
   testSeekSparseExpansion()
 
 when isMainModule:
-  runTests()
+  runTreeTableSeekTests()

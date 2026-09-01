@@ -2,6 +2,7 @@ import nuigi
 import mymath
 import mesh
 import arena, array_view
+import tables
 
 import widgets
 import dynamic_virtuallist, profiler
@@ -16,20 +17,28 @@ type
     index*: int
     path*: seq[int]
 
-  # A cached expanded node. Only expanded nodes live in `TreeTable.nodes`;
-  # each serves as an anchor from which any visible row can be reached by seeking
-  # forward through the cursor.
+  # A cached expanded node. Active nodes form an intrinsic tree through stable
+  # slot indices; removed nodes leave reusable free-list slots.
   ExpandedNode* = object
     cursor*: TreeCursor
     childIndex*: int
     depth*: int
     childCount*: int
     totalChildren*: int
+    parent*: int
+    firstChild*: int
+    nextSibling*: int
+    previousSibling*: int
+    nextFree: int
 
   # Per-instance state for one tree table, kept in the builder's node storage.
   TreeTable* = ref object of UiNodeStorageData
     cursor*: TreeCursor
     nodes*: seq[ExpandedNode]
+    rootNode*: int
+    freeNode: int
+    expandedCount*: int
+    nodeByKey: Table[string, int]
     initialized*: bool
     pendingToggleCursor*: TreeCursor
     walkCursor*: TreeCursor
@@ -111,9 +120,12 @@ type
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
 
-func depth*(c: TreeCursor): int = c.path.len
+func depth*(c: TreeCursor): int =
+  ## Returns the cursor's depth below the root.
+  c.path.len
 
 proc defaultTreeTableOptions*(): TreeTableOptions =
+  ## Creates the standard tree-table appearance and layout options.
   result = TreeTableOptions(
     columns: @[],
     columnGap: 4.0'f32,
@@ -152,6 +164,7 @@ proc initTreeTableOptions*(
     hasCustomAlternatingColors: bool = false,
     hoverColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomHoverColor: bool = false): TreeTableOptions =
+  ## Creates options from explicit column, separator, indentation, and row colors.
   result.columns = @columns
   result.columnGap = columnGap
   result.showColumnLines = showColumnLines
@@ -171,8 +184,8 @@ proc initTreeTableOptions*(
   result.hoverColor = hoverColor
   result.hasCustomHoverColor = hasCustomHoverColor or hoverColor.a > 0.001'f32
 
-# Returns the editor state attached to `node`, creating it on first use.
 proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
+  ## Returns the editor state attached to `node`, creating it on first use.
   let existing = nodeStorageGet(b, node)
   if existing != nil:
     return cast[TreeTable](existing)
@@ -181,46 +194,89 @@ proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
   return storage
 
 method clone*(c: TreeCursor): TreeCursor {.base.} =
+  ## Copies a cursor so callers can navigate without mutating the original.
   result = TreeCursor()
   result.fieldName = c.fieldName
   result.index = c.index
   result.path = c.path
 
-# Unique identity of a node, used to match expansion state. Subtypes override
-# this (e.g. a file system cursor returns its full path).
 method cursorKey*(c: TreeCursor): string {.base.} =
+  ## Returns stable node identity used to preserve expansion state.
+  ## Subtypes should override this, for example with a filesystem path.
   result = ""
   for i in c.path:
     result.add($i)
     result.add("/")
 
 method moveNext*(c: TreeCursor, count: int = 1): bool {.base.} =
+  ## Moves to a later sibling and returns false when it does not exist.
   false
 
 method movePrev*(c: TreeCursor, count: int = 1): bool {.base.} =
+  ## Moves to an earlier sibling and returns false when it does not exist.
   false
 
 method childCount*(c: TreeCursor): int {.base.} =
+  ## Returns the number of direct children under the current node.
   0
 
 method enterChild*(c: TreeCursor): bool {.base.} =
+  ## Moves to the first child and returns false when the current node is a leaf.
   false
 
 method exitChild*(c: TreeCursor): bool {.base.} =
+  ## Moves to the parent and returns false when already at the cursor root.
   false
 
-# True if the node under `c` is currently expanded (present in `nodes`).
-proc nodeIsExpanded(e: TreeTable, c: TreeCursor, startIndex: int): bool =
-  prof("nodeIsExpanded")
-  let key = cursorKey(c)
-  for i in startIndex..e.nodes.high:
-    if cursorKey(e.nodes[i].cursor) == key:
-      return true
-  return false
+method updatePath*(c: TreeCursor, path: seq[int]) {.base.} =
+  ## Replaces the positional path and keeps the sibling index synchronized.
+  c.path = path
+  c.index = if path.len > 0: path[^1] else: 0
 
-# Advances `c` to the next visible row in preorder, descending into a node only
-# when it is expanded.
+method replacePathPrefix*(c: TreeCursor, oldPrefixLen: int, newPrefix: seq[int]) {.base.} =
+  ## Rebases after an ancestor moves while preserving the descendant suffix.
+  if oldPrefixLen == newPrefix.len:
+    for index in 0 ..< newPrefix.len:
+      c.path[index] = newPrefix[index]
+    c.index = if c.path.len > 0: c.path[^1] else: 0
+    return
+
+  let suffixLen = max(0, c.path.len - oldPrefixLen)
+  var path = newSeq[int](newPrefix.len + suffixLen)
+  for index in 0 ..< newPrefix.len:
+    path[index] = newPrefix[index]
+  for index in 0 ..< suffixLen:
+    path[newPrefix.len + index] = c.path[oldPrefixLen + index]
+  c.updatePath(path)
+
+method resolveChild*(c: TreeCursor, child: TreeCursor): TreeCursor {.base.} =
+  ## Resolves `child` against the current children using its index only as a hint.
+  ## Identity comes from cursorKey; indexed data sources should override this.
+  prof("resolveChild")
+  let childKey = child.cursorKey()
+  var current = c.clone()
+  if not current.enterChild():
+    return nil
+
+  if child.index > 0:
+    var hinted = current.clone()
+    if hinted.moveNext(child.index) and hinted.cursorKey() == childKey:
+      return hinted
+
+  while true:
+    if current.cursorKey() == childKey:
+      return current
+    if not current.moveNext():
+      return nil
+
+proc nodeIsExpanded(e: TreeTable, c: TreeCursor, startIndex: int): bool =
+  ## Returns whether the cursor has an active expanded-node slot.
+  prof("nodeIsExpanded")
+  discard startIndex
+  e.nodeByKey.hasKey(cursorKey(c))
+
 proc stepForward(c: var TreeCursor, e: TreeTable, startIndex: int): bool =
+  ## Advances to the next visible preorder row, descending only when expanded.
   prof("stepForward")
   if nodeIsExpanded(e, c, startIndex) and c.enterChild():
     return true
@@ -233,89 +289,292 @@ proc stepForward(c: var TreeCursor, e: TreeTable, startIndex: int): bool =
       return true
 
 iterator expandedChildren*(e: TreeTable, nodeIndex: int): (int, ptr ExpandedNode) =
-  if nodeIndex < e.nodes.len:
-    let parent {.cursor.} = e.nodes[nodeIndex]
-    var i = nodeIndex + 1
-    while i < e.nodes.len:
-      let n = e.nodes[i].addr
-      if n.depth <= parent.depth:
-        break
-      if n.depth == parent.depth + 1:
-        yield (i, n)
-      inc i
+  ## Yields active expanded direct children in current sibling order.
+  if nodeIndex >= 0 and nodeIndex < e.nodes.len and e.nodes[nodeIndex].cursor != nil:
+    var childIndex = e.nodes[nodeIndex].firstChild
+    while childIndex >= 0:
+      let nextIndex = e.nodes[childIndex].nextSibling
+      yield (childIndex, e.nodes[childIndex].addr)
+      childIndex = nextIndex
 
-proc refreshRenderedNode*(e: TreeTable, cursor: TreeCursor) =
-  ## Refresh cached expansion bookkeeping for one row that is rendered this frame.
-  prof("refreshRenderedNode")
-  let key = cursor.cursorKey()
-  var nodeIndex = -1
-  for i in 0 .. e.nodes.high:
-    if e.nodes[i].cursor.cursorKey() == key:
-      nodeIndex = i
+proc allocateExpandedNode(e: TreeTable, node: ExpandedNode): int =
+  ## Allocates a stable slot, preferring the free list, and indexes its key.
+  if e.freeNode >= 0:
+    result = e.freeNode
+    e.freeNode = e.nodes[result].nextFree
+    e.nodes[result] = node
+  else:
+    result = e.nodes.len
+    e.nodes.add(node)
+  inc e.expandedCount
+  e.nodeByKey[node.cursor.cursorKey()] = result
+
+proc linkChild(e: TreeTable, parentIndex, nodeIndex: int) =
+  ## Inserts a slot into its parent's child list in source sibling order.
+  e.nodes[nodeIndex].parent = parentIndex
+  var previousIndex = -1
+  var currentIndex = e.nodes[parentIndex].firstChild
+  while currentIndex >= 0 and e.nodes[currentIndex].childIndex < e.nodes[nodeIndex].childIndex:
+    previousIndex = currentIndex
+    currentIndex = e.nodes[currentIndex].nextSibling
+  e.nodes[nodeIndex].previousSibling = previousIndex
+  e.nodes[nodeIndex].nextSibling = currentIndex
+  if previousIndex >= 0:
+    e.nodes[previousIndex].nextSibling = nodeIndex
+  else:
+    e.nodes[parentIndex].firstChild = nodeIndex
+  if currentIndex >= 0:
+    e.nodes[currentIndex].previousSibling = nodeIndex
+
+proc unlinkNode(e: TreeTable, nodeIndex: int) =
+  ## Detaches a slot from its parent and siblings without releasing it.
+  let parentIndex = e.nodes[nodeIndex].parent
+  let previousIndex = e.nodes[nodeIndex].previousSibling
+  let nextIndex = e.nodes[nodeIndex].nextSibling
+  if previousIndex >= 0:
+    e.nodes[previousIndex].nextSibling = nextIndex
+  elif parentIndex >= 0:
+    e.nodes[parentIndex].firstChild = nextIndex
+  if nextIndex >= 0:
+    e.nodes[nextIndex].previousSibling = previousIndex
+  e.nodes[nodeIndex].parent = -1
+  e.nodes[nodeIndex].previousSibling = -1
+  e.nodes[nodeIndex].nextSibling = -1
+
+proc releaseNode(e: TreeTable, nodeIndex: int) =
+  ## Removes a key mapping and pushes the cleared slot onto the free list.
+  e.nodeByKey.del(e.nodes[nodeIndex].cursor.cursorKey())
+  e.nodes[nodeIndex] = ExpandedNode(
+    parent: -1,
+    firstChild: -1,
+    nextSibling: -1,
+    previousSibling: -1,
+    nextFree: e.freeNode)
+  e.freeNode = nodeIndex
+  dec e.expandedCount
+
+proc initializeTopology(e: TreeTable) =
+  ## Resets expanded topology and lookup state to an empty initialized tree.
+  e.initialized = true
+  e.nodes.setLen(0)
+  e.nodeByKey = initTable[string, int]()
+  e.rootNode = -1
+  e.freeNode = -1
+  e.expandedCount = 0
+
+proc addExpandedNode(e: TreeTable, cursor: TreeCursor, parentIndex: int): int =
+  ## Caches a newly expanded cursor and links it below its expanded parent.
+  let childCount = cursor.childCount()
+  result = e.allocateExpandedNode(ExpandedNode(
+    cursor: cursor.clone(),
+    childIndex: cursor.index,
+    depth: cursor.path.len,
+    childCount: childCount,
+    totalChildren: childCount,
+    parent: parentIndex,
+    firstChild: -1,
+    nextSibling: -1,
+    previousSibling: -1,
+    nextFree: -1))
+  if parentIndex >= 0:
+    e.linkChild(parentIndex, result)
+  else:
+    e.rootNode = result
+
+proc recomputeTotals(e: TreeTable) =
+  ## Recomputes visible descendant totals bottom-up for all expanded slots.
+  prof("recomputeTotals")
+  if e.rootNode < 0:
+    return
+  var stack: seq[(int, bool)]
+  stack.add((e.rootNode, false))
+  while stack.len > 0:
+    let (nodeIndex, visited) = stack.pop()
+    if visited:
+      var total = e.nodes[nodeIndex].childCount
+      var childIndex = e.nodes[nodeIndex].firstChild
+      while childIndex >= 0:
+        total += e.nodes[childIndex].totalChildren
+        childIndex = e.nodes[childIndex].nextSibling
+      e.nodes[nodeIndex].totalChildren = total
+    else:
+      stack.add((nodeIndex, true))
+      var childIndex = e.nodes[nodeIndex].firstChild
+      while childIndex >= 0:
+        stack.add((childIndex, false))
+        childIndex = e.nodes[childIndex].nextSibling
+
+proc removeExpandedSubtree(e: TreeTable, nodeIndex: int) =
+  ## Unlinks a subtree and releases all of its slots to the free list.
+  prof("removeExpandedSubtree")
+  let removesRoot = nodeIndex == e.rootNode
+  e.unlinkNode(nodeIndex)
+  var stack = @[nodeIndex]
+  while stack.len > 0:
+    let removeIndex = stack.pop()
+    var childIndex = e.nodes[removeIndex].firstChild
+    while childIndex >= 0:
+      let nextIndex = e.nodes[childIndex].nextSibling
+      stack.add(childIndex)
+      childIndex = nextIndex
+    e.releaseNode(removeIndex)
+  if removesRoot:
+    e.rootNode = -1
+
+iterator expandedSubtree(e: TreeTable, nodeIndex: int): int =
+  ## Yields expanded descendants in preorder, excluding the supplied root slot.
+  var currentIndex = e.nodes[nodeIndex].firstChild
+  while currentIndex >= 0:
+    yield currentIndex
+    if e.nodes[currentIndex].firstChild >= 0:
+      currentIndex = e.nodes[currentIndex].firstChild
+      continue
+    while currentIndex != nodeIndex and e.nodes[currentIndex].nextSibling < 0:
+      currentIndex = e.nodes[currentIndex].parent
+    if currentIndex == nodeIndex:
       break
-  if nodeIndex < 0:
+    currentIndex = e.nodes[currentIndex].nextSibling
+
+proc updateExpandedCursor(e: TreeTable, nodeIndex: int, cursor: TreeCursor) =
+  ## Replaces a cached cursor and rebases descendants when its path changed.
+  prof("updateExpandedCursor")
+  let oldPath = e.nodes[nodeIndex].cursor.path
+  let newPath = cursor.path
+  if oldPath == newPath:
+    e.nodes[nodeIndex].cursor = cursor
+    e.nodes[nodeIndex].childIndex = cursor.index
     return
 
-  let parentDepth = e.nodes[nodeIndex].depth
-  var expandedChildIndex = nodeIndex + 1
-  while expandedChildIndex < e.nodes.len and e.nodes[expandedChildIndex].depth > parentDepth:
-    if e.nodes[expandedChildIndex].depth != parentDepth + 1:
-      inc expandedChildIndex
+  for subtreeIndex in e.expandedSubtree(nodeIndex):
+    e.nodes[subtreeIndex].cursor.replacePathPrefix(oldPath.len, newPath)
+  e.nodes[nodeIndex].cursor = cursor
+  e.nodes[nodeIndex].childIndex = cursor.index
+
+proc findExpandedNode(e: TreeTable, key: string): int =
+  ## Returns the active slot for a key, or -1 when it is not expanded.
+  prof("findExpandedNode")
+  if e.nodeByKey.hasKey(key): e.nodeByKey[key] else: -1
+
+proc refreshNode(e: TreeTable, cursor: TreeCursor): int =
+  ## Refreshes one expanded node and reconciles its expanded direct children.
+  prof("refreshNode")
+  let nodeIndex = e.findExpandedNode(cursor.cursorKey())
+  if nodeIndex < 0:
+    return -1
+
+  e.updateExpandedCursor(nodeIndex, cursor.clone())
+  e.nodes[nodeIndex].childCount = cursor.childCount()
+  var expandedChildIndex = e.nodes[nodeIndex].firstChild
+  while expandedChildIndex >= 0:
+    let nextExpandedChild = e.nodes[expandedChildIndex].nextSibling
+    let resolved = cursor.resolveChild(e.nodes[expandedChildIndex].cursor)
+    if resolved == nil:
+      e.removeExpandedSubtree(expandedChildIndex)
+    else:
+      let oldChildIndex = e.nodes[expandedChildIndex].childIndex
+      e.updateExpandedCursor(expandedChildIndex, resolved)
+      if e.nodes[expandedChildIndex].childIndex != oldChildIndex:
+        e.unlinkNode(expandedChildIndex)
+        e.linkChild(nodeIndex, expandedChildIndex)
+    expandedChildIndex = nextExpandedChild
+  return nodeIndex
+
+proc refreshRenderedNode*(e: TreeTable, cursor: TreeCursor) =
+  ## Refreshes cached expansion bookkeeping for one row rendered this frame.
+  prof("refreshRenderedNode")
+  discard e.refreshNode(cursor)
+  e.recomputeTotals()
+
+proc refreshRenderedNodes*(e: TreeTable, cursors: openArray[TreeCursor]) =
+  ## Validates retained visible cursors and their ancestors without scanning
+  ## unrelated branches.
+  prof("refreshRenderedNodes")
+  var refreshedIndexes = initTable[string, int]()
+  for renderedCursor in cursors:
+    var chain: seq[TreeCursor]
+    var chainCursor = renderedCursor.clone()
+    var refreshedAncestorIndex = -1
+    block:
+      prof("cursorChain")
+      chain.add(chainCursor.clone())
+      while chainCursor.exitChild():
+        chain.add(chainCursor.clone())
+        if refreshedIndexes.len > 0:
+          let ancestorKey = chainCursor.cursorKey()
+          let ancestorIndex = refreshedIndexes.getOrDefault(ancestorKey, -1)
+          if ancestorIndex >= 0 and ancestorIndex < e.nodes.len and
+              e.nodes[ancestorIndex].cursor != nil and
+              e.nodes[ancestorIndex].cursor.cursorKey() == ancestorKey:
+            refreshedAncestorIndex = ancestorIndex
+            break
+
+    if chain.len == 0 or
+        (refreshedAncestorIndex < 0 and
+          chain[^1].cursorKey() != e.cursor.cursorKey()):
       continue
 
-    let expandedKey = e.nodes[expandedChildIndex].cursor.cursorKey()
-    var hasCurrentChild = false
-    var currentChild = cursor.clone()
-    if currentChild.enterChild():
-      while true:
-        if currentChild.cursorKey() == expandedKey:
-          hasCurrentChild = true
-          break
-        if not currentChild.moveNext():
-          break
-
-    if not hasCurrentChild:
-      let removedDepth = e.nodes[expandedChildIndex].depth
-      e.nodes.delete(expandedChildIndex)
-      while expandedChildIndex < e.nodes.len and e.nodes[expandedChildIndex].depth > removedDepth:
-        e.nodes.delete(expandedChildIndex)
+    prof("loop")
+    var current = if refreshedAncestorIndex >= 0:
+      e.nodes[refreshedAncestorIndex].cursor.clone()
     else:
-      let oldPath = e.nodes[expandedChildIndex].cursor.path
-      let newPath = currentChild.path
-      let expandedChildDepth = e.nodes[expandedChildIndex].depth
-      var subtreeIndex = expandedChildIndex
-      while subtreeIndex < e.nodes.len and
-          (subtreeIndex == expandedChildIndex or e.nodes[subtreeIndex].depth > expandedChildDepth):
-        let nodePath = e.nodes[subtreeIndex].cursor.path
-        if nodePath.len > oldPath.len:
-          e.nodes[subtreeIndex].cursor.path = newPath & nodePath[oldPath.len .. ^1]
+      e.cursor.clone()
+    var expandedNodeIndex = if refreshedAncestorIndex >= 0:
+      refreshedAncestorIndex
+    else:
+      e.rootNode
+    for chainIndex in countdown(chain.high, 0):
+      prof("body")
+      let currentKey = current.cursorKey()
+      let refreshedIndex = refreshedIndexes.getOrDefault(currentKey, -1)
+      if refreshedIndex < 0:
+        expandedNodeIndex = e.refreshNode(current)
+        if expandedNodeIndex < 0:
+          break
+        refreshedIndexes[currentKey] = expandedNodeIndex
+      else:
+        if refreshedIndex < e.nodes.len and
+            e.nodes[refreshedIndex].cursor != nil and
+            e.nodes[refreshedIndex].cursor.cursorKey() == currentKey:
+          expandedNodeIndex = refreshedIndex
         else:
-          e.nodes[subtreeIndex].cursor.path = newPath
-        e.nodes[subtreeIndex].cursor.index = e.nodes[subtreeIndex].cursor.path[^1]
-        inc subtreeIndex
-      e.nodes[expandedChildIndex].cursor = currentChild
-      e.nodes[expandedChildIndex].childIndex = currentChild.index
-      expandedChildIndex = subtreeIndex
+          expandedNodeIndex = e.findExpandedNode(currentKey)
+          if expandedNodeIndex >= 0:
+            refreshedIndexes[currentKey] = expandedNodeIndex
+        if expandedNodeIndex < 0:
+          break
+      if chainIndex == 0:
+        break
+      let expectedChild = chain[chainIndex - 1]
+      let expectedKey = expectedChild.cursorKey()
+      var linkedChildIndex = refreshedIndexes.getOrDefault(expectedKey, -1)
+      if linkedChildIndex < 0:
+        linkedChildIndex = e.findExpandedNode(expectedKey)
+      if linkedChildIndex >= 0 and
+          linkedChildIndex < e.nodes.len and
+          e.nodes[linkedChildIndex].cursor != nil and
+          e.nodes[linkedChildIndex].cursor.cursorKey() == expectedKey and
+          e.nodes[linkedChildIndex].parent == expandedNodeIndex:
+        current = e.nodes[linkedChildIndex].cursor.clone()
+        expandedNodeIndex = linkedChildIndex
+        continue
 
-  e.nodes[nodeIndex].cursor = cursor.clone()
-  e.nodes[nodeIndex].childCount = cursor.childCount()
-
-  for i in countdown(e.nodes.high, 0):
-    var total = e.nodes[i].childCount
-    var childIndex = i + 1
-    while childIndex < e.nodes.len and e.nodes[childIndex].depth > e.nodes[i].depth:
-      if e.nodes[childIndex].depth == e.nodes[i].depth + 1:
-        total += e.nodes[childIndex].totalChildren
-      inc childIndex
-    e.nodes[i].totalChildren = total
+      let resolved = current.resolveChild(expectedChild)
+      if resolved == nil:
+        break
+      current = resolved
+      expandedNodeIndex = -1
+      if chainIndex > 1:
+        break
+  e.recomputeTotals()
 
 proc seek*(e: TreeTable, targetRow: int): bool =
+  ## Positions the frame walk cursor at a visible row using cached subtree totals.
   prof("seek")
   assert e.walkIndex == 0
 
   e.walkCursor = e.cursor.clone()
   e.walkIndex = 0
-  e.walkNode = 0
+  e.walkNode = e.rootNode
   var targetChild = 0
   if targetRow > 0:
     var done = false
@@ -358,8 +617,8 @@ proc seek*(e: TreeTable, targetRow: int): bool =
   e.walkIndex = targetRow
   return true
 
-# True if `a`'s path is a strict prefix of `b`'s path (i.e. `a` is an ancestor of `b`).
 func isAncestorPath*(a, b: seq[int]): bool =
+  ## Returns whether `a` is a strict ancestor path of `b`.
   if a.len >= b.len:
     return false
   for i in 0 ..< a.len:
@@ -367,132 +626,86 @@ func isAncestorPath*(a, b: seq[int]): bool =
       return false
   return true
 
-# True if `a` comes before `b` in a preorder traversal of the tree.
 func preorderLess*(a, b: TreeCursor): bool =
+  ## Returns whether `a` precedes `b` in a preorder traversal.
   let n = min(a.path.len, b.path.len)
   for i in 0 ..< n:
     if a.path[i] != b.path[i]:
       return a.path[i] < b.path[i]
   return a.path.len < b.path.len
 
-# Toggles the expansion state of the node under `cursor`. Expanding inserts the
-# node into `nodes` at its preorder position; collapsing removes it and every
-# descendant. `nodes` always stays sorted in preorder and downward-closed.
 proc toggleNode*(e: var TreeTable, cursor: TreeCursor) =
+  ## Toggles expansion while preserving stable slots and linked logical order.
+  prof("toggleNode")
+  if not e.initialized:
+    e.initialized = true
+    e.initializeTopology()
   let key = cursorKey(cursor)
-  var idx = -1
-  for i in 0 .. e.nodes.high:
-    if cursorKey(e.nodes[i].cursor) == key:
-      idx = i
-      break
+  let idx = e.findExpandedNode(key)
   if idx >= 0:
-    let collapseTotal = e.nodes[idx].totalChildren
-    var depth = cursor.depth
-    for i in 0..<idx:
-      let parentIndex = idx - i - 1
-      if e.nodes[parentIndex].cursor.depth == depth - 1:
-        e.nodes[parentIndex].totalChildren -= collapseTotal
-        dec depth
-    var i = idx
-    while i < e.nodes.len:
-      let k = cursorKey(e.nodes[i].cursor)
-      if k == key or isAncestorPath(cursor.path, e.nodes[i].cursor.path):
-        e.nodes.delete(i)
-      else:
-        i += 1
+    e.removeExpandedSubtree(idx)
   else:
-    var ins = e.nodes.len
-    for i in 0 .. e.nodes.high:
-      if not preorderLess(e.nodes[i].cursor, cursor):
-        ins = i
-        break
-    let childCount = cursor.childCount()
-    e.nodes.insert(ExpandedNode(
-      cursor: cursor.clone(),
-      depth: cursor.path.len,
-      childIndex: cursor.index,
-      childCount: childCount,
-      totalChildren: childCount), ins)
-    var depth = cursor.depth
-    for i in 0..<ins:
-      let parentIndex = ins - i - 1
-      if e.nodes[parentIndex].cursor.depth == depth - 1:
-        e.nodes[parentIndex].totalChildren += childCount
-        dec depth
+    var parentIndex = -1
+    if cursor.path.len > 0:
+      var parentCursor = cursor.clone()
+      if not parentCursor.exitChild():
+        return
+      parentIndex = e.findExpandedNode(parentCursor.cursorKey())
+      if parentIndex < 0:
+        return
+    discard e.addExpandedNode(cursor, parentIndex)
+  e.recomputeTotals()
 
-# Seeds `nodes` with just the root on first use.
 proc ensureNodes(e: var TreeTable) =
+  ## Seeds expanded-node storage with only the root on first use.
   if e.initialized:
     return
   e.initialized = true
-  var root = e.cursor.clone()
-  let childCount = root.childCount()
-  e.nodes.add(ExpandedNode(
-    cursor: root,
-    depth: 0,
-    childCount: childCount,
-    totalChildren: childCount))
+  e.initializeTopology()
+  discard e.addExpandedNode(e.cursor, -1)
 
-# Collapses the whole tree back to just the root, keeping it initialized.
 proc collapseAll*(e: var TreeTable) =
-  e.nodes.setLen(0)
-  var root = e.cursor.clone()
-  let childCount = root.childCount()
-  e.nodes.add(ExpandedNode(
-    cursor: root,
-    depth: 0,
-    childCount: childCount,
-    totalChildren: childCount))
+  ## Collapses the tree back to the root while keeping storage initialized.
+  if e.rootNode < 0:
+    e.initializeTopology()
+    discard e.addExpandedNode(e.cursor, -1)
+    return
+  var childIndex = e.nodes[e.rootNode].firstChild
+  while childIndex >= 0:
+    let nextIndex = e.nodes[childIndex].nextSibling
+    e.removeExpandedSubtree(childIndex)
+    childIndex = nextIndex
+  e.nodes[e.rootNode].cursor = e.cursor.clone()
+  e.nodes[e.rootNode].childIndex = e.cursor.index
+  e.nodes[e.rootNode].childCount = e.cursor.childCount()
+  e.nodes[e.rootNode].totalChildren = e.nodes[e.rootNode].childCount
 
-# Total number of visible rows: the root plus every child of each expanded node.
 proc countVisible(e: TreeTable): int =
-  var count = 1
-  for i in 0 ..< e.nodes.len:
-    var c = e.nodes[i].cursor.clone()
-    count += c.childCount()
-  return count
+  ## Returns the root plus all visible descendants of expanded nodes.
+  if e.rootNode < 0: 1 else: 1 + e.nodes[e.rootNode].totalChildren
 
-# Expands every node that has children by adding them all to `nodes` in preorder.
 proc expandAll*(e: TreeTable) =
-  e.nodes.setLen(0)
+  ## Expands every non-leaf node and builds the linked topology in preorder.
+  e.initializeTopology()
+  let rootIndex = e.addExpandedNode(e.cursor, -1)
   var stack: seq[(TreeCursor, int)]
-  stack.add((e.cursor.clone(), 0))
+  stack.add((e.cursor.clone(), rootIndex))
   while stack.len > 0:
-    let (cursor, depth) = stack.pop()
+    let (cursor, parentIndex) = stack.pop()
     let childCount = cursor.childCount()
-    if childCount > 0:
-      e.nodes.add(ExpandedNode(
-        cursor: cursor.clone(),
-        depth: depth,
-        childIndex: cursor.index,
-        childCount: childCount,
-        totalChildren: childCount))
     if childCount > 0:
       var child = cursor.clone()
       if child.enterChild():
-        var children: seq[TreeCursor]
         while true:
-          children.add(child.clone())
+          if child.childCount() > 0:
+            let childNodeIndex = e.addExpandedNode(child, parentIndex)
+            stack.add((child.clone(), childNodeIndex))
           if not child.moveNext():
             break
-        for i in countdown(children.len - 1, 0):
-          stack.add((children[i], depth + 1))
-  # bottom-up totalChildren = childCount + sum of direct expanded children totalChildren
-  for i in countdown(e.nodes.high, 0):
-    var sum = 0
-    let parentDepth = e.nodes[i].depth
-    var j = i + 1
-    while j <= e.nodes.high:
-      if e.nodes[j].depth <= parentDepth:
-        break
-      if e.nodes[j].depth == parentDepth + 1 and isAncestorPath(e.nodes[i].cursor.path, e.nodes[j].cursor.path):
-        sum += e.nodes[j].totalChildren
-      inc j
-    e.nodes[i].totalChildren = e.nodes[i].childCount + sum
+  e.recomputeTotals()
 
 proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
-  ## Deferred builder for the expand/collapse chevron icon.
-  ## userData == 1 => expanded (down), 0 => collapsed (right)
+  ## Builds the deferred chevron; userData selects expanded/down or collapsed/right.
   let arena = b.frame.arena
   if arena == nil:
     return
@@ -525,10 +738,8 @@ proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   b.withParent(nodeIdx):
     discard b.customRenderCommands(cmds)
 
-# Renders a single row for the node under `cursor`. A leading chevron mesh
-# indicates whether the node has children and its expanded/collapsed state.
-# Collapsed points right (1,0), expanded points down (0,1).
 proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
+  ## Renders one row with indentation, expansion control, background, and cells.
   prof("treeTableField")
   let hasChildren = e.walkCursor.childCount() > 0
   let isExpanded = hasChildren and nodeIsExpanded(e, e.walkCursor, 0)
@@ -570,28 +781,11 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
 
   e.rowRenderer(b, e.walkCursor, index)
 
-# Custom layout for the virtual list viewport: lays out every row's children as
-# columns, table-style. First pass measures the maximum width of each column index
-# across all visible rows; the second pass positions each row's columns using those
-# shared widths so columns line up vertically. Each column is fit-sized; the row
-# height follows the tallest column in that row.
-#
-# Columns 0 and 1 (indent/chevron container + first renderer column) are treated as
-# a single logical column 0, so the second column lives right next to the indent
-# instead of being vertically aligned across rows. Logical column 0's width is the
-# combined width of those two physical children (including the gap between them);
-# logical column N (N>=1) maps to physical child N+1. Only starting at the third
-# physical column (logical 1) are columns vertically aligned.
-#
-# When a column spec is supplied via userData (ptr TreeTableLayout, same shape as
-# widgets.tableLayout), each logical column can be Fixed, Fit, Fill or
-# Proportional (see widgets.nim). Fixed/Fill/Proportional work for logical 0 as
-# well – the indent width is subtracted so the name column (physical 1) fills the
-# remainder of the allocated logical width.
-#
-# `TreeTableLayout.showColumnLines` draws vertical separator lines between
-# logical columns (inside the inter-column gap, centered).
 proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
+  ## Aligns visible row children into table columns and draws optional guides.
+  ## Physical indentation and name cells form logical column zero; later cells
+  ## map one-to-one to logical columns. Explicit specs support fixed, fit, fill,
+  ## and proportional widths; zero userData selects the legacy fit-only layout.
   prof "treeTableColumnLayout"
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
     return
@@ -934,13 +1128,12 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           else:
             b.ensureNodeCustomCommands(row) = indentAvail
 
-# Builds the row at `itemIndex` by walking the visible preorder from the root.
-# `walkCursor` is cached across the deferred row builds within a frame (visited in
-# increasing `itemIndex` order), so each row advances the walk incrementally.
 proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
+  ## Builds one deferred row by incrementally walking the visible preorder.
+  ## The frame walk cursor is shared across increasing virtual-list indices.
   prof("buildTreeTableRow")
   var ctx = b.getOrCreateStorage(b.frame.nodes[userData].addr)
-  if ctx.nodes.len == 0:
+  if ctx.rootNode < 0:
     return
   if ctx.walkCursor == nil:
     ctx.walkCursor = ctx.cursor.clone()
@@ -957,12 +1150,10 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
   ctx.renderedCursors.add(ctx.walkCursor.clone())
   treeTableField(b, ctx, itemIndex)
 
-# Entry point with TreeTableOptions – all sizing and line options in one object.
-# Logical column 0 is the combined indent+name column (physical 0+1); logical N
-# (N>=1) maps to physical column N+1. Only starting at the third physical
-# column are columns vertically aligned; logical 0 takes the indent width into
-# account when sizing the name part.
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions, rowRenderer: TreeTableRowRenderer) =
+  ## Builds a virtualized tree table using the complete options object.
+  ## Logical column zero combines indentation and the first renderer cell.
+  prof("treeTable")
   var ctx = b.getOrCreateStorage(b.currentNode)
   ctx.cursor = cursor
   ctx.walkCursor = nil
@@ -975,8 +1166,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.hasCustomHoverColor = options.hasCustomHoverColor
   ensureNodes(ctx)
 
-  for renderedCursor in ctx.renderedCursors:
-    ctx.refreshRenderedNode(renderedCursor)
+  ctx.refreshRenderedNodes(ctx.renderedCursors)
   ctx.renderedCursors.setLen(0)
 
   try:
@@ -987,7 +1177,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   except:
     return
 
-  let count = if ctx.nodes.len == 0: 1 else: 1 + ctx.nodes[0].totalChildren
+  let count = if ctx.rootNode < 0: 1 else: 1 + ctx.nodes[ctx.rootNode].totalChildren
   b.layoutHorizontal:
     discard b.fit().gap(2)
     if b.button("Expand all"):
@@ -1040,14 +1230,16 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       discard b.customLayout(treeTableColumnLayout, 0)
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
+  ## Builds a tree table with explicit column policies and column gap.
   var opts = defaultTreeTableOptions()
   opts.columns = @columns
   opts.columnGap = columnGap
   b.treeTable(cursor, opts, rowRenderer)
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], rowRenderer: TreeTableRowRenderer) =
+  ## Builds a tree table with explicit columns and the default gap.
   b.treeTable(cursor, columns, 4.0'f32, rowRenderer)
 
-# Backwards-compatible entry point – all columns Fit (legacy behaviour).
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, rowRenderer: TreeTableRowRenderer) =
+  ## Builds a tree table with the backwards-compatible fit-only layout.
   b.treeTable(cursor, defaultTreeTableOptions(), rowRenderer)
