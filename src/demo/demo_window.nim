@@ -1438,6 +1438,18 @@ proc newTreeCursor*(childrenPerNode: seq[int]): TestTreeCursor =
   result.fieldName = treeName(result.path)
 
 var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+type
+  FileDragUserData = ref object of UiDragUserData
+    cursor: FileSystemCursor
+
+proc buildFileDragTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
+  if userData == nil or not (userData of FileDragUserData):
+    return
+  let dragData = FileDragUserData(userData)
+  discard b.fit().padding(6).gap(4)
+  discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
+  discard b.text(dragData.cursor.fieldName & (if canDrop: " - move here" else: " - cannot move here")).fit()
+
 var treeTableShowColumnLines = true
 var treeTableShowIndentationLines = true
 var treeTableAlternatingRowColors = true
@@ -1505,6 +1517,23 @@ proc buildTreeTableExample(b: var UiBuilder) =
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
 
+              let fileCursor = FileSystemCursor(cursor)
+              if b.beginDrop():
+                let userData = b.dragData.userData
+                let canDrop = FileDragUserData(userData).cursor.canDropOn(fileCursor)
+                if canDrop:
+                  discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexAccent)[].fillColor)
+                if b.endDrop(canDrop):
+                  discard FileDragUserData(userData).cursor.moveTo(fileCursor)
+
+              let (dragging, began) = b.beginDrag()
+              if began:
+                b.setDragData(FileDragUserData(cursor: FileSystemCursor(fileCursor.clone())))
+                b.setDragUiCallback(buildFileDragTooltip)
+              if dragging:
+                discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexAccent)[].fillColor)
+
+
             b.node:
               discard b.fit().paddingX(10)
               b.label("bar"):
@@ -1520,6 +1549,117 @@ proc buildTreeTableExample(b: var UiBuilder) =
           opts.showColumnLines = treeTableShowColumnLines
           opts.showIndentationLines = treeTableShowIndentationLines
           b.treeTable(fsCursor, opts, renderRow)
+
+# ---------------------------------------------------------------------------
+# Drag & Drop — child moved between two horizontal containers
+# ---------------------------------------------------------------------------
+
+var dragDropLocation = 0 # 0 = left container, 1 = right container
+
+proc buildDragDropTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
+  let _ = userData
+  discard b.fit().padding(6).gap(4)
+  discard b.fillBackground().backgroundColor(if canDrop: rgba(0.18, 0.52, 0.24, 1.0) else: rgba(0.58, 0.20, 0.20, 1.0)).cornerRadius(4)
+  discard b.borderWidth(1).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 0.9'f32))
+  discard b.text(if canDrop: "Drop allowed" else: "Cannot drop here").fit()
+  discard b.textColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+
+proc buildDragDropExample*(b: var UiBuilder) =
+  b.layoutVertical("drag-drop-demo"):
+    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
+
+    b.label("Drag & Drop — move a chip between two containers in a horizontal list"):
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
+    b.labelWrapped("Drag the chip from its current container and drop it onto the other. While dragging a tooltip follows the mouse and shows whether the hovered container can accept the drop."):
+      discard b.fillX().fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+    b.layoutHorizontal("dnd-containers"):
+      discard b.fillX().fitY().gap(12)
+
+      # Left container
+      b.node("dnd-left"):
+        discard b.size(220, 180).padding(8).gap(8)
+        discard b.layout(LayoutVertical)
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+        discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor).cornerRadius(6)
+
+        let hoverDrop = b.beginDrop()
+        let canDrop = dragDropLocation != 0
+
+        if hoverDrop:
+          if canDrop:
+            discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0)).borderWidth(2)
+          else:
+            discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0)).borderWidth(2)
+          if b.endDrop(canDrop):
+            dragDropLocation = 0
+
+        b.label("Left"):
+          discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+        if dragDropLocation == 0:
+          b.node("dnd-chip"):
+            discard b.fit().padding(8).gap(4)
+            discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0)).cornerRadius(6)
+            discard b.text("DragMe").fit()
+            discard b.textColor(b.themeTextStyle(UiStyleIndexButtonText)[].textColor)
+            let (dragging, began) = b.beginDrag()
+            if began:
+              b.setDragUiCallback(buildDragDropTooltip)
+            if dragging:
+              discard b.borderWidth(2).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+        else:
+          b.node("dnd-placeholder-left"):
+            discard b.fit().padding(8)
+            discard b.text("drop here").fit().textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+            discard b.cornerRadius(6).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+
+      # Right container
+      b.node("dnd-right"):
+        discard b.size(220, 180).padding(8).gap(8)
+        discard b.layout(LayoutVertical)
+        discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+        discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor).cornerRadius(6)
+
+        let hoverDrop = b.beginDrop()
+        let canDrop = dragDropLocation != 1
+
+        if hoverDrop:
+          if canDrop:
+            discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0)).borderWidth(2)
+          else:
+            discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0)).borderWidth(2)
+          if b.endDrop(canDrop):
+            dragDropLocation = 1
+
+        b.label("Right"):
+          discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+        if dragDropLocation == 1:
+          b.node("dnd-chip"):
+            discard b.fit().padding(8).gap(4)
+            discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0)).cornerRadius(6)
+            discard b.text("DragMe").fit()
+            discard b.textColor(b.themeTextStyle(UiStyleIndexButtonText)[].textColor)
+            let (dragging, began) = b.beginDrag()
+            if began:
+              b.setDragUiCallback(buildDragDropTooltip)
+            if dragging:
+              discard b.borderWidth(2).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+        else:
+          b.node("dnd-placeholder-right"):
+            discard b.fit().padding(8)
+            discard b.text("drop here").fit().textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+            discard b.cornerRadius(6).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+
+    b.label("Current location: " & (if dragDropLocation == 0: "Left" else: "Right")):
+      discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+
+    if b.button("Reset to left"):
+      dragDropLocation = 0
+      b.dragData.nodeId = noneNodeId()
+      b.dragData.userData = nil
 
 proc buildAllExamples(b: var UiBuilder)
 
@@ -1548,6 +1688,7 @@ var examples = [
   (fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),
   (fun: buildCustomRenderExamples, scrollBox: true, title: "Custom"),
   (fun: buildCustomMaterialExample, scrollBox: false, title: "CustomMat"),
+  (fun: buildDragDropExample, scrollBox: true, title: "DragDrop"),
   (fun: buildAllExamples, scrollBox: false, title: "All"),
 ]
 

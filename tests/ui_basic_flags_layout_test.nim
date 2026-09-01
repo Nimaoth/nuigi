@@ -1,4 +1,5 @@
-import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/tree_table
+import std/os
+import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/tree_table, widgets/file_system_cursor
 
 include compat2
 
@@ -32,6 +33,17 @@ proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
   var b = newBuilder(fixedMeasureText)
   discard b.beginUiFrame(viewW, viewH)
   b
+
+var dragUiCallbackCalls = 0
+var dragUiCallbackUserData: UiDragUserData = nil
+var dragUiCallbackCanDrop = false
+
+proc buildTestDragUi(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
+  inc dragUiCallbackCalls
+  dragUiCallbackUserData = userData
+  dragUiCallbackCanDrop = canDrop
+  b.node:
+    discard b.fit().text("drag")
 
 # --- property editor test scaffolding ---------------------------------------
 
@@ -745,6 +757,137 @@ proc testPreviousNodesAndIndicesDoubleBuffered() =
   require(b.previousOutput.clickedIndex == firstIdx, "clickedIndex should point into previousFrame.nodes")
   require(b.previousFrame.nodes[b.previousOutput.hoveredIndex].id == firstId, "hoveredIndex should resolve to previous frame node id")
   require(b.previousFrame.nodes[b.previousOutput.clickedIndex].id == firstId, "clickedIndex should resolve to previous frame node id")
+
+proc testDragUiCallbackAndDropState() =
+  var b = newBuilder(fixedMeasureText)
+  dragUiCallbackCalls = 0
+  dragUiCallbackUserData = nil
+  dragUiCallbackCanDrop = false
+  let testUserData = UiDragUserData()
+
+  discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(30.0'f32, 40.0'f32)))
+  b.dragData.nodeId = b.nodes[0].id
+  b.setDragData(testUserData)
+  b.setDragUiCallback(buildTestDragUi)
+  require(not b.endDrop(true), "accepted target should not drop before release")
+  require(b.dragData.canDrop, "endDrop should store acceptance while the mouse remains down")
+  b.endUiFrame(buildRenderCommands = false)
+
+  require(dragUiCallbackCalls == 1, "endUiFrame should invoke the drag UI callback")
+  require(dragUiCallbackUserData == testUserData, "drag UI callback user data mismatch")
+  require(dragUiCallbackCanDrop, "drag UI callback should receive current target acceptance")
+  require(b.nodes.len == 3, "drag tooltip and callback content should be added to the frame")
+  require(b.dragData.nodeId != noneNodeId(), "drag should remain active before release")
+
+  let releaseInput = UiInputSnapshot(
+    mouse: vec2(30.0'f32, 40.0'f32),
+    mouseReleased: {MouseLeft},
+  )
+  discard b.beginUiFrame(220.0, 120.0, input = releaseInput)
+  require(not b.dragData.canDrop, "drop acceptance should reset at the start of each frame")
+  require(not b.endDrop(false), "rejected target should not drop on release")
+  b.endUiFrame(buildRenderCommands = false)
+
+  require(dragUiCallbackCalls == 2, "drag UI callback should run on the release frame")
+  require(not dragUiCallbackCanDrop, "release-frame callback should receive rejected target state")
+  require(b.dragData.nodeId == noneNodeId(), "drag data should clear after release-frame UI is built")
+  require(b.dragData.uiCallback == nil, "drag UI callback should clear with released drag data")
+
+proc testFileSystemCursorDragAndDrop() =
+  let root = getTempDir() / "nuigi-file-drag-test"
+  if dirExists(root):
+    removeDir(root)
+  createDir(root)
+  try:
+    let sourceParentPath = root / "source"
+    let sourceFolderPath = sourceParentPath / "folder"
+    let sourceChildPath = sourceFolderPath / "child"
+    let sourceFilePath = sourceParentPath / "item.txt"
+    let targetPath = root / "target"
+    let unrelatedPath = root / "unrelated"
+    let cachedKindPath = root / "cached-kind"
+    createDir(sourceParentPath)
+    createDir(sourceFolderPath)
+    createDir(sourceChildPath)
+    createDir(targetPath)
+    createDir(unrelatedPath)
+    createDir(cachedKindPath)
+    writeFile(sourceFilePath, "drag")
+
+    let cache = newFileSystemCache()
+    require(fileSystemCursor(cachedKindPath, cache).kind == Folder, "initial directory kind should be Folder")
+    removeDir(cachedKindPath)
+    require(fileSystemCursor(cachedKindPath, cache).kind == Folder, "shared cache should serve entry kind without rechecking the filesystem")
+    let rootCursor = fileSystemCursor(root, cache)
+    let sourceParent = fileSystemCursor(sourceParentPath, cache)
+    let sourceFolder = fileSystemCursor(sourceFolderPath, cache)
+    let sourceChild = fileSystemCursor(sourceChildPath, cache)
+    let sourceFile = fileSystemCursor(sourceFilePath, cache)
+    let target = fileSystemCursor(targetPath, cache)
+    let unrelated = fileSystemCursor(unrelatedPath, cache)
+
+    require(sourceFolder.kind == Folder, "directory cursor should have Folder kind")
+    require(sourceFile.kind == File, "file cursor should have File kind")
+    require(FileSystemCursor(sourceFolder.clone()).kind == Folder, "cloned cursor should preserve entry kind")
+    require(not sourceFile.canDropOn(sourceFile), "file target should reject a drop")
+    require(not sourceFolder.canDropOn(sourceFolder), "folder should not drop onto itself")
+    require(not sourceFolder.canDropOn(sourceChild), "folder should not drop onto its child")
+    require(not sourceFile.canDropOn(sourceParent), "entry should not drop onto its direct parent")
+    require(sourceFolder.canDropOn(target), "sibling folder should accept the dragged folder")
+
+    require(sourceParent.childCount() == 2, "source listing should be cached before the move")
+    require(target.childCount() == 0, "target listing should be empty before the move")
+    require(unrelated.childCount() == 0, "unrelated listing should be cached before the move")
+    writeFile(unrelatedPath / "late.txt", "cached")
+
+    var sourceNav = FileSystemCursor(rootCursor.clone())
+    require(sourceNav.enterChild(), "source folder should be reachable from root")
+    var sourceFolderNav = FileSystemCursor(sourceNav.clone())
+    require(sourceFolderNav.enterChild(), "dragged folder should be reachable from source")
+    var targetNav = FileSystemCursor(rootCursor.clone())
+    require(targetNav.enterChild() and targetNav.moveNext(), "target folder should be reachable from root")
+
+    var tree = TreeTable(cursor: rootCursor)
+    tree.toggleNode(rootCursor)
+    tree.toggleNode(sourceNav)
+    tree.toggleNode(sourceFolderNav)
+    tree.toggleNode(targetNav)
+
+    proc expandedIndex(key: string): int =
+      for i in 0 .. tree.nodes.high:
+        if tree.nodes[i].cursor.cursorKey() == key:
+          return i
+      return -1
+
+    let targetExpandedIndex = expandedIndex(targetPath)
+    require(targetExpandedIndex >= 0 and tree.nodes[targetExpandedIndex].childCount == 0,
+      "target expansion should begin with a cached zero child count")
+
+    require(sourceFolder.moveTo(target), "eligible folder move should succeed")
+    require(dirExists(targetPath / "folder"), "moved folder should exist under target")
+    require(not dirExists(sourceFolderPath), "moved folder should leave its source path")
+    require(unrelated.childCount() == 0, "moving should not invalidate an unrelated listing")
+
+    tree.refreshRenderedNode(sourceNav)
+    require(expandedIndex(sourceFolderPath) < 0, "rendered source should remove its missing expanded child")
+    let sourceExpandedIndex = expandedIndex(sourceParentPath)
+    require(sourceExpandedIndex >= 0 and tree.nodes[sourceExpandedIndex].childCount == 1,
+      "rendered source should refresh its cached child count")
+    require(tree.nodes[expandedIndex(targetPath)].childCount == 0,
+      "non-rendered target should retain its cached child count")
+
+    tree.refreshRenderedNode(targetNav)
+    require(tree.nodes[expandedIndex(targetPath)].childCount == 1,
+      "rendered target should refresh its cached child count")
+
+    require(sourceFile.moveTo(target), "eligible file move should succeed")
+    require(fileExists(targetPath / "item.txt"), "moved file should exist under target")
+    require(not fileExists(sourceFilePath), "moved file should leave its source path")
+    require(sourceParent.childCount() == 0, "source cache should refresh after both moves")
+    require(target.childCount() == 2, "target cache should refresh after both moves")
+  finally:
+    if dirExists(root):
+      removeDir(root)
 
 type
   ReverseChildMode = enum
@@ -1545,6 +1688,8 @@ proc runTests() =
   # testButtonHoverAndPressed()
   # testSliderClickUpdatesValue()
   testPreviousNodesAndIndicesDoubleBuffered()
+  testDragUiCallbackAndDropState()
+  testFileSystemCursorDragAndDrop()
   testReverseVerticalLayoutAllCombinations()
   testReverseHorizontalLayoutAllCombinations()
   testReverseVerticalParentFitRepositions()

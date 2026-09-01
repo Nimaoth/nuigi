@@ -376,6 +376,12 @@ type
     ## Callback whose body builds a node's children; executed during `flushDeferredNodes`
     ## at `endUiFrame` (after the whole tree has been described).
 
+  UiDragUserData* = ref object of RootObj
+    ## Base type for application-defined drag payloads.
+
+  UiDragUiCallback* = proc(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.}
+    ## Callback that builds the contents of the tooltip shown during a drag.
+
   UiDeferredNode* = object
     ## A node whose child-building is deferred to `endUiFrame` (see `deferBuild`).
     nodeIdx*: int
@@ -707,6 +713,17 @@ type
     screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
     ## Callback that rasterizes `arrangement` into renderer-owned `UiVertex` data (runs during render-command build).
 
+  DragData* = object
+    ## Data for the current drag operation, owned by `UiBuilder`.
+    nodeId*: UiNodeId
+      ## Node that is currently being dragged (`noneNodeId` if no drag).
+    userData*: UiDragUserData
+      ## Application-defined data associated with the drag.
+    canDrop*: bool
+      ## Whether the drop target processed most recently this frame accepts the drag.
+    uiCallback*: UiDragUiCallback
+      ## Callback that builds the drag tooltip contents.
+
   UiBuilder* = object
     ## The central UI object. Owns the current and previous frames, the node stack,
     ## ID scopes, theme styles, animations, node storage, and frame output. Mutators
@@ -832,6 +849,9 @@ type
       ## Cursor position where the middle-drag scroll started.
     middleDragScroll*: Vec2
       ## Per-frame scroll delta (pixels) from the middle-drag.
+
+    dragData*: DragData
+      ## Current drag operation data (node id + user pointer).
 
   UiClipRect* = object
     ## An axis-aligned clipping rectangle.
@@ -1084,6 +1104,9 @@ proc contentSize*(b: var UiBuilder, n: ptr UiNode): Vec2 {.raises: [].}
 proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int)
 proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
 proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+proc buildDragUi(b: var UiBuilder)
+proc beginAttach*(b: var UiBuilder, parentIdx: int): bool
+proc endAttach*(b: var UiBuilder)
 proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.}
 proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId)
   ## Prevent node storage from being garbage-collected this frame.
@@ -2725,6 +2748,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
   prof("beginUiFrame")
   b.computeFrameInteraction(ctx.input)
+  b.dragData.canDrop = false
 
   for i in 0 ..< b.animations.len:
     inc b.animations[i].unchangedFrames
@@ -3336,8 +3360,12 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
 
   discard b.endNode()
   b.flushDeferredNodes()
+  b.buildDragUi()
   b.removeStaleAnimations()
   b.updateVirtualTrees()
+
+  if MouseLeft in b.frameCtx.input.mouseReleased:
+    b.dragData = DragData(nodeId: noneNodeId())
 
   b.frameOutput.clearFrameOutput()
   if buildRenderCommands:
@@ -5976,6 +6004,61 @@ proc wasRightClicked*(b: UiBuilder, idx: int, includeChildren: bool = false): bo
   ## Check if the node at idx was right-clicked.
   return b.wasRightClicked(b.frame.nodes[idx].addr, includeChildren, idx)
 
+proc beginDrag*(b: var UiBuilder): tuple[dragging: bool, began: bool] =
+  ## Begin dragging for the current node if no drag is active.
+  ## Returns (dragging, began) where `dragging` is true when the current node
+  ## is the dragged node, and `began` is true only on the frame dragging started.
+  if b.stack.len == 0:
+    return (false, false)
+  if b.dragData.nodeId != noneNodeId():
+    let isDragging = b.dragData.nodeId == b.currentNode.id
+    return (isDragging, false)
+  # No drag active — start drag for current node if it is interacted and left button is down.
+  # Require hover/held/pressed/dragged to avoid auto-starting drag without user interaction.
+  let interacted = b.wasDragged()
+  if interacted and MouseLeft in b.frameCtx.input.mouseDown:
+    b.dragData = DragData(nodeId: b.currentNode.id)
+    return (true, true)
+  return (false, false)
+
+proc setDragData*(b: var UiBuilder, userData: UiDragUserData) =
+  ## Set the application-defined data for the current drag.
+  if b.dragData.nodeId != noneNodeId():
+    b.dragData.userData = userData
+
+proc setDragUiCallback*(b: var UiBuilder, cb: UiDragUiCallback) =
+  ## Set the callback that builds tooltip contents for the current drag.
+  if b.dragData.nodeId != noneNodeId():
+    b.dragData.uiCallback = cb
+
+proc beginDrop*(b: var UiBuilder): bool =
+  ## Returns true when the mouse is hovered over the current node while drag data exists.
+  if b.dragData.nodeId == noneNodeId():
+    return false
+  return b.wasHovered(includeChildren = true)
+
+proc endDrop*(b: var UiBuilder, canDrop: bool): bool =
+  ## Store target acceptance even while dragging, and report a successful release.
+  b.dragData.canDrop = canDrop
+  return canDrop and MouseLeft in b.frameCtx.input.mouseReleased
+
+proc buildDragUi(b: var UiBuilder) =
+  if b.dragData.nodeId == noneNodeId():
+    return
+
+  let overlayIdx = b.currentNodeIndex(b.overlays)
+  let attached = b.beginAttach(overlayIdx)
+  try:
+    discard b.beginNodeId("drag-tooltip")
+    if b.dragData.uiCallback != nil:
+      b.dragData.uiCallback(b, b.dragData.userData, b.dragData.canDrop)
+    let input = b.frameCtx.input
+    discard b.offsets(input.mouse.x, input.mouse.y, 0, 0).pivot(0, 1).finishAnchors().noHover()
+    discard b.endNode()
+  finally:
+    if attached:
+      b.endAttach()
+
 template node*(b: var UiBuilder, body: untyped): untyped =
   ## Create an anonymous child node, execute body in its context, then close it.
   block:
@@ -6006,7 +6089,10 @@ proc endAttach*(b: var UiBuilder) =
   ## Restores the previous current node.
   discard b.stack.pop()
   discard b.nodeIdStack.pop()
-  b.currentNode = b.frame.nodes[b.stack[^1]].addr
+  if b.stack.len > 0:
+    b.currentNode = b.frame.nodes[b.stack[^1]].addr
+  else:
+    b.currentNode = sentinelNode.addr
   if b.currentNode.parent >= 0:
     b.currentParent = b.frame.nodes[b.currentNode.parent].addr
   else:

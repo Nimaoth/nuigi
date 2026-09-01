@@ -36,6 +36,7 @@ type
     walkIndex*: int
     walkNode*: int # Index into TreeTable.nodes which is the walkCursors ExpandedNode or the parents ExpandedNode
     nodesIndex: int # Index into nodes where we currently are while rendering items
+    renderedCursors: seq[TreeCursor]
     searchFilter*: string
     scrollOffset*: Vec2
     rowRenderer: TreeTableRowRenderer
@@ -242,6 +243,71 @@ iterator expandedChildren*(e: TreeTable, nodeIndex: int): (int, ptr ExpandedNode
       if n.depth == parent.depth + 1:
         yield (i, n)
       inc i
+
+proc refreshRenderedNode*(e: TreeTable, cursor: TreeCursor) =
+  ## Refresh cached expansion bookkeeping for one row that is rendered this frame.
+  prof("refreshRenderedNode")
+  let key = cursor.cursorKey()
+  var nodeIndex = -1
+  for i in 0 .. e.nodes.high:
+    if e.nodes[i].cursor.cursorKey() == key:
+      nodeIndex = i
+      break
+  if nodeIndex < 0:
+    return
+
+  let parentDepth = e.nodes[nodeIndex].depth
+  var expandedChildIndex = nodeIndex + 1
+  while expandedChildIndex < e.nodes.len and e.nodes[expandedChildIndex].depth > parentDepth:
+    if e.nodes[expandedChildIndex].depth != parentDepth + 1:
+      inc expandedChildIndex
+      continue
+
+    let expandedKey = e.nodes[expandedChildIndex].cursor.cursorKey()
+    var hasCurrentChild = false
+    var currentChild = cursor.clone()
+    if currentChild.enterChild():
+      while true:
+        if currentChild.cursorKey() == expandedKey:
+          hasCurrentChild = true
+          break
+        if not currentChild.moveNext():
+          break
+
+    if not hasCurrentChild:
+      let removedDepth = e.nodes[expandedChildIndex].depth
+      e.nodes.delete(expandedChildIndex)
+      while expandedChildIndex < e.nodes.len and e.nodes[expandedChildIndex].depth > removedDepth:
+        e.nodes.delete(expandedChildIndex)
+    else:
+      let oldPath = e.nodes[expandedChildIndex].cursor.path
+      let newPath = currentChild.path
+      let expandedChildDepth = e.nodes[expandedChildIndex].depth
+      var subtreeIndex = expandedChildIndex
+      while subtreeIndex < e.nodes.len and
+          (subtreeIndex == expandedChildIndex or e.nodes[subtreeIndex].depth > expandedChildDepth):
+        let nodePath = e.nodes[subtreeIndex].cursor.path
+        if nodePath.len > oldPath.len:
+          e.nodes[subtreeIndex].cursor.path = newPath & nodePath[oldPath.len .. ^1]
+        else:
+          e.nodes[subtreeIndex].cursor.path = newPath
+        e.nodes[subtreeIndex].cursor.index = e.nodes[subtreeIndex].cursor.path[^1]
+        inc subtreeIndex
+      e.nodes[expandedChildIndex].cursor = currentChild
+      e.nodes[expandedChildIndex].childIndex = currentChild.index
+      expandedChildIndex = subtreeIndex
+
+  e.nodes[nodeIndex].cursor = cursor.clone()
+  e.nodes[nodeIndex].childCount = cursor.childCount()
+
+  for i in countdown(e.nodes.high, 0):
+    var total = e.nodes[i].childCount
+    var childIndex = i + 1
+    while childIndex < e.nodes.len and e.nodes[childIndex].depth > e.nodes[i].depth:
+      if e.nodes[childIndex].depth == e.nodes[i].depth + 1:
+        total += e.nodes[childIndex].totalChildren
+      inc childIndex
+    e.nodes[i].totalChildren = total
 
 proc seek*(e: TreeTable, targetRow: int): bool =
   prof("seek")
@@ -888,6 +954,7 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
       if not stepForward(ctx.walkCursor, ctx, ctx.walkNode):
         break
       ctx.walkIndex += 1
+  ctx.renderedCursors.add(ctx.walkCursor.clone())
   treeTableField(b, ctx, itemIndex)
 
 # Entry point with TreeTableOptions – all sizing and line options in one object.
@@ -907,6 +974,19 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.hoverColor = options.hoverColor
   ctx.hasCustomHoverColor = options.hasCustomHoverColor
   ensureNodes(ctx)
+
+  for renderedCursor in ctx.renderedCursors:
+    ctx.refreshRenderedNode(renderedCursor)
+  ctx.renderedCursors.setLen(0)
+
+  try:
+    if ctx.pendingToggleCursor != nil:
+      toggleNode(ctx, ctx.pendingToggleCursor)
+      ctx.pendingToggleCursor = nil
+      b.anythingAnimating = true
+  except:
+    return
+
   let count = if ctx.nodes.len == 0: 1 else: 1 + ctx.nodes[0].totalChildren
   b.layoutHorizontal:
     discard b.fit().gap(2)
@@ -958,11 +1038,6 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   else:
     b.withParent(b.frame.nodes[containerIndex].id):
       discard b.customLayout(treeTableColumnLayout, 0)
-
-  if ctx.pendingToggleCursor != nil:
-    toggleNode(ctx, ctx.pendingToggleCursor)
-    ctx.pendingToggleCursor = nil
-    b.anythingAnimating = true
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
   var opts = defaultTreeTableOptions()
