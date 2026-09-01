@@ -306,6 +306,14 @@ proc buildUiTestNim2() =
     "ui-bench-nim2"
   )
 
+proc buildFontWrappingTest() =
+  echo "buildFontWrappingTest"
+  let passthroughArgs = passthroughArgs.join(" ")
+  shellCapture(
+    &"nim c -r -o:bin/font-wrapping-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
+    "font-wrapping-test-nim2"
+  )
+
 proc buildUiTestNimony() =
   echo "buildUiTestNimony"
   let passthroughArgs = passthroughArgs.join(" ")
@@ -476,12 +484,17 @@ proc main() =
 
   of "test":
     buildUiTest(compiler)
+    if compiler == Nim2:
+      buildFontWrappingTest()
     buildTreeTableRefreshTest(compiler)
     buildTreeTableRefreshBench(compiler)
     buildFileSystemCursorBench(compiler)
 
   of "tree-table-refresh-test":
     buildTreeTableRefreshTest(compiler)
+
+  of "font-wrapping-test":
+    buildFontWrappingTest()
 
   of "tree-table-refresh-bench":
     buildTreeTableRefreshBench(compiler)

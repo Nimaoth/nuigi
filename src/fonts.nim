@@ -29,7 +29,7 @@ import freetype/[
   ]
 
 when not defined(nimony):
-  const useHarfbuzz = not defined(wasm)
+  const useHarfbuzz = not defined(wasm) and not defined(nuiNoHarfbuzz)
 else:
   const useHarfbuzz = false
 
@@ -795,6 +795,151 @@ proc buildArrangementGlyphsAt(r: var FontRender, text: openArray[char], sizeIdx:
     prevGi = gi
     prevFi = fi
 
+proc buildArrangementLegacy(r: var FontRender, text: string, sizeIdx: int,
+    asc, desc: cfloat, maxWidth: float32, arrangement: var UiTextArrangement,
+    primaryFont: int) {.raises: [].} =
+  type LegacyGlyph = object
+    rune: Rune
+    fontIndex: int
+    glyphIndex: FT_UInt
+    advance: cfloat
+
+  proc canBreakAfter(rune: Rune): bool {.inline.} =
+    if rune.isWhiteSpace:
+      return true
+    case rune.uint32
+    of 0x002d'u32, 0x002f'u32, 0x00ad'u32, 0x058a'u32, 0x05be'u32, 0x1400'u32,
+        0x1806'u32, 0x200b'u32, 0x2053'u32, 0x207b'u32, 0x208b'u32, 0x2212'u32,
+        0x2e17'u32, 0x2e1a'u32, 0x301c'u32, 0x3030'u32, 0x30a0'u32, 0xfe58'u32,
+        0xfe63'u32, 0xff0d'u32:
+      true
+    of 0x2010'u32 .. 0x2015'u32, 0xfe31'u32 .. 0xfe32'u32:
+      true
+    else:
+      false
+
+  proc isCjk(rune: Rune): bool {.inline.} =
+    let codepoint = rune.uint32
+    codepoint in 0x1100'u32 .. 0x11ff'u32 or codepoint in 0x2e80'u32 .. 0x30ff'u32 or
+      codepoint in 0x3400'u32 .. 0x4dbf'u32 or codepoint in 0x4e00'u32 .. 0x9fff'u32 or
+      codepoint in 0xac00'u32 .. 0xd7af'u32 or codepoint in 0xf900'u32 .. 0xfaff'u32 or
+      codepoint in 0xff65'u32 .. 0xff9f'u32
+
+  proc kerning(renderer: var FontRender, left, right: LegacyGlyph): cfloat {.inline.} =
+    if left.glyphIndex == 0 or right.glyphIndex == 0 or
+        left.fontIndex != right.fontIndex:
+      return 0
+    var kern = FT_Vector()
+    discard FT_Get_Kerning(renderer.fonts[right.fontIndex].face, left.glyphIndex,
+      right.glyphIndex, FT_UInt(0), kern)
+    kern.x.cfloat / 64.0
+
+  proc emitLine(renderer: var FontRender, glyphs: seq[LegacyGlyph], first, last: int,
+      baselineY: cfloat, output: var UiTextArrangement): cfloat =
+    var penX: cfloat = 0
+    var previous = LegacyGlyph(fontIndex: -1)
+    for glyphIndex in first .. last:
+      let glyph = glyphs[glyphIndex]
+      penX += kerning(renderer, previous, glyph)
+      if glyph.glyphIndex != 0:
+        output.glyphs.add UiTextArrangementGlyph(
+          fontIndex: glyph.fontIndex.int32,
+          glyphIndex: glyph.glyphIndex.uint32,
+          pos: vec2(penX.float32, baselineY.float32),
+        )
+        penX += glyph.advance
+      previous = glyph
+    penX
+
+  assert maxWidth == maxWidth, "legacy text maxWidth must not be NaN"
+  let lineHeight = asc - desc
+  var lineY: cfloat = 0
+  var maxLineWidth: cfloat = 0
+  var hasOverwideGlyphLine = false
+  var inputLines = text.splitLines()
+  if inputLines.len == 0:
+    inputLines.add("")
+
+  for rawLine in inputLines:
+    var glyphs: seq[LegacyGlyph] = @[]
+    for rune in rawLine.runes:
+      let fontIndex = r.resolveFontIndex(rune.int, sizeIdx, primaryFont)
+      var glyphIndex: FT_UInt = 0
+      if fontIndex >= 0 and fontIndex < r.fonts.len and r.fonts[fontIndex].face != nil:
+        glyphIndex = FT_Get_Char_Index(r.fonts[fontIndex].face, rune.int.culong)
+      let advance =
+        if glyphIndex != 0:
+          r.ftGlyphAdvanceCached(fontIndex, glyphIndex, sizeIdx)
+        else:
+          0
+      glyphs.add LegacyGlyph(
+        rune: rune,
+        fontIndex: fontIndex,
+        glyphIndex: glyphIndex,
+        advance: advance,
+      )
+
+    if glyphs.len == 0:
+      lineY += lineHeight
+      continue
+
+    var lineStart = 0
+    while lineStart < glyphs.len:
+      var lineEnd = lineStart
+      var lineWidth: cfloat = 0
+      var lastBreak = -1
+      var previous = LegacyGlyph(fontIndex: -1)
+
+      while lineEnd < glyphs.len:
+        let glyph = glyphs[lineEnd]
+        let nextWidth = lineWidth + kerning(r, previous, glyph) + glyph.advance
+        if maxWidth > 0.0'f32 and lineEnd > lineStart and nextWidth > maxWidth:
+          break
+        lineWidth = nextWidth
+        if canBreakAfter(glyph.rune) or
+            (lineEnd + 1 < glyphs.len and isCjk(glyph.rune) and isCjk(glyphs[lineEnd + 1].rune)):
+          lastBreak = lineEnd
+        previous = glyph
+        inc lineEnd
+
+      var nextLineStart = lineEnd
+      if lineEnd < glyphs.len:
+        if lastBreak >= lineStart:
+          assert lastBreak < lineEnd, "legacy text break must be inside the measured line"
+          if glyphs[lastBreak].rune.isWhiteSpace and lastBreak > lineStart:
+            lineEnd = lastBreak
+          else:
+            lineEnd = lastBreak + 1
+          nextLineStart = lastBreak + 1
+        elif lineEnd > lineStart and glyphs[lineEnd].rune.isWhiteSpace:
+          nextLineStart = lineEnd + 1
+        elif lineEnd == lineStart:
+          inc lineEnd
+          nextLineStart = lineEnd
+
+        while nextLineStart < glyphs.len and glyphs[nextLineStart].rune.isWhiteSpace:
+          inc nextLineStart
+
+      assert lineEnd > lineStart and lineEnd <= glyphs.len,
+        "legacy text wrapping must emit a non-empty in-bounds line"
+      assert nextLineStart >= lineEnd and nextLineStart <= glyphs.len,
+        "legacy text continuation must advance past the emitted line"
+      let width = emitLine(r, glyphs, lineStart, lineEnd - 1, lineY + asc, arrangement)
+      let singleOverwideGlyph =
+        lineEnd == lineStart + 1 and glyphs[lineStart].advance > maxWidth
+      hasOverwideGlyphLine = hasOverwideGlyphLine or singleOverwideGlyph
+      assert maxWidth <= 0.0'f32 or width <= maxWidth + 0.01'f32 or singleOverwideGlyph,
+        "legacy text line exceeds maxWidth without an overwide glyph"
+      maxLineWidth = max(maxLineWidth, width)
+      lineY += lineHeight
+      lineStart = nextLineStart
+
+  arrangement.size = vec2(max(0.0'f32, maxLineWidth.float32), max(1.0'f32, lineY.float32))
+  assert maxWidth <= 0.0'f32 or arrangement.size.x <= maxWidth + 0.01'f32 or
+    hasOverwideGlyphLine,
+    "legacy text arrangement width must reflect its emitted lines"
+  arrangement.contentHash = arrangement.glyphs.hash
+
 proc mixTextMeshHash(state: var uint64, value: uint64) {.inline, raises: [].} =
   state = (state xor value) * 1099511628211'u64
 
@@ -1013,9 +1158,7 @@ proc arrangeText*(r: var FontRender, text: openArray[char], fontSize: float32, f
     if r.tryBuildArrangementWithHarfBuzz(textOwned, fontSize, sizeIdx, asc, desc, result, primaryFont, maxWidth):
       return
 
-  result.size.x = r.measureTextWidthLegacy(textOwned, fontSize, sizeIdx, primaryFont)
-  r.buildArrangementGlyphsAt(text, sizeIdx, asc, 0.0'f32, 0.0'f32, result, primaryFont)
-  result.contentHash = result.glyphs.hash
+  r.buildArrangementLegacy(textOwned, sizeIdx, asc, desc, maxWidth, result, primaryFont)
 
 proc addFontFace*(r: var FontRender, name: string, content: string): FontId {.raises: [].} =
   if cast[pointer](r.fontLibrary) == nil:
