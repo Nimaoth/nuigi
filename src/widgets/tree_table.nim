@@ -781,6 +781,19 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
 
   e.rowRenderer(b, e.walkCursor, index)
 
+iterator tableCells(b: UiBuilder, rowIdx: int): int =
+  ## Yields direct row children that participate in tree-table column layout.
+  for childIdx in b.children(rowIdx):
+    let flags = b.frame.nodes[childIdx].flags
+    if AnchorX notin flags and AnchorY notin flags:
+      yield childIdx
+
+proc tableCellCount(b: UiBuilder, rowIdx: int): int =
+  ## Counts direct row children that participate in tree-table column layout.
+  for childIdx in b.tableCells(rowIdx):
+    discard childIdx
+    inc result
+
 proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
   ## Aligns visible row children into table columns and draws optional guides.
   ## Physical indentation and name cells form logical column zero; later cells
@@ -803,7 +816,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
     for rowIdx in b.children(nodeIdx):
       var k = 0
       var firstTwoColumns: float32 = 0.0
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let w = b.frame.nodes[childIdx].addr.size.x
         if k == 0:
           firstTwoColumns += w
@@ -822,7 +835,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
       var cursor = 0.0'f32
       var k = 0
       var rowHeight = 0.0'f32
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let child = b.frame.nodes[childIdx].addr
         let cw = if k == 0:
           child.size.x
@@ -845,7 +858,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
         row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
         row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
         k += 1
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let child = b.frame.nodes[childIdx].addr
         child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
       b.updateNodeFit(row)
@@ -888,7 +901,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
       for rowIdx in b.children(nodeIdx):
         var k = 0
         var indentW: float32 = 0.0'f32
-        for childIdx in b.children(rowIdx):
+        for childIdx in b.tableCells(rowIdx):
           let w = b.frame.nodes[childIdx].addr.size.x
           if k == 0:
             indentW = w
@@ -920,7 +933,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
     for rowIdx in b.children(nodeIdx):
       var k = 0
       var firstTwo: float32 = 0.0'f32
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let w = b.frame.nodes[childIdx].addr.size.x
         if k == 0:
           firstTwo += w
@@ -951,7 +964,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
     var indentW: float32 = 0.0'f32
     var rowHeight = 0.0'f32
     if not useDynamicFit:
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let child = b.frame.nodes[childIdx].addr
         if k == 0:
           child.pos.x = cursor
@@ -999,7 +1012,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
         k += 1
     else:
       # Dynamic fit positioning (same as legacy but we already computed colWidths)
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         let child = b.frame.nodes[childIdx].addr
         let cw = if k == 0: child.size.x
           elif k == 1: gap + colWidths[0] - cursor
@@ -1018,9 +1031,9 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
         row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
         row.contentExtent.y = max(row.contentExtent.y, child.pos.y + child.size.y)
         k += 1
-    for childIdx in b.children(rowIdx):
-      let child = b.frame.nodes[childIdx].addr
-      child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
+      for childIdx in b.tableCells(rowIdx):
+        let child = b.frame.nodes[childIdx].addr
+        child.pos.y = ((rowHeight - child.size.y) * 0.5).floor
     b.updateNodeFit(row)
 
     # -------------------------------------------------------------------
@@ -1033,7 +1046,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
         let padY = rowStyle.paddingY
         # Count how many separators actually have both sides present in this row.
         var sepCount = 0
-        let childCount = b.childCount(rowIdx)
+        let childCount = b.tableCellCount(rowIdx)
         for i in 0 ..< logicalForLines - 1:
           let leftK = if i == 0: 1 else: i + 1
           let rightK = leftK + 1
@@ -1044,12 +1057,12 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           for i in 0 ..< logicalForLines - 1:
             let leftK = if i == 0: 1 else: i + 1
             let rightK = leftK + 1
-            let childCount = b.childCount(rowIdx)
+            let childCount = b.tableCellCount(rowIdx)
             if rightK >= childCount: continue
             var leftIdx = -1
             var rightIdx = -1
             var kk = 0
-            for childIdx in b.children(rowIdx):
+            for childIdx in b.tableCells(rowIdx):
               if kk == leftK: leftIdx = childIdx
               if kk == rightK: rightIdx = childIdx
               inc kk
@@ -1094,7 +1107,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
       let step = if data.indentationStep > 0.001'f32: data.indentationStep else: 20.0'f32
       var firstW: float32 = 0.0'f32
       var containerIdx = -1
-      for childIdx in b.children(rowIdx):
+      for childIdx in b.tableCells(rowIdx):
         containerIdx = childIdx
         break
       if containerIdx >= 0:

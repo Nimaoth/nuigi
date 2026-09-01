@@ -314,6 +314,30 @@ proc testParentFitIncludesChildren() =
   require(approxEq(parent.size.x, 49.0), "parent size-to-content width should include child extent")
   require(approxEq(parent.size.y, 31.0), "parent size-to-content height should include child extent")
 
+proc testParentFitIgnoresFlaggedChildExtent() =
+  var b = newTestBuilder(200.0, 120.0)
+
+  let parentIdx = b.nodes.len
+  var overlayIdx = -1
+  b.node:
+    discard b.fitX().fitY()
+    b.node:
+      discard b.size(20.0, 30.0)
+    overlayIdx = b.nodes.len
+    b.node:
+      discard b.size(80.0, 90.0).ignoreInContentExtent()
+      discard b.anchors(0.0, 0.0, 1.0, 0.0)
+        .offsets(0.0, -10.0, 0.0, 10.0)
+        .finishAnchors()
+  discard b.postProcessChildren(0)
+
+  require(IgnoreInContentExtent in b.nodes[overlayIdx].flags,
+    "ignoreInContentExtent should set the node flag")
+  require(approxEq(b.nodes[parentIdx].size.x, 20.0),
+    "flagged overlay should not affect fitted parent width")
+  require(approxEq(b.nodes[parentIdx].size.y, 30.0),
+    "flagged overlay should not affect fitted parent height")
+
 proc testParentFitIncludesChildren2() =
   var b = newTestBuilder(200.0, 120.0)
 
@@ -1619,6 +1643,12 @@ proc testTreeTableTreeTexts() =
     proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
       b.label(cursor.fieldName & ":"):
         discard b.fitX().fitY()
+      b.node:
+        b.debugName("tree-table-row-overlay")
+        discard b.anchors(0.0, 0.0, 1.0, 0.0)
+          .offsets(0.0, -50.0, 0.0, 50.0)
+          .finishAnchors()
+          .ignoreInContentExtent()
 
     b.treeTable(cursor, renderRow)
 
@@ -1648,13 +1678,22 @@ proc testTreeTableTreeTexts() =
 
   var colXs: seq[float32]
   var colHeights: seq[float32]
+  var overlayFound = false
   for childIdx in b.children(rowNodeIdx):
-    colXs.add(b.nodes[childIdx].pos.x)
-    colHeights.add(b.nodes[childIdx].size.y)
+    let child = b.nodes[childIdx].addr
+    if AnchorX in child.flags or AnchorY in child.flags:
+      overlayFound = true
+      require(IgnoreInContentExtent in child.flags,
+        "tree-table overlay must be excluded from row content extent")
+    else:
+      colXs.add(child.pos.x)
+      colHeights.add(child.size.y)
+  require(overlayFound, "expected an anchored direct-row overlay")
   require(colXs.len == 2, "expected 2 columns per row (symbol, name), got " & $colXs.len)
   for i in 1 ..< colXs.len:
     require(colXs[i] > colXs[i - 1] - 0.5, "columns must be laid out left-to-right")
   let rowH = b.nodes[rowNodeIdx].size.y
+  require(rowH < 100.0, "anchored overlay must not affect tree-table row fit")
   for h in colHeights:
     require(rowH >= h - 0.5, "row height should encompass its columns")
 
@@ -1684,6 +1723,7 @@ proc runTests() =
   testAlignCenterWithoutLayout()
   testStandaloneFitOnEndNode()
   testParentFitIncludesChildren()
+  testParentFitIgnoresFlaggedChildExtent()
   testParentFitIncludesChildren2()
   testHorizontalFitYWithNestedFillYPropagation()
   testImmediateFillXAndFillY()

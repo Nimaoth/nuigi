@@ -51,6 +51,8 @@ type
       ## Position the node on the X axis via anchors (fractions of parent size + offsets).
     AnchorY
       ## Position the node on the Y axis via anchors (fractions of parent size + offsets).
+    IgnoreInContentExtent
+      ## Exclude this node from its parent's accumulated content extent.
     DrawText
       ## Node renders its `UiNodeText` string.
     WrapText
@@ -4498,19 +4500,20 @@ proc updateParentAfterChildEnd(b: var UiBuilder, child: ptr UiNode) =
 
   let childEndX = child.pos.x + child.size.x
   let childEndY = child.pos.y + child.size.y
-  if isReverseLayout(parent.flags) and isHorizontalLayout(parent.flags) and parentFitXEnabled:
-    if parent.contentExtent.x > 0:
-      parent.contentExtent.x += b.nodeGap(parent)
-    parent.contentExtent.x += child.size.x
-  else:
-    parent.contentExtent.x = max(parent.contentExtent.x, childEndX)
+  if IgnoreInContentExtent notin child.flags:
+    if isReverseLayout(parent.flags) and isHorizontalLayout(parent.flags) and parentFitXEnabled:
+      if parent.contentExtent.x > 0:
+        parent.contentExtent.x += b.nodeGap(parent)
+      parent.contentExtent.x += child.size.x
+    else:
+      parent.contentExtent.x = max(parent.contentExtent.x, childEndX)
 
-  if isReverseLayout(parent.flags) and isVerticalLayout(parent.flags) and parentFitYEnabled:
-    if parent.contentExtent.y > 0:
-      parent.contentExtent.y += b.nodeGap(parent)
-    parent.contentExtent.y += child.size.y
-  else:
-    parent.contentExtent.y = max(parent.contentExtent.y, childEndY)
+    if isReverseLayout(parent.flags) and isVerticalLayout(parent.flags) and parentFitYEnabled:
+      if parent.contentExtent.y > 0:
+        parent.contentExtent.y += b.nodeGap(parent)
+      parent.contentExtent.y += child.size.y
+    else:
+      parent.contentExtent.y = max(parent.contentExtent.y, childEndY)
 
   if not isReverseLayout(parent.flags):
     if isVerticalLayout(parent.flags):
@@ -4626,8 +4629,9 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
             if child.pos.y != old and FillY in child.flags:
               n.flags.incl PostProcessChildren
             cursor = max(0.0'f32, cursor - b.nodeGap(n))
-            n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
-            n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+            if IgnoreInContentExtent notin child.flags:
+              n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+              n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
         elif isHorizontalLayout(n.flags):
           var cursor = contentW
           for childIdx in b.children(idx):
@@ -4640,8 +4644,9 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
             if child.pos.x != old and FillX in child.flags:
               n.flags.incl PostProcessChildren
             cursor = max(0.0'f32, cursor - b.nodeGap(n))
-            n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
-            n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+            if IgnoreInContentExtent notin child.flags:
+              n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+              n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
         else:
           discard
       else:
@@ -4680,8 +4685,9 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
         discard b.postProcessChildren(childIdx)
         if oldSize != child.size:
           childSizeChanged = true
-      n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
-      n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
+      if IgnoreInContentExtent notin child.flags:
+        n.contentExtent.x = max(n.contentExtent.x, child.pos.x + child.size.x)
+        n.contentExtent.y = max(n.contentExtent.y, child.pos.y + child.size.y)
 
     if childSizeChanged:
       n.flags.incl PostProcessChildren
@@ -4739,6 +4745,11 @@ proc noHover*(b: var UiBuilder): var UiBuilder {.discardable.} =
 proc noChildHover*(b: var UiBuilder): var UiBuilder {.discardable.} =
   ## Disable hover detection for the current nodes children.
   b.currentNode.flags.incl NoChildHover
+  b
+
+proc ignoreInContentExtent*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Exclude the current node from its parent's accumulated content extent.
+  b.currentNode.flags.incl IgnoreInContentExtent
   b
 
 proc fill*(b: var UiBuilder, value = true): var UiBuilder {.discardable.} =
@@ -6031,11 +6042,11 @@ proc setDragUiCallback*(b: var UiBuilder, cb: UiDragUiCallback) =
   if b.dragData.nodeId != noneNodeId():
     b.dragData.uiCallback = cb
 
-proc beginDrop*(b: var UiBuilder): bool =
+proc beginDrop*(b: var UiBuilder, includeChildren = true): bool =
   ## Returns true when the mouse is hovered over the current node while drag data exists.
   if b.dragData.nodeId == noneNodeId():
     return false
-  return b.wasHovered(includeChildren = true)
+  return b.wasHovered(includeChildren)
 
 proc endDrop*(b: var UiBuilder, canDrop: bool): bool =
   ## Store target acceptance even while dragging, and report a successful release.

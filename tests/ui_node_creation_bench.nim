@@ -6,7 +6,7 @@ import std/monotimes, std/strutils, std/math, std/syncio
 when defined(nimony):
   import std/assertions
 
-const NumNodes = 10_000
+const NumNodes = 2_000
 const WarmupIters = 3
 const BenchIters = 100
 

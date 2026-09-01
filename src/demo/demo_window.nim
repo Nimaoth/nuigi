@@ -1377,65 +1377,209 @@ proc buildCustomMaterialExample*(b: var UiBuilder) =
       discard b.deferBuild(buildCustomDeferred)
 
 type
-  TestTreeCursor* = ref object of TreeCursor
-    childrenPerNode*: seq[int]
+  DemoTreeNode = ref object
+    key: string
+    name: string
+    parent: DemoTreeNode
+    children: seq[DemoTreeNode]
 
-proc treeName(path: seq[int]): string =
-  if path.len == 0:
-    return "root"
-  result = "n"
-  for p in path:
-    result.add("_")
-    result.add($p)
+  DemoTreeCursor = ref object of TreeCursor
+    node: DemoTreeNode
+    parents: seq[DemoTreeNode]
 
-method clone*(c: TestTreeCursor): TreeCursor =
-  let r = TestTreeCursor()
-  r.fieldName = c.fieldName
-  r.index = c.index
-  # Deep copy the path: Nim seq assignment aliases the backing array, and
-  # stepForward mutates `path` in place (`path[^1] = ...`, `setLen`), so a
-  # shallow clone would corrupt the original (e.g. the stored anchor cursors).
-  r.path = c.path
-  r.childrenPerNode = c.childrenPerNode
-  return r
+  DemoTreeDragUserData = ref object of UiDragUserData
+    node: DemoTreeNode
 
-method childCount*(c: TestTreeCursor): int =
-  if c.path.len < c.childrenPerNode.len:
-    return c.childrenPerNode[c.path.len]
-  return 0
+var demoTreeRoot: DemoTreeNode
 
-method enterChild*(c: TestTreeCursor): bool =
-  if c.path.len >= c.childrenPerNode.len:
+proc addDemoTreeChild(parent: DemoTreeNode, key, name: string): DemoTreeNode =
+  result = DemoTreeNode(key: key, name: name, parent: parent)
+  parent.children.add(result)
+
+proc createDemoTree(): DemoTreeNode =
+  result = DemoTreeNode(key: "demo-root", name: "Root")
+  for groupIndex in 0 ..< 10:
+    let group = result.addDemoTreeChild(
+      "group-" & $groupIndex, "Group " & $(groupIndex + 1))
+    for itemIndex in 0 ..< (10 * groupIndex):
+      let item = group.addDemoTreeChild(
+        group.key & "-item-" & $itemIndex, "Item " & $(itemIndex + 1))
+      for valueIndex in 0 ..< (10 * itemIndex):
+        discard item.addDemoTreeChild(
+          item.key & "-value-" & $valueIndex, "Value " & $(valueIndex + 1))
+
+proc resetDemoTree() =
+  demoTreeRoot = createDemoTree()
+
+proc demoTreeCursor(root: DemoTreeNode): DemoTreeCursor =
+  DemoTreeCursor(node: root, fieldName: root.name, path: @[])
+
+method clone*(c: DemoTreeCursor): TreeCursor =
+  let copy = DemoTreeCursor(node: c.node, fieldName: c.fieldName, index: c.index)
+  for parent in c.parents:
+    copy.parents.add(parent)
+  for pathIndex in c.path:
+    copy.path.add(pathIndex)
+  return copy
+
+method cursorKey*(c: DemoTreeCursor): string =
+  c.node.key
+
+method childCount*(c: DemoTreeCursor): int =
+  c.node.children.len
+
+method enterChild*(c: DemoTreeCursor): bool =
+  if c.node.children.len == 0:
     return false
+  c.parents.add(c.node)
+  c.node = c.node.children[0]
   c.path.add(0)
   c.index = 0
-  c.fieldName = treeName(c.path)
+  c.fieldName = c.node.name
   return true
 
-method moveNext*(c: TestTreeCursor, count: int = 1): bool =
-  if c.path.len == 0:
+method moveNext*(c: DemoTreeCursor, count: int = 1): bool =
+  if c.parents.len == 0:
     return false
-  let parentChildCount = if (c.path.len - 1) < c.childrenPerNode.len: c.childrenPerNode[c.path.len - 1] else: 0
-  if c.index + count < parentChildCount:
+  let siblings = c.parents[^1].children
+  if c.index + count < siblings.len:
     c.index += count
     c.path[^1] = c.index
-    c.fieldName = treeName(c.path)
+    c.node = siblings[c.index]
+    c.fieldName = c.node.name
     return true
   return false
 
-method exitChild*(c: TestTreeCursor): bool =
-  if c.path.len == 0:
+method exitChild*(c: DemoTreeCursor): bool =
+  if c.parents.len == 0:
     return false
+  c.node = c.parents[^1]
+  c.parents.setLen(c.parents.len - 1)
   c.path.setLen(c.path.len - 1)
   c.index = if c.path.len > 0: c.path[^1] else: 0
-  c.fieldName = treeName(c.path)
+  c.fieldName = c.node.name
   return true
 
-proc newTreeCursor*(childrenPerNode: seq[int]): TestTreeCursor =
-  result = TestTreeCursor(childrenPerNode: childrenPerNode)
-  result.path = @[]
-  result.index = 0
-  result.fieldName = treeName(result.path)
+method resolveChild*(c: DemoTreeCursor, child: TreeCursor): TreeCursor =
+  let expected = DemoTreeCursor(child)
+  var childIndex = expected.index
+  if childIndex < 0 or childIndex >= c.node.children.len or
+      c.node.children[childIndex].key != expected.node.key:
+    childIndex = -1
+    for index, candidate in c.node.children:
+      if candidate.key == expected.node.key:
+        childIndex = index
+        break
+  if childIndex < 0:
+    return nil
+  let resolved = DemoTreeCursor(c.clone())
+  resolved.parents.add(c.node)
+  resolved.node = c.node.children[childIndex]
+  resolved.index = childIndex
+  resolved.path.add(childIndex)
+  resolved.fieldName = resolved.node.name
+  return resolved
+
+proc canMoveDemoTreeNodeBeside(source, target: DemoTreeNode): bool =
+  if source == nil or target == nil or source == target or
+      source.parent == nil or target.parent == nil:
+    return false
+  var destinationAncestor = target.parent
+  while destinationAncestor != nil:
+    if destinationAncestor == source:
+      return false
+    destinationAncestor = destinationAncestor.parent
+  return true
+
+proc moveDemoTreeNodeBeside(source, target: DemoTreeNode, insertAfter: bool) =
+  if not source.canMoveDemoTreeNodeBeside(target):
+    return
+  let sourceParent = source.parent
+  let targetParent = target.parent
+  var sourceIndex = -1
+  var targetIndex = -1
+  for index, child in sourceParent.children:
+    if child == source:
+      sourceIndex = index
+      break
+  for index, child in targetParent.children:
+    if child == target:
+      targetIndex = index
+  if sourceIndex < 0 or targetIndex < 0:
+    return
+  sourceParent.children.delete(sourceIndex)
+  if sourceParent == targetParent and sourceIndex < targetIndex:
+    dec targetIndex
+  if insertAfter:
+    inc targetIndex
+  source.parent = targetParent
+  targetParent.children.insert(source, targetIndex)
+
+proc canReparentDemoTreeNode(source, target: DemoTreeNode): bool =
+  if source == nil or target == nil or source == target or
+      source.parent == nil or source.parent == target:
+    return false
+  var ancestor = target
+  while ancestor != nil:
+    if ancestor == source:
+      return false
+    ancestor = ancestor.parent
+  return true
+
+proc reparentDemoTreeNode(source, target: DemoTreeNode) =
+  if not source.canReparentDemoTreeNode(target):
+    return
+  var sourceIndex = -1
+  for index, child in source.parent.children:
+    if child == source:
+      sourceIndex = index
+      break
+  if sourceIndex < 0:
+    return
+  source.parent.children.delete(sourceIndex)
+  source.parent = target
+  target.children.add(source)
+
+proc buildDemoTreeDragTooltip(
+    b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
+  if userData == nil or not (userData of DemoTreeDragUserData):
+    return
+  let dragData = DemoTreeDragUserData(userData)
+  discard b.fit().padding(6).gap(4)
+  discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
+  discard b.text(dragData.node.name &
+    (if canDrop: " - release to move" else: " - cannot move here")).fit()
+
+proc buildDemoTreeDropGradient(b: var UiBuilder, nodeIdx: int, userData: int) =
+  if b.frame.arena == nil or nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
+    return
+  let node = b.frame.nodes[nodeIdx].addr
+  if node.size.x <= 0.0'f32 or node.size.y <= 0.0'f32:
+    return
+  let origin = b.absoluteNodePos(nodeIdx)
+  let farCorner = origin + node.size
+  let accent = b.themeStyle(UiStyleIndexAccent)[].fillColor
+  let transparent = rgba(accent.r, accent.g, accent.b, 0.0'f32)
+  let topColor = if userData == 0: accent else: transparent
+  let bottomColor = if userData == 0: transparent else: accent
+  let vertices = cast[nil ptr UncheckedArray[UiVertex]](
+    b.frame.arena[].alloc(6 * sizeof(UiVertex)))
+  if vertices == nil:
+    return
+  vertices[0] = UiVertex(pos: origin, color: topColor)
+  vertices[1] = UiVertex(pos: vec2(farCorner.x, origin.y), color: topColor)
+  vertices[2] = UiVertex(pos: farCorner, color: bottomColor)
+  vertices[3] = UiVertex(pos: origin, color: topColor)
+  vertices[4] = UiVertex(pos: farCorner, color: bottomColor)
+  vertices[5] = UiVertex(pos: vec2(origin.x, farCorner.y), color: bottomColor)
+  var commands = b.frame.arena[].allocEmptyArray(1, UiRenderCommand)
+  commands.add UiRenderCommand(
+    kind: CmdRawVertices,
+    vertexData: vertices,
+    vertexCount: 6,
+  )
+  b.withParent(nodeIdx):
+    discard b.customRenderCommands(commands)
 
 var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
 type
@@ -1455,18 +1599,25 @@ var treeTableShowIndentationLines = true
 var treeTableAlternatingRowColors = true
 var treeTableAlternatingRowHeights = false
 proc buildTreeTableExample(b: var UiBuilder) =
+  if demoTreeRoot == nil:
+    resetDemoTree()
   b.layoutVertical:
     b.debugName("tree-table-demo")
     discard b.fillX().fitY().padding(8).gap(8)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     b.label("Tree Table"):
       discard b.fontSize(18)
+    b.labelWrapped("Tree tables combine expandable hierarchy rows with aligned columns and virtualized rendering, so large nested data sets can be browsed without building every row at once."):
+      discard b.fillX().fontSize(13)
+        .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.layoutVertical("tree-table-options"):
       discard b.fitX().fitY().gap(12)
       if b.checkbox("Show column lines", treeTableShowColumnLines): discard
       if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
       if b.checkbox("Alternating background colors", treeTableAlternatingRowColors): discard
       if b.checkbox("Alternating row heights", treeTableAlternatingRowHeights): discard
+      if b.button("Reset tree"):
+        resetDemoTree()
 
     b.layoutVertical:
       b.debugName("tree-table-hosts")
@@ -1476,12 +1627,67 @@ proc buildTreeTableExample(b: var UiBuilder) =
         b.layoutVertical:
           b.debugName("test-tree-table-host")
           discard b.fillX().height(500)
-          b.label("UiBuilder Tree (live)"):
+          b.label("Mutable Tree"):
             discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+          b.labelWrapped("Drag any row onto another row to make it the target's last child. Drop on the highlighted strip above or below a row to move it beside that row, reparenting it when necessary. Use Reset tree to restore the original hierarchy."):
+            discard b.fillX().fontSize(13)
+              .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
           proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+            let treeCursor = DemoTreeCursor(cursor)
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
+
+              template reorderDropZone(insertAfter: bool) =
+                b.node:
+                  b.debugName(if insertAfter:
+                    "mutable-tree-drop-after"
+                  else:
+                    "mutable-tree-drop-before")
+                  discard b.ignoreInContentExtent()
+                  if insertAfter:
+                    discard b.anchors(0.0'f32, 1, 1.0'f32, 1)
+                      .offsets(0.0'f32, -3, 0.0'f32, 2)
+                      .finishAnchors()
+                  else:
+                    discard b.anchors(0.0'f32, 0, 1.0'f32, 0)
+                      .offsets(0.0'f32, -2, 0.0'f32, 3)
+                      .finishAnchors()
+                  if b.beginDrop():
+                    let userData = b.dragData.userData
+                    let canDrop = userData != nil and
+                      userData of DemoTreeDragUserData and
+                      DemoTreeDragUserData(userData).node.canMoveDemoTreeNodeBeside(treeCursor.node)
+                    if canDrop:
+                      discard b.deferBuild(
+                        buildDemoTreeDropGradient, if insertAfter: 1 else: 0)
+                    if b.endDrop(canDrop):
+                      moveDemoTreeNodeBeside(
+                        DemoTreeDragUserData(userData).node,
+                        treeCursor.node,
+                        insertAfter)
+
+              reorderDropZone(false)
+              reorderDropZone(true)
+
+              if b.beginDrop(includeChildren = false):
+                let userData = b.dragData.userData
+                let canDrop = userData != nil and
+                  userData of DemoTreeDragUserData and
+                  DemoTreeDragUserData(userData).node.canReparentDemoTreeNode(treeCursor.node)
+                if canDrop:
+                  discard b.fillBackground().backgroundColor(
+                    b.themeStyle(UiStyleIndexAccent)[].fillColor)
+                if b.endDrop(canDrop):
+                  reparentDemoTreeNode(DemoTreeDragUserData(userData).node, treeCursor.node)
+
+              let (dragging, began) = b.beginDrag()
+              if began:
+                b.setDragData(DemoTreeDragUserData(node: treeCursor.node))
+                b.setDragUiCallback(buildDemoTreeDragTooltip)
+              if dragging:
+                discard b.fillBackground().backgroundColor(
+                  b.themeStyle(UiStyleIndexAccent)[].fillColor)
 
             b.node:
               discard b.fit().paddingX(10)
@@ -1502,7 +1708,7 @@ proc buildTreeTableExample(b: var UiBuilder) =
           opts.showColumnLines = treeTableShowColumnLines
           opts.showIndentationLines = treeTableShowIndentationLines
           opts.alternatingRowBackground = treeTableAlternatingRowColors
-          let testCursor = newTreeCursor(@[5, 5, 100])
+          let testCursor = demoTreeCursor(demoTreeRoot)
           b.treeTable(testCursor, opts, renderRow)
 
 
@@ -1512,6 +1718,9 @@ proc buildTreeTableExample(b: var UiBuilder) =
           discard b.fillX().height(500)
           b.label("File System (fs-demo)"):
             discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+          b.labelWrapped("Drag a file or folder onto a folder to move it there. Invalid moves, including dropping a folder into its own descendant or onto its current parent, are rejected."):
+            discard b.fillX().fontSize(13)
+              .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
           proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
             b.label(cursor.fieldName & ":"):

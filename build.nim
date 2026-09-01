@@ -298,8 +298,8 @@ proc buildUiTestNim2() =
     "ui-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/ui-property-editor-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/property_editor_seek_test.nim",
-    "ui-property-editor-seek-test-nim2"
+    &"nim c -r -o:bin/ui-tree-table-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
+    "ui-tree-table-seek-test-nim2"
   )
   shellCapture(
     &"nim c -r -o:bin/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
@@ -327,8 +327,8 @@ proc buildUiTestNimony() =
     "ui-test-nimony"
   )
   shellCapture(
-    &"nimony c -r -o:bin/ui-property-editor-seek-test-nimony.exe --path:src {passthroughArgs} tests/property_editor_seek_test.nim",
-    "ui-property-editor-seek-test-nimony"
+    &"nimony c -r -o:bin/ui-tree-table-seek-test-nimony.exe --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
+    "ui-tree-table-seek-test-nimony"
   )
   shellCapture(
     &"nimony c -r -o:bin/ui-bench-nimony.exe --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
@@ -351,6 +351,54 @@ proc buildUiTest(compiler: NimCompiler) =
   of NimonyLlvm:
     echo "not implemented"
   of Nlvm:
+    echo "not implemented"
+
+proc buildTreeTableRefreshTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/tree-table-refresh-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_refresh_test.nim",
+      "tree-table-refresh-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/tree-table-refresh-test-nimony.exe --path:src {passthroughArgs} tests/tree_table_refresh_test.nim",
+      "tree-table-refresh-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
+proc buildTreeTableRefreshBench(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/tree-table-refresh-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/tree_table_refresh_bench.nim",
+      "tree-table-refresh-bench-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/tree-table-refresh-bench-nimony.exe -d:release --path:src {passthroughArgs} tests/tree_table_refresh_bench.nim",
+      "tree-table-refresh-bench-nimony"
+    )
+  else:
+    echo "not implemented"
+
+proc buildFileSystemCursorBench(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/file-system-cursor-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/file_system_cursor_bench.nim",
+      "file-system-cursor-bench-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/file-system-cursor-bench-nimony.exe -d:release --path:src {passthroughArgs} tests/file_system_cursor_bench.nim",
+      "file-system-cursor-bench-nimony"
+    )
+  else:
     echo "not implemented"
 
 var optParser = initOptParser("")
@@ -428,6 +476,18 @@ proc main() =
 
   of "test":
     buildUiTest(compiler)
+    buildTreeTableRefreshTest(compiler)
+    buildTreeTableRefreshBench(compiler)
+    buildFileSystemCursorBench(compiler)
+
+  of "tree-table-refresh-test":
+    buildTreeTableRefreshTest(compiler)
+
+  of "tree-table-refresh-bench":
+    buildTreeTableRefreshBench(compiler)
+
+  of "file-system-cursor-bench":
+    buildFileSystemCursorBench(compiler)
 
   of "shader":
     buildShader()
