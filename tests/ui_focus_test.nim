@@ -1,4 +1,5 @@
 import nuigi, mymath, widgets, colorpicker
+import widgets/tree_table
 
 include compat2
 
@@ -27,6 +28,202 @@ proc hasAccentFocusHighlight(b: UiBuilder): bool =
       return true
   false
 
+type FocusTreeCursor = ref object of TreeCursor
+  maxDepth: int
+  childrenPerNode: int
+
+method clone(c: FocusTreeCursor): TreeCursor =
+  FocusTreeCursor(
+    fieldName: c.fieldName,
+    index: c.index,
+    path: c.path,
+    maxDepth: c.maxDepth,
+    childrenPerNode: c.childrenPerNode)
+
+method cursorKey(c: FocusTreeCursor): string =
+  result = "root"
+  for childIndex in c.path:
+    result.add("/")
+    result.add($childIndex)
+
+method childCount(c: FocusTreeCursor): int =
+  if c.path.len < c.maxDepth: c.childrenPerNode else: 0
+
+method enterChild(c: FocusTreeCursor): bool =
+  if c.path.len >= c.maxDepth:
+    return false
+  c.path.add(0)
+  c.index = 0
+  true
+
+method exitChild(c: FocusTreeCursor): bool =
+  if c.path.len == 0:
+    return false
+  c.path.setLen(c.path.len - 1)
+  c.index = if c.path.len > 0: c.path[^1] else: 0
+  true
+
+method moveNext(c: FocusTreeCursor, count: int = 1): bool =
+  if c.path.len == 0 or c.index + count >= c.childrenPerNode:
+    return false
+  c.index += count
+  c.path[^1] = c.index
+  true
+
+method movePrev(c: FocusTreeCursor, count: int = 1): bool =
+  if c.path.len == 0 or c.index - count < 0:
+    return false
+  c.index -= count
+  c.path[^1] = c.index
+  true
+
+proc testTreeTableFocusNavigation() =
+  var b = newBuilder(fixedMeasureText)
+  let root = FocusTreeCursor(maxDepth: 2, childrenPerNode: 2)
+  var initialized = false
+  var treeStorage: TreeTable
+
+  proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+    let _ = index
+    b.label(cursor.cursorKey())
+
+  proc buildTree(b: var UiBuilder) =
+    b.node("focus-tree-table"):
+      discard b.size(400.0'f32, 400.0'f32)
+      if not initialized:
+        treeStorage = TreeTable(cursor: root)
+        treeStorage.expandAll()
+        b.nodeStorage(b.currentNode, treeStorage)
+        initialized = true
+      b.treeTable(root, renderRow)
+
+  proc rowFocusItem(b: UiBuilder, row: int): UiFocusItem =
+    for item in b.frame.focusItems:
+      if item.tabOrder == row and item.nodeIndex >= 0 and
+          b.frame.nodes[item.nodeIndex].nodeDebugName() == "tree-table-row":
+        return item
+    require(false, "missing tree-table focus item for row " & $row)
+    UiFocusItem()
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32)
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  let rootItem = b.rowFocusItem(0)
+  let firstChildItem = b.rowFocusItem(1)
+  let firstGrandchildItem = b.rowFocusItem(2)
+  let secondGrandchildItem = b.rowFocusItem(3)
+  let secondChildItem = b.rowFocusItem(4)
+  require(firstChildItem.scopeId == rootItem.nodeId,
+    "tree child should belong to its expanded parent scope")
+  require(firstGrandchildItem.scopeId == firstChildItem.nodeId,
+    "tree grandchild should belong to its expanded parent scope")
+
+  b.focusedNode = rootItem.nodeId
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyRight}))
+  require(b.focusedNode == firstChildItem.nodeId,
+    "Right should move tree focus to the first child")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyDown}, modsDown: {ModShift}))
+  require(b.focusedNode == secondChildItem.nodeId,
+    "Shift+Down should move to the next sibling instead of entering children")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyUp}, modsDown: {ModShift}))
+  require(b.focusedNode == firstChildItem.nodeId,
+    "Shift+Up should move to the previous sibling instead of its deepest child")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyDown}))
+  require(b.focusedNode == firstGrandchildItem.nodeId,
+    "Down should enter the first child of an expanded row")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyDown}))
+  require(b.focusedNode == secondGrandchildItem.nodeId,
+    "Down should move tree focus to the next sibling when there is no expanded child")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyDown}))
+  require(b.focusedNode == secondChildItem.nodeId,
+    "Down should leave a completed subtree in visible preorder")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyUp}))
+  require(b.focusedNode == secondGrandchildItem.nodeId,
+    "Up should enter the deepest previous visible subtree")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyUp}))
+  require(b.focusedNode == firstGrandchildItem.nodeId,
+    "Up should follow visible preorder between siblings")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyLeft}))
+  require(b.focusedNode == firstChildItem.nodeId,
+    "Left should move from a leaf to its parent")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyLeft}))
+  require(b.focusedNode == firstChildItem.nodeId,
+    "Left should keep focus on an expanded row while collapsing it")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyLeft}))
+  require(b.focusedNode == rootItem.nodeId,
+    "Left should move to the parent after the row is collapsed")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  b.focusedNode = firstChildItem.nodeId
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyRight}))
+  require(b.focusedNode == firstChildItem.nodeId,
+    "Right should keep focus on a collapsed row while expanding it")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+  let expandedGrandchildItem = b.rowFocusItem(2)
+
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyRight}))
+  require(b.focusedNode == expandedGrandchildItem.nodeId,
+    "Right should enter the first child after expansion")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  b.focusedNode = rootItem.nodeId
+  discard b.beginUiFrame(400.0'f32, 400.0'f32,
+    input = UiInputSnapshot(keysPressed: {KeyLeft}))
+  require(b.focusedNode == rootItem.nodeId,
+    "Left should keep focus on the root while collapsing it")
+  buildTree(b)
+  b.endUiFrame(buildRenderCommands = false)
+  let collapsedRootItem = b.rowFocusItem(0)
+  require(collapsedRootItem.nodeId == rootItem.nodeId,
+    "collapsed root should remain rendered and focusable")
+
 proc testKeyboardFocusTraversal() =
   var b = newBuilder(fixedMeasureText)
   var firstId = noneNodeId()
@@ -47,6 +244,14 @@ proc testKeyboardFocusTraversal() =
   discard b.beginUiFrame(200.0, 120.0,
     input = UiInputSnapshot(keysPressed: {KeyTab}))
   require(b.focusedNode == firstId, "Tab should focus the first registered item")
+  require(b.wasFocusChangedByKeyboard(),
+    "Tab focus movement should report a keyboard-driven focus change")
+  buildFocusItems(b)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0)
+  require(not b.wasFocusChangedByKeyboard(),
+    "steady keyboard focus should not report a focus change")
   buildFocusItems(b)
   b.endUiFrame(buildRenderCommands = false)
 
@@ -416,6 +621,7 @@ proc runTests() =
   testDragFloatKeyboardFocus()
   testMultiDragFloatFocusStops()
   testFocusableWidgetsShowFocus()
+  testTreeTableFocusNavigation()
 
 when isMainModule:
   runTests()

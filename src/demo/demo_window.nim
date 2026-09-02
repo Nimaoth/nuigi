@@ -1454,6 +1454,19 @@ method moveNext*(c: DemoTreeCursor, count: int = 1): bool =
     return true
   return false
 
+method movePrev*(c: DemoTreeCursor, count: int = 1): bool =
+  if c.parents.len == 0:
+    return false
+  if count <= 0:
+    return true
+  if c.index >= count:
+    c.index -= count
+    c.path[^1] = c.index
+    c.node = c.parents[^1].children[c.index]
+    c.fieldName = c.node.name
+    return true
+  return false
+
 method exitChild*(c: DemoTreeCursor): bool =
   if c.parents.len == 0:
     return false

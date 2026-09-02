@@ -62,6 +62,10 @@ type
     hasCustomAlternatingColors*: bool
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
+    focusRootId: UiNodeId
+    focusCursors: Table[uint64, TreeCursor]
+    focusCursorsInitialized: bool
+    listStorage: UiDynamicVirtualListStorage
 
   TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
 
@@ -732,6 +736,92 @@ proc countVisible(e: TreeTable): int =
   ## Returns the root plus all visible descendants of expanded nodes.
   if e.rootNode < 0: 1 else: 1 + e.nodes[e.rootNode].totalChildren
 
+proc treeFocusId(e: TreeTable, cursor: TreeCursor): UiNodeId =
+  e.focusRootId.deriveNodeId("tree-table-row:" & cursor.cursorKey())
+
+proc visibleRowIndex(e: TreeTable, cursor: TreeCursor): int =
+  ## Resolves a visible cursor to its preorder row using expanded subtree totals.
+  if cursor.path.len == 0:
+    return 0
+  if e.rootNode < 0:
+    return -1
+  result = 0
+  var parentIndex = e.rootNode
+  for depthIndex in 0 ..< cursor.path.len:
+    if parentIndex < 0:
+      return -1
+    let childPosition = cursor.path[depthIndex]
+    result += childPosition + 1
+    var nextParentIndex = -1
+    for (childIndex, childNode) in e.expandedChildren(parentIndex):
+      if childNode.childIndex < childPosition:
+        result += childNode.totalChildren
+      elif childNode.childIndex == childPosition:
+        nextParentIndex = childIndex
+        break
+      else:
+        break
+    if depthIndex < cursor.path.high:
+      parentIndex = nextParentIndex
+
+proc focusScopeId(e: TreeTable, cursor: TreeCursor): UiNodeId =
+  if cursor.path.len == 0:
+    return e.focusRootId
+  var parent = cursor.clone()
+  if parent.exitChild():
+    return e.treeFocusId(parent)
+  e.focusRootId
+
+proc registerFocusScopes(b: var UiBuilder, e: TreeTable, cursor: TreeCursor) =
+  ## Materializes the expanded ancestor scope chain for a visible row.
+  var chain = @[cursor.clone()]
+  var ancestor = cursor.clone()
+  while ancestor.exitChild():
+    chain.add(ancestor.clone())
+  var parentScopeId = e.focusRootId
+  for chainIndex in countdown(chain.high, 0):
+    let scopeCursor = chain[chainIndex]
+    if e.findExpandedNode(scopeCursor.cursorKey()) >= 0:
+      let scopeId = e.treeFocusId(scopeCursor)
+      b.registerFocusScope(scopeId, parentScopeId)
+      parentScopeId = scopeId
+
+proc registerFocusTarget(b: var UiBuilder, e: TreeTable, cursor: TreeCursor): UiNodeId =
+  result = e.treeFocusId(cursor)
+  e.focusCursors[result.nodeIdValue()] = cursor.clone()
+  discard b.registerFocusItem(
+    result,
+    -1,
+    e.focusScopeId(cursor),
+    {FocusTabStop},
+    e.visibleRowIndex(cursor))
+
+proc nextVisibleCursor(e: TreeTable, cursor: TreeCursor): TreeCursor =
+  ## Returns the next row in the same visible preorder used by Tab traversal.
+  result = cursor.clone()
+  if e.nodeIsExpanded(result, 0) and result.enterChild():
+    return
+  while true:
+    if result.moveNext():
+      return
+    if not result.exitChild():
+      return nil
+
+proc previousVisibleCursor(e: TreeTable, cursor: TreeCursor): TreeCursor =
+  ## Returns the previous row in the same visible preorder used by Tab traversal.
+  result = cursor.clone()
+  if not result.movePrev():
+    if result.exitChild():
+      return
+    return nil
+  while e.nodeIsExpanded(result, 0):
+    var child = result.clone()
+    if not child.enterChild():
+      break
+    while child.moveNext():
+      discard
+    result = child
+
 proc expandAll*(e: TreeTable) =
   ## Expands every non-leaf node and builds the linked topology in preorder.
   e.initializeTopology()
@@ -860,6 +950,42 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
 
   b.debugName("tree-table-row")
   discard b.fitY().gap(4).paddingY(2)
+
+  let rowFocusId = e.treeFocusId(e.walkCursor)
+  e.focusCursors[rowFocusId.nodeIdValue()] = e.walkCursor.clone()
+  b.registerFocusScopes(e, e.walkCursor)
+  discard b.registerFocusItem(
+    rowFocusId,
+    b.currentNodeIndex,
+    e.focusScopeId(e.walkCursor),
+    {FocusTabStop},
+    index)
+
+  var targetCursor = e.previousVisibleCursor(e.walkCursor)
+  if targetCursor != nil:
+    b.focusNavigationTarget(rowFocusId, NavUp, b.registerFocusTarget(e, targetCursor))
+  targetCursor = e.nextVisibleCursor(e.walkCursor)
+  if targetCursor != nil:
+    b.focusNavigationTarget(rowFocusId, NavDown, b.registerFocusTarget(e, targetCursor))
+  targetCursor = e.walkCursor.clone()
+  if targetCursor.movePrev():
+    b.shiftFocusNavigationTarget(rowFocusId, NavUp, b.registerFocusTarget(e, targetCursor))
+  targetCursor = e.walkCursor.clone()
+  if targetCursor.moveNext():
+    b.shiftFocusNavigationTarget(rowFocusId, NavDown, b.registerFocusTarget(e, targetCursor))
+  if not isExpanded:
+    targetCursor = e.walkCursor.clone()
+    if targetCursor.exitChild():
+      b.focusNavigationTarget(rowFocusId, NavLeft, b.registerFocusTarget(e, targetCursor))
+  targetCursor = e.walkCursor.clone()
+  if isExpanded and targetCursor.enterChild():
+    b.focusNavigationTarget(rowFocusId, NavRight, b.registerFocusTarget(e, targetCursor))
+
+  if b.wasClicked(includeChildren = true):
+    discard b.requestFocus(rowFocusId)
+  if b.focusedNode == rowFocusId:
+    discard b.borderWidth(2.0'f32)
+    discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
 
   b.layoutHorizontal:
     discard b.fit().gap(2)
@@ -1241,8 +1367,6 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
   ## The frame walk cursor is shared across increasing virtual-list indices.
   prof("buildTreeTableRow")
   var ctx = b.getOrCreateStorage(b.frame.nodes[userData].addr)
-  if ctx.rootNode < 0:
-    return
   if ctx.walkCursor == nil:
     ctx.walkCursor = ctx.cursor.clone()
     ctx.walkIndex = 0
@@ -1263,6 +1387,11 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ## Logical column zero combines indentation and the first renderer cell.
   prof("treeTable")
   var ctx = b.getOrCreateStorage(b.currentNode)
+  ctx.focusRootId = b.currentNode.id.deriveNodeId("tree-table-focus-scope")
+  b.pushFocusScope(ctx.focusRootId)
+  if not ctx.focusCursorsInitialized:
+    ctx.focusCursors = initTable[uint64, TreeCursor]()
+    ctx.focusCursorsInitialized = true
   if NodeStorageParent notin b.currentNode.flags:
     b.nodeStorageParent()
   ctx.cursor = cursor
@@ -1275,6 +1404,25 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.hoverColor = options.hoverColor
   ctx.hasCustomHoverColor = options.hasCustomHoverColor
   ensureNodes(ctx)
+
+  let input = b.frameCtx.input
+  let rightPressed = KeyRight in input.keysPressed or
+    KeyRight in input.keysRepeated or NavRight in input.navigationPressed
+  let leftPressed = KeyLeft in input.keysPressed or
+    KeyLeft in input.keysRepeated or NavLeft in input.navigationPressed
+  if rightPressed and not b.wasFocusNavigationHandled() and
+      ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
+    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    if focusedCursor.childCount() > 0 and
+        ctx.findExpandedNode(focusedCursor.cursorKey()) < 0:
+      ctx.expandNode(focusedCursor)
+      b.anythingAnimating = true
+  elif leftPressed and not b.wasFocusNavigationHandled() and
+      ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
+    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    if ctx.findExpandedNode(focusedCursor.cursorKey()) >= 0:
+      ctx.toggleNode(focusedCursor)
+      b.anythingAnimating = true
 
   ctx.refreshRenderedNodes(ctx.renderedCursors)
   ctx.renderedCursors.setLen(0)
@@ -1306,9 +1454,15 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       b.anythingAnimating = true
 
   let count = ctx.countVisible()
+  if b.wasFocusChangedByKeyboard() and ctx.listStorage != nil and
+      ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
+    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    let focusedRow = ctx.visibleRowIndex(focusedCursor)
+    if focusedRow >= 0:
+      ctx.listStorage.centerItem(focusedRow)
   b.label("Items: " & $count):
     discard b.fitX()
-  discard b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
+  ctx.listStorage = b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
   let last = b.frame.nodes[b.lastNodeIndex].addr
   let containerIndex = b.frame.nodes[last.lastChild].nextSibling
 
@@ -1351,6 +1505,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   else:
     b.withParent(b.frame.nodes[containerIndex].id):
       discard b.customLayout(treeTableColumnLayout, 0)
+  b.popFocusScope()
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =
   ## Builds a tree table with explicit column policies and column gap.

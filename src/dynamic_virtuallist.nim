@@ -101,6 +101,10 @@ proc centerItem*(storage: UiDynamicVirtualListStorage, itemIndex: int, viewportH
     maxScroll)
   storage.scrollVelocityY = 0.0'f32
 
+proc centerItem*(storage: UiDynamicVirtualListStorage, itemIndex: int) =
+  ## Centers an item using the viewport height measured during the previous frame.
+  storage.centerItem(itemIndex, storage.viewportHeight)
+
 proc firstVisibleItem(storage: UiDynamicVirtualListStorage, itemCount: int,
     heightHint, scrollOffset: float32): int =
   var low = 0

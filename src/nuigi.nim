@@ -312,6 +312,8 @@ type
       ## Explicit Tab rank; equal ranks retain deterministic build order.
     navigationTargets*: array[UiNavigationDirection, UiNodeId]
       ## Explicit directional edges for arrow and controller navigation.
+    shiftNavigationTargets*: array[UiNavigationDirection, UiNodeId]
+      ## Optional directional edges used while Shift is held.
 
   UiFocusScope* = object
     ## A frame-local logical focus scope, independent of render parentage.
@@ -825,6 +827,10 @@ type
       ## ID of the overlay root node (drawn above windows).
     focusedNode*: UiNodeId
       ## ID of the currently focused node (for keyboard/text input).
+    focusNavigationHandled: bool
+      ## Whether directional focus navigation moved focus at frame start.
+    focusChangedByKeyboard: bool
+      ## Whether Tab or directional keyboard navigation changed focus this frame.
     debugDrawGridLines*: bool
       ## When true, draw layout grid/debug guides.
     showDebugPanel*: bool = false
@@ -1292,6 +1298,33 @@ proc focusScope*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if NodeStorageParent notin b.currentNode.flags:
     b.nodeStorageParent()
   b
+
+proc registerFocusScope*(b: var UiBuilder, nodeId: UiNodeId,
+    parentScopeId: UiNodeId = noneNodeId()) =
+  ## Register a logical focus scope that does not require a rendered node.
+  for scope in b.frame.focusScopes:
+    if scope.nodeId == nodeId:
+      return
+  b.frame.focusScopes.add UiFocusScope(
+    nodeId: nodeId,
+    parentScopeId: parentScopeId,
+  )
+  let storage = b.nodeStorage.mgetOrPut(nodeId.uint64, UiNodeStorage()).addr
+  storage.parents = b.storageParentStack
+  storage.lastAccess = b.frameCtx.input.frameIndex
+
+proc pushFocusScope*(b: var UiBuilder, nodeId: UiNodeId) =
+  ## Enter a balanced logical focus scope without requiring a rendered node.
+  let parentScopeId =
+    if b.focusScopeStack.len > 0: b.focusScopeStack[^1]
+    else: noneNodeId()
+  b.registerFocusScope(nodeId, parentScopeId)
+  b.focusScopeStack.add nodeId
+
+proc popFocusScope*(b: var UiBuilder) =
+  ## Leave the logical focus scope entered by `pushFocusScope`.
+  assert b.focusScopeStack.len > 0
+  discard b.focusScopeStack.pop()
 
 proc nodeStorage*(b: var UiBuilder, node: ptr UiNode, data: UiNodeStorageData) {.inline.} =
   ## Store node storage for given node.
@@ -1850,6 +1883,10 @@ func toNodeId*(value: uint64): UiNodeId {.inline.} =
 func nodeIdValue*(value: UiNodeId): uint64 {.inline.} =
   ## Extract the raw uint64 value from a UiNodeId.
   uint64(value)
+
+func deriveNodeId*(parent: UiNodeId, value: openArray[char]): UiNodeId {.inline.} =
+  ## Derive a stable logical ID from a parent ID and character key.
+  toNodeId(combineIdHash(nodeIdValue(parent), hashChars(value)))
 
 func rootNodeId*(): UiNodeId {.inline.} =
   ## Returns the deterministic ID of the root node (always created at frame start).
@@ -2618,17 +2655,37 @@ proc currentNodeIndex*(b: UiBuilder): int {.inline.} =
   ## Index of the current node in the current frame.
   b.stack[^1]
 
+proc registerFocusItem*(b: var UiBuilder, nodeId: UiNodeId, nodeIndex: int,
+    scopeId: UiNodeId = noneNodeId(), flags: UiFocusFlags = {FocusTabStop},
+    tabOrder = 0): var UiBuilder {.discardable.} =
+  ## Register a logical focus item, optionally backed by a rendered node.
+  for index in 0 ..< b.frame.focusItems.len:
+    if b.frame.focusItems[index].nodeId == nodeId:
+      if nodeIndex >= 0 or b.frame.focusItems[index].nodeIndex < 0:
+        b.frame.focusItems[index].nodeIndex = nodeIndex
+      b.frame.focusItems[index].scopeId = scopeId
+      b.frame.focusItems[index].flags = flags
+      b.frame.focusItems[index].tabOrder = tabOrder
+      return b
+  b.frame.focusItems.add UiFocusItem(
+    nodeId: nodeId,
+    nodeIndex: nodeIndex,
+    scopeId: scopeId,
+    flags: flags,
+    tabOrder: tabOrder,
+  )
+  b
+
 proc focusable*(b: var UiBuilder, flags: UiFocusFlags = {FocusTabStop},
   tabOrder = 0): var UiBuilder {.discardable.} =
   ## Register the current node for keyboard focus in deterministic build order.
   if b.stack.len > 0:
-    b.frame.focusItems.add UiFocusItem(
-      nodeId: b.currentNode.id,
-      nodeIndex: b.stack[^1],
-      scopeId: (if b.focusScopeStack.len > 0: b.focusScopeStack[^1] else: noneNodeId()),
-      flags: flags,
-      tabOrder: tabOrder,
-    )
+    discard b.registerFocusItem(
+      b.currentNode.id,
+      b.stack[^1],
+      (if b.focusScopeStack.len > 0: b.focusScopeStack[^1] else: noneNodeId()),
+      flags,
+      tabOrder)
   b
 
 proc focusNavigationTarget*(b: var UiBuilder, direction: UiNavigationDirection,
@@ -2645,6 +2702,14 @@ proc focusNavigationTarget*(b: var UiBuilder, source: UiNodeId,
   for index in countdown(b.frame.focusItems.high, 0):
     if b.frame.focusItems[index].nodeId == source:
       b.frame.focusItems[index].navigationTargets[direction] = target
+      return
+
+proc shiftFocusNavigationTarget*(b: var UiBuilder, source: UiNodeId,
+    direction: UiNavigationDirection, target: UiNodeId) =
+  ## Set a Shift-modified directional edge after both focus IDs are known.
+  for index in countdown(b.frame.focusItems.high, 0):
+    if b.frame.focusItems[index].nodeId == source:
+      b.frame.focusItems[index].shiftNavigationTargets[direction] = target
       return
 
 proc requestFocus*(b: var UiBuilder) =
@@ -2687,6 +2752,14 @@ proc isFocused*(b: UiBuilder): bool {.inline.} =
 proc clearFocus*(b: var UiBuilder) {.inline.} =
   ## Clear keyboard focus.
   b.focusedNode = noneNodeId()
+
+proc wasFocusNavigationHandled*(b: UiBuilder): bool {.inline.} =
+  ## Whether this frame's directional input followed an explicit focus edge.
+  b.focusNavigationHandled
+
+proc wasFocusChangedByKeyboard*(b: UiBuilder): bool {.inline.} =
+  ## Whether this frame's keyboard navigation changed the focused node.
+  b.focusChangedByKeyboard
 
 proc wasFocusActivated*(b: UiBuilder): bool =
   ## Whether Enter or Space activated the current focused, activatable node.
@@ -2984,7 +3057,9 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
             else: focusItemBefore(b.frame.focusItems, index, candidate))):
           candidate = index
     if candidate >= 0:
+      let previousFocusedNode = b.focusedNode
       b.applyFocusedItem(b.frame.focusItems[candidate], input.frameIndex)
+      b.focusChangedByKeyboard = b.focusedNode != previousFocusedNode
     return
 
   if current < 0 or not b.frame.focusItems[current].focusItemAvailable():
@@ -3011,16 +3086,25 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
   if not directionFound:
     return
 
-  let target = b.frame.focusItems[current].navigationTargets[direction]
+  var target = noneNodeId()
+  if ModShift in input.modsDown:
+    target = b.frame.focusItems[current].shiftNavigationTargets[direction]
+  if target == noneNodeId():
+    target = b.frame.focusItems[current].navigationTargets[direction]
   for item in b.frame.focusItems:
     if item.nodeId == target and item.focusItemAvailable():
+      let previousFocusedNode = b.focusedNode
       b.applyFocusedItem(item, input.frameIndex)
+      b.focusNavigationHandled = true
+      b.focusChangedByKeyboard = b.focusedNode != previousFocusedNode
       return
 
 proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.discardable.} =
   ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
   prof("beginUiFrame")
   b.computeFrameInteraction(ctx.input)
+  b.focusNavigationHandled = false
+  b.focusChangedByKeyboard = false
   b.processKeyboardFocus(ctx.input)
   b.dragData.canDrop = false
 
