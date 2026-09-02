@@ -63,6 +63,7 @@ template tooltip*(b: var UiBuilder, body: untyped): untyped =
 template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, body: untyped): untyped =
   block:
     prof("tabBar")
+    var focusTabContent = false
     if tabs.len <= 0:
       activeTab = 0
     else:
@@ -78,31 +79,56 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
         discard b.animateHeight().animateDelayed()
         discard b.fillBackground()
 
+        var firstTabId = noneNodeId()
+        var previousTabId = noneNodeId()
         for i in 0 ..< tabs.len:
           let isActive = i == activeTab
-          let tabNodeIndex = b.nodes.len
           discard b.pushId(i.uint64)
           b.node("tab-bar-item"):
+            let tabId = b.currentNode.id
+            if firstTabId == noneNodeId():
+              firstTabId = tabId
             discard b.styleIndex(if isActive: UiStyleIndexTabBarItemActive else: UiStyleIndexTabBarItem)
             discard b.copyTextStyleIndex(if isActive: UiStyleIndexTabBarItemActiveText else: UiStyleIndexTabBarItemText)
             discard b.fitX().fitY()
             discard b.fillBackground()
             discard b.text(tabs[i])
+            discard b.focusable({FocusTabStop, FocusActivatable})
+            if previousTabId != noneNodeId():
+              b.focusNavigationTarget(NavLeft, previousTabId)
+              b.focusNavigationTarget(previousTabId, NavRight, tabId)
+            if b.previousOutput.clickedId == tabId:
+              b.requestFocus()
+              activeTab = i
+            elif b.wasFocusActivated():
+              activeTab = i
+              focusTabContent = true
+            discard b.focusHighlight()
             discard b.animatePos().animateDelayed()
+            previousTabId = tabId
           discard b.popId()
 
-          if b.wasClicked(tabNodeIndex, includeChildren = true):
-            activeTab = i
+        if firstTabId != noneNodeId() and previousTabId != noneNodeId():
+          b.focusNavigationTarget(firstTabId, NavLeft, previousTabId)
+          b.focusNavigationTarget(previousTabId, NavRight, firstTabId)
 
       b.node("tab-bar-content"):
         discard b.styleIndex(UiStyleIndexTabBarContent)
         discard b.sizeToParentX().sizeToParentY()
         discard b.fillBackground()
+        let firstContentFocusItem = b.frame.focusItems.len
         body
+        if focusTabContent:
+          for focusItemIndex in firstContentFocusItem ..< b.frame.focusItems.len:
+            let focusItem = b.frame.focusItems[focusItemIndex]
+            if FocusDisabled notin focusItem.flags:
+              discard b.requestFocus(focusItem.nodeId)
+              break
 
 proc button*(b: var UiBuilder, text: string): bool =
   prof("button")
   let nodeIndex = b.nodes.len
+  var focusActivated = false
 
   b.node:
     b.debugName("button")
@@ -111,6 +137,11 @@ proc button*(b: var UiBuilder, text: string): bool =
     discard b.fitX().fitY()
     discard b.text(text)
     let nodeId = b.currentNode.id
+    discard b.focusable({FocusTabStop, FocusActivatable})
+    if b.previousOutput.clickedId == nodeId:
+      b.requestFocus()
+    focusActivated = b.wasFocusActivated()
+    discard b.focusHighlight()
     let wasHovered = b.previousOutput.hoveredId == nodeId
     discard b.fillBackground()
     b.animate(b.previousOutput.clickedId == nodeId or
@@ -124,7 +155,7 @@ proc button*(b: var UiBuilder, text: string): bool =
         b.ensureNodeStyle(b.currentNode).fillColor = b.themeTextStyle(UiStyleIndexButtonText)[].textColor
 
   let id = b.nodes[nodeIndex].id
-  b.previousOutput.clickedId == id
+  b.previousOutput.clickedId == id or focusActivated
 
 template menuItem*(b: var UiBuilder, inBody: untyped, inHovered: untyped, inClicked: untyped): untyped =
   block:
@@ -252,12 +283,16 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
   var boxNodeId = noneNodeId()
   var previousBoxNodeIndex = -1
   var boxNodeIdx = -1
+  var focusActivated = false
+  var isFocused = false
 
   discard b.pushId(label)
   b.layoutHorizontalReverse:
     b.debugName("checkbox")
     discard b.fitX().fitY()
     discard b.gap(6)
+    discard b.focusable({FocusTabStop, FocusActivatable})
+    isFocused = b.isFocused()
 
     let parent = b.currentParent
     if fillXInVertical and parent != nil and LayoutVertical in parent.flags:
@@ -265,11 +300,16 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
 
     b.node():
       discard b.padding(2).fit()
-      b.node("checkbox-box"):
+      b.node:
+        b.debugName("checkbox-box")
         discard b.styleIndex(UiStyleIndexCheckbox)
         let defaultTextSize = b.themeTextStyle(UiStyleIndexDefaultText)[].fontSize
         discard b.size(defaultTextSize, defaultTextSize)
         discard b.fillBackground()
+        if isFocused:
+          discard b.copyStyleIndex(UiStyleIndexCheckbox)
+          discard b.borderWidth(2.0'f32)
+          discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
         discard b.alignCenter()
         boxNodeIdx = b.nodes.high
         boxNodeId = b.currentNode.id
@@ -284,8 +324,8 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
               discard b.sizeAnim(0, 0)
           discard b.fillBackground()
 
-        let boxIsHovered = b.wasHovered(boxNodeIdx, includeChildren = true)
-        discard b.styleIndex(if boxIsHovered: UiStyleIndexCheckboxHover else: UiStyleIndexCheckbox)
+        if b.wasHovered(boxNodeIdx, includeChildren = true):
+          discard b.styleIndex(UiStyleIndexCheckboxHover)
 
     if label != "":
       b.node("checkbox-label"):
@@ -293,6 +333,9 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
         discard b.copyTextStyleIndex(UiStyleIndexLabelText)
         discard b.fillX().fitX().fitY().alignCenter()
         discard b.text(label)
+    if b.wasClicked(boxNodeIdx, includeChildren = true):
+      b.requestFocus()
+    focusActivated = b.wasFocusActivated()
   discard b.popId()
 
   previousBoxNodeIndex = b.previousNodeIndex(boxNodeId, boxNodeIdx)
@@ -301,9 +344,10 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
       false
     else:
       b.wasClicked(boxNodeIdx, includeChildren = true)
-  if clicked:
+  let activated = clicked or focusActivated
+  if activated:
     value = not value
-  clicked
+  activated
 
 proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue = 1.0'f32, defaultValue = 0.5'f32): bool =
   prof("slider")
@@ -339,9 +383,13 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
 
       trackNodeId = b.currentNode.id
       trackNodeIdx = b.stack[^1]
+      discard b.focusable({FocusTabStop, FocusDirectionalInput})
+      if b.wasClicked(trackNodeId, includeChildren = true, indexHint = trackNodeIdx):
+        b.requestFocus()
       previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
       let trackHovered = b.wasHovered(trackNodeIdx, includeChildren = true)
       discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
+      discard b.focusHighlight()
 
       b.node("slider-line"):
         discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
@@ -388,6 +436,19 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
     previousTrackIndex >= 0 and
     b.wasRightClicked(trackNodeIdx, includeChildren = true)
 
+  var keyboardChanged = false
+  if b.focusedNode == trackNodeId:
+    let decrease = KeyLeft in input.keysPressed or KeyDown in input.keysPressed or
+      KeyLeft in input.keysRepeated or KeyDown in input.keysRepeated or
+      NavLeft in input.navigationPressed or NavDown in input.navigationPressed
+    let increase = KeyRight in input.keysPressed or KeyUp in input.keysPressed or
+      KeyRight in input.keysRepeated or KeyUp in input.keysRepeated or
+      NavRight in input.navigationPressed or NavUp in input.navigationPressed
+    if decrease != increase:
+      let newValue = clamp(value + (if increase: span / 100.0'f32 else: -span / 100.0'f32), low, high)
+      keyboardChanged = abs(newValue - value) > 0.0001'f32
+      value = newValue
+
   if rightClicked and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
     value = defaultValue
 
@@ -404,7 +465,7 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
     value = newValue
     return changed
 
-  false
+  keyboardChanged
 
 const dragFloatNegInf: float32 = -Inf.float32
 const dragFloatInf: float32 = Inf.float32
@@ -449,9 +510,13 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
     discard b.fillBackground()
     trackNodeId = b.currentNode.id
     trackNodeIdx = b.stack[^1]
+    discard b.focusable({FocusTabStop, FocusDirectionalInput})
+    if b.wasClicked(trackNodeId, includeChildren = true, indexHint = trackNodeIdx):
+      b.requestFocus()
     previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
     let trackHovered = b.wasHovered(trackNodeIdx, includeChildren = true)
     discard b.styleIndex(if trackHovered: UiStyleIndexSliderTrackHover else: UiStyleIndexSliderTrack)
+    discard b.focusHighlight()
 
     if hasMin and hasMax:
       b.node("dragfloat-fill"):
@@ -485,6 +550,19 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
     b.wasRightClicked(trackNodeIdx, includeChildren = true)
 
   var changed = false
+  if b.focusedNode == trackNodeId:
+    let decrease = KeyLeft in input.keysPressed or KeyDown in input.keysPressed or
+      KeyLeft in input.keysRepeated or KeyDown in input.keysRepeated or
+      NavLeft in input.navigationPressed or NavDown in input.navigationPressed
+    let increase = KeyRight in input.keysPressed or KeyUp in input.keysPressed or
+      KeyRight in input.keysRepeated or KeyUp in input.keysRepeated or
+      NavRight in input.navigationPressed or NavUp in input.navigationPressed
+    if decrease != increase:
+      let step = if hasMin and hasMax: span / 100.0'f32 else: 1.0'f32
+      let newValue = clamp(value + (if increase: step else: -step), low, high)
+      if abs(newValue - value) > 0.0001'f32:
+        value = newValue.float32
+        changed = true
   if rightClicked and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
     if value != default:
       value = default
@@ -1179,7 +1257,10 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "", state: ni
   b.node("textfield"):
     let nodeId = b.currentNode.id
     let nodePtr = b.currentNode
-    let isFocused = b.focusedNode == nodeId
+    discard b.focusable({FocusTabStop, FocusTextInput})
+    if b.previousOutput.clickedId == nodeId:
+      b.requestFocus()
+    let isFocused = b.isFocused()
     let storage: TextFieldStorage = if state != nil:
       cast[TextFieldStorage](state)
     else:
@@ -1187,13 +1268,11 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "", state: ni
     storage.cursorPos = clamp(storage.cursorPos, 0, text.len)
 
     discard b.styleIndex(if isFocused: UiStyleIndexTextFieldFocused else: UiStyleIndexTextField)
+    discard b.focusHighlight()
     discard b.fitX().fitY()
     discard b.fillBackground()
 
     let input = b.frameCtx.input
-
-    if b.previousOutput.clickedId == nodeId:
-      b.focusedNode = nodeId
 
     if isFocused:
       for ch in input.textInput:
@@ -1222,9 +1301,9 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "", state: ni
         of KeyRight: storage.cursorPos = min(text.len, storage.cursorPos + 1)
         of KeyHome: storage.cursorPos = 0
         of KeyEnd: storage.cursorPos = text.len
-        of KeyEscape: b.focusedNode = noneNodeId()
+        of KeyEscape: b.clearFocus()
         of KeyEnter:
-          b.focusedNode = noneNodeId()
+          b.clearFocus()
           submitted = true
         else: discard
 
@@ -1251,9 +1330,9 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "", state: ni
         of KeyRight: storage.cursorPos = min(text.len, storage.cursorPos + 1)
         of KeyHome: storage.cursorPos = 0
         of KeyEnd: storage.cursorPos = text.len
-        of KeyEscape: b.focusedNode = noneNodeId()
+        of KeyEscape: b.clearFocus()
         of KeyEnter:
-          b.focusedNode = noneNodeId()
+          b.clearFocus()
           submitted = true
         else: discard
 

@@ -9,6 +9,7 @@ const cpTwoPi = 6.2831853'f32
 type ColorPickerStorage* = ref object of UiNodeStorageData
   h*, s*, v*, a*: float32
   svIdx*, hueIdx*, alphaIdx*: int
+  open*: bool
   openPrev*: bool
 
 proc getOrCreateColorPickerStorage(b: var UiBuilder, node: ptr UiNode): ColorPickerStorage =
@@ -211,6 +212,7 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
   var swatchIdx = -1
   var swatchId = noneNodeId()
   var pickerIdx = -1
+  var storage: nil ColorPickerStorage = nil
 
   b.node:
     b.debugName("color-picker")
@@ -219,22 +221,22 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
 
     swatchIdx = b.stack[^1]
     swatchId = b.currentNode.id
+    storage = getOrCreateColorPickerStorage(b, b.currentNode)
+    discard b.focusable({FocusTabStop, FocusActivatable})
+    if b.previousOutput.clickedId == swatchId:
+      b.requestFocus()
+      storage.open = not storage.open
+    elif b.wasFocusActivated():
+      storage.open = not storage.open
     let swatchHovered = b.wasHovered(b.stack[^1], includeChildren = true)
-    let swatchOpen = b.focusedNode == swatchId
     discard b.fillBackground()
     discard b.backgroundColor(value)
-    discard b.borderWidth(if swatchOpen or swatchHovered: 2.0'f32 else: 1.0'f32)
-    discard b.borderColor(if swatchOpen or swatchHovered: b.themeStyle(UiStyleIndexButtonHover)[].borderColor
+    discard b.borderWidth(if storage.open or swatchHovered: 2.0'f32 else: 1.0'f32)
+    discard b.borderColor(if storage.open or swatchHovered: b.themeStyle(UiStyleIndexButtonHover)[].borderColor
                           else: b.themeStyle(UiStyleIndexButton)[].borderColor)
+    discard b.focusHighlight()
 
-  if b.previousOutput.clickedId == swatchId:
-    if b.focusedNode == swatchId:
-      b.focusedNode = noneNodeId()
-    else:
-      b.focusedNode = swatchId
-
-  let pickerOpen = b.focusedNode == swatchId
-  let storage = getOrCreateColorPickerStorage(b, b.nodes[swatchIdx].addr)
+  let pickerOpen = storage.open
 
   if pickerOpen and not storage.openPrev:
     let (h, s, v) = rgbToHsv(value)
@@ -332,13 +334,13 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
     value = hsvToRgb(storage.h, storage.s, storage.v, storage.a)
 
   if pickerOpen and KeyEscape in b.frameCtx.input.keysPressed:
-    b.focusedNode = noneNodeId()
+    storage.open = false
 
   if pickerOpen and MouseLeft in b.frameCtx.input.mousePressed:
     let swatchHovered: bool = swatchIdx >= 0 and b.wasHovered(swatchIdx, includeChildren = true)
     let popupHovered: bool = popupIdx >= 0 and b.wasHovered(popupIdx, includeChildren = true)
     if not swatchHovered and not popupHovered and not b.wasHovered(pickerIdx, includeChildren = true):
-      b.focusedNode = noneNodeId()
+      storage.open = false
 
-  storage.openPrev = pickerOpen
+  storage.openPrev = storage.open
   changed

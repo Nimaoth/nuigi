@@ -314,6 +314,22 @@ proc buildFontWrappingTest() =
     "font-wrapping-test-nim2"
   )
 
+proc buildFocusTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/ui-focus-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_focus_test.nim",
+      "ui-focus-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/ui-focus-test-nimony.exe --path:src {passthroughArgs} tests/ui_focus_test.nim",
+      "ui-focus-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
 proc buildUiTestNimony() =
   echo "buildUiTestNimony"
   let passthroughArgs = passthroughArgs.join(" ")
@@ -484,6 +500,7 @@ proc main() =
 
   of "test":
     buildUiTest(compiler)
+    buildFocusTest(compiler)
     if compiler == Nim2:
       buildFontWrappingTest()
     buildTreeTableRefreshTest(compiler)
@@ -495,6 +512,9 @@ proc main() =
 
   of "font-wrapping-test":
     buildFontWrappingTest()
+
+  of "focus-test":
+    buildFocusTest(compiler)
 
   of "tree-table-refresh-bench":
     buildTreeTableRefreshBench(compiler)
