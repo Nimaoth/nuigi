@@ -2,7 +2,7 @@ import std/[tables, assertions, os, hashes, syncio]
 import sdl3
 import mymath
 import render2d, fonts
-import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, windows
+import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, demo/gamepad_window, windows
 import profiler
 import profiler_ui
 import plot
@@ -14,6 +14,7 @@ var b: UiBuilder
 var gUiExampleInitialized = false
 var gShowDemoWindow = true
 var gShowSettingsWindow = true
+var gShowGamepadWindow = true
 var gRender2D: Render2D
 var gFontRender: FontRender
 when defined(wasm):
@@ -232,6 +233,7 @@ type SdlInputAccum = object
   textInput: string
 
 var gInputAccum: SdlInputAccum
+var gGamepadInput: DemoGamepadInput
 
 func toUiMouseButton(button: uint8): UiMouseButton =
   case button
@@ -250,6 +252,8 @@ func toUiModifiers(m: Keymod): UiModifiers =
 
 proc accumulateSdlInput(ev: var Event) =
   prof("accumulateSdlInput")
+  if gGamepadInput.handleEvent(ev):
+    return
   case ev.`type`
   of EVENT_MOUSE_MOTION:
     gInputAccum.mouse = vec2(ev.motion.x, ev.motion.y)
@@ -338,11 +342,12 @@ proc beginInputFrame() =
   gInputAccum.keysPressed = {}
   gInputAccum.keysReleased = {}
   gInputAccum.keysRepeated = {}
+  gGamepadInput.beginFrame()
   gInputAccum.textInput.setLen(0)
   gHadInputThisFrame = false
 
 proc makeInputSnapshot(): UiInputSnapshot =
-  UiInputSnapshot(
+  result = UiInputSnapshot(
     frameIndex: gInputAccum.frameIndex,
     mouse: gInputAccum.mouse,
     mouseDelta: gInputAccum.mouseDelta,
@@ -357,6 +362,7 @@ proc makeInputSnapshot(): UiInputSnapshot =
     modsDown: gInputAccum.modsDown,
     textInput: gInputAccum.textInput,
   )
+  gGamepadInput.applyToSnapshot(result)
 
 proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY: float32, precision: int) =
   b.layoutHorizontal:
@@ -453,6 +459,12 @@ proc buildSettingsWindow(b: var UiBuilder) =
           b.node():
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+            discard b.text("Gamepad Input")
+          discard b.checkbox("", gShowGamepadWindow)
+
+          b.node():
+            discard b.fit()
+            discard b.copyTextStyleIndex(UiStyleIndexLabelText)
             discard b.text("Theme Editor")
           var x = b.showThemeEditor
           discard b.checkbox("", x)
@@ -514,6 +526,9 @@ proc buildUi(b: var UiBuilder) =
     if gShowDemoWindow:
       b.window("Demo", 400, 100, 800, 900):
         b.buildDemoUi()
+
+    if gShowGamepadWindow:
+      gGamepadInput.buildGamepadWindow(b)
 
     if gShowNuiProfiler:
       b.window("Profiler", 1200, 100, 700, 1000):
@@ -1083,6 +1098,7 @@ proc main(quitImmediately: bool) =
       while running:
         mainLoop()
 
+    gGamepadInput.shutdown()
     destroyWindow(gWindow)
 
 var quitImmediately = false
