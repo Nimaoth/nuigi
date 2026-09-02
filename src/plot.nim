@@ -33,7 +33,11 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     0
 
   let segCount = resolution - 1
-  let perSeries = segCount * 6 * 2
+  let aaHalfWidth = min(max(0.0'f32, b.antialiasMeshWidth) * 0.5'f32,
+    max(0.0'f32, lineThickness) * 0.5'f32)
+  let hasAaRing = aaHalfWidth > 0.0'f32
+  let lineVtxPerSegment = if hasAaRing: 18 else: 6
+  let perSeries = segCount * (6 + lineVtxPerSegment)
   let total = perSeries * series.len + overlayVtx
   let data = cast[nil ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(total * sizeof(UiVertex)))
   if data == nil:
@@ -74,9 +78,12 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
       data[vertexIndex] = UiVertex(pos: bBase, color: bottom); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: aBase, color: bottom); inc vertexIndex
 
-  let half = lineThickness * 0.5'f32
+  let half = max(0.0'f32, lineThickness) * 0.5'f32
+  let solidHalf = half - aaHalfWidth
+  let outerHalf = half + aaHalfWidth
   for s in 0 ..< series.len:
     let col = series[s].lineColor
+    let clearColor = UiColor(r: col.r, g: col.g, b: col.b, a: 0.0'f32)
     for i in 0 ..< segCount:
       let a = points[s * resolution + i]
       let bpt = points[s * resolution + i + 1]
@@ -84,17 +91,36 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
       let len = dir.length
       if len <= 0.0'f32:
         continue
-      let n = vec2(-dir.y, dir.x) * (half / len)
-      let a0 = a + n
-      let a1 = a - n
-      let b0 = bpt + n
-      let b1 = bpt - n
+      let normal = vec2(-dir.y, dir.x) / len
+      let solidNormal = normal * solidHalf
+      let a0 = a + solidNormal
+      let a1 = a - solidNormal
+      let b0 = bpt + solidNormal
+      let b1 = bpt - solidNormal
       data[vertexIndex] = UiVertex(pos: a0, color: col); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: b0, color: col); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: b1, color: col); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: a0, color: col); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: b1, color: col); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: a1, color: col); inc vertexIndex
+      if hasAaRing:
+        let outerNormal = normal * outerHalf
+        let outerA0 = a + outerNormal
+        let outerA1 = a - outerNormal
+        let outerB0 = bpt + outerNormal
+        let outerB1 = bpt - outerNormal
+        data[vertexIndex] = UiVertex(pos: a0, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerA0, color: clearColor); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerB0, color: clearColor); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: a0, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerB0, color: clearColor); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: b0, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: a1, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: b1, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerB1, color: clearColor); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: a1, color: col); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerB1, color: clearColor); inc vertexIndex
+        data[vertexIndex] = UiVertex(pos: outerA1, color: clearColor); inc vertexIndex
 
   let cmdCount = 1 + (if useMouse: series.len else: 0)
   var commands = b.frame.arena[].allocEmptyArray(max(1, cmdCount), UiRenderCommand)

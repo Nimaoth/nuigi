@@ -60,7 +60,7 @@ when defined(profiler) and not defined(nimony):
   var gprof* = Profiler(
     stopOnThreshold: false,
     stopThreshold: 10,
-    record: true,
+    record: false,
     scaleX: 0.5'f32,
     plotScale: 8.0'f32,
     frameStart: 0,

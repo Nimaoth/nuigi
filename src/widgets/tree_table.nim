@@ -908,7 +908,8 @@ proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
     return
   let dir = if userData == 1: vec2(0.0'f32, 1.0'f32) else: vec2(1.0'f32, 0.0'f32)
   let color = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
-  let (data, count) = buildChevronVertices(arena, innerPos, innerSize, dir, color)
+  let (data, count) = buildChevronVertices(arena, innerPos, innerSize, dir, color,
+    antialiasMeshWidth = b.antialiasMeshWidth)
   if data == nil or count == 0:
     return
   var cmds = arena[].allocEmptyArray(1, UiRenderCommand)

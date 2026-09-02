@@ -821,6 +821,8 @@ type
       ## Per-node flag: whether new animation tracks may be created this frame.
     anythingAnimating*: bool
       ## True if any animation is actively stepping this frame.
+    antialiasMeshWidth*: float32
+      ## Width in pixels of alpha fringes around rectangle fill and border meshes; zero disables them.
     windows*: UiNodeId
       ## ID of the window-space root node (windows layer).
     overlays*: UiNodeId
@@ -2535,7 +2537,7 @@ template traceUiNode*(b: UiBuilder, eventName: string, idx: int): untyped =
       )
 
 proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMeshFn = nil,
-  textHeight = 16.0'f32): UiBuilder =
+  textHeight = 16.0'f32, antialiasMeshWidth = 0.0'f32): UiBuilder =
   ## Create a new UiBuilder with default theme styles and the given text metrics.
   let frameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
   let previousFrameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
@@ -2557,6 +2559,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     themeTextStyles: initDefaultThemeTextStyles(),
     animations: @[],
     animationSpeed: 1.0'f32,
+    antialiasMeshWidth: max(0.0'f32, antialiasMeshWidth),
     defaultText: UiNodeText(measuredTextDirty: true, fontSize: textHeight, textColor: UiColor(r: 0.92'f32, g: 0.92'f32, b: 0.92'f32, a: 1.0'f32)),
     defaultStyle: UiStyle(),
     defaultAnchor: UiNodeAnchor(),
@@ -3765,7 +3768,8 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
             let n = b.frame.nodes[nodeIdx].addr
             let absPos = b.absoluteNodePos(nodeIdx)
             let (vertexData, vertexCount) = buildRectStrokeVertices(
-              b.frame.arena, absPos, n.size, highlightColor, 0.0'f32, 3.0'f32)
+              b.frame.arena, absPos, n.size, highlightColor, 0.0'f32, 3.0'f32,
+              b.antialiasMeshWidth)
             if vertexData != nil and vertexCount > 0:
               b.frameOutput.commands.add(UiRenderCommand(
                 kind: CmdRawVertices,
@@ -3829,9 +3833,11 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
 
   if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
     let (vertexData, vertexCount) = if nodeStyle[].hasPerCornerRadii:
-      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor, nodeStyle.cornerRadii)
+      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor,
+        nodeStyle.cornerRadii, b.antialiasMeshWidth)
     else:
-      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor, nodeStyle.cornerRadius)
+      buildRectFillVertices(b.frame.arena, absPos, absSize, nodeStyle.fillColor,
+        nodeStyle.cornerRadius, b.antialiasMeshWidth)
     if not transform.isIdentity():
       for n in 0..<vertexCount:
         vertexData[n].pos = transform * vertexData[n].pos
@@ -3916,9 +3922,12 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
 
   block:
     let (vertexData, vertexCount) = if nodeStyle[].hasPerCornerRadii or nodeStyle[].hasPerSideBorderWidths or nodeStyle[].hasPerSideBorderColors:
-      buildRectStrokeVertices(b.frame.arena, absPos, absSize, nodeStyle[].resolvedBorderColors, nodeStyle[].resolvedCornerRadii, nodeStyle[].resolvedBorderWidths)
+      buildRectStrokeVertices(b.frame.arena, absPos, absSize,
+        nodeStyle[].resolvedBorderColors, nodeStyle[].resolvedCornerRadii,
+        nodeStyle[].resolvedBorderWidths, b.antialiasMeshWidth)
     else:
-      buildRectStrokeVertices(b.frame.arena, absPos, absSize, nodeStyle[].borderColor, nodeStyle[].cornerRadius, nodeStyle[].borderWidth)
+      buildRectStrokeVertices(b.frame.arena, absPos, absSize, nodeStyle[].borderColor,
+        nodeStyle[].cornerRadius, nodeStyle[].borderWidth, b.antialiasMeshWidth)
     if not transform.isIdentity():
       for n in 0..<vertexCount:
         vertexData[n].pos = transform * vertexData[n].pos

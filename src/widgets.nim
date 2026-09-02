@@ -278,7 +278,7 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
         if MouseLeft in input.mousePressed and popupIdx >= 0 and not b.wasHovered(popupIdx, includeChildren = true):
           inOpen = false
 
-proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical = true): bool =
+proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical = false): bool =
   prof("checkbox")
   var boxNodeId = noneNodeId()
   var previousBoxNodeIndex = -1
@@ -287,7 +287,7 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
   var isFocused = false
 
   discard b.pushId(label)
-  b.layoutHorizontalReverse:
+  b.layoutHorizontal:
     b.debugName("checkbox")
     discard b.fitX().fitY()
     discard b.gap(6)
@@ -297,6 +297,12 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     let parent = b.currentParent
     if fillXInVertical and parent != nil and LayoutVertical in parent.flags:
       discard b.fillX()
+
+    if label != "":
+      b.node("checkbox-label"):
+        discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+        discard b.fitX().fitY().alignCenter()
+        discard b.text(label)
 
     b.node():
       discard b.padding(2).fit()
@@ -326,13 +332,6 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
 
         if b.wasHovered(boxNodeIdx, includeChildren = true):
           discard b.styleIndex(UiStyleIndexCheckboxHover)
-
-    if label != "":
-      b.node("checkbox-label"):
-        # discard b.padding(4)
-        discard b.copyTextStyleIndex(UiStyleIndexLabelText)
-        discard b.fillX().fitX().fitY().alignCenter()
-        discard b.text(label)
     if b.wasClicked(boxNodeIdx, includeChildren = true):
       b.requestFocus()
     focusActivated = b.wasFocusActivated()

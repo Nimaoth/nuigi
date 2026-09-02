@@ -31,6 +31,7 @@ type
     vertices: nil ptr UncheckedArray[UiVertex]
     count: int
     capacity: int
+    antialiasMeshWidth: float32
 
 func mixColor(a, b: UiColor, amount: float32): UiColor =
   let t = clamp(amount, 0.0'f32, 1.0'f32)
@@ -48,10 +49,6 @@ proc addTriangle(writer: var MeshWriter, a, b, c: Vec2, color: UiColor) =
   writer.vertices[writer.count] = UiVertex(pos: b, color: color); inc writer.count
   writer.vertices[writer.count] = UiVertex(pos: c, color: color); inc writer.count
 
-proc addQuad(writer: var MeshWriter, a, b, c, d: Vec2, color: UiColor) =
-  writer.addTriangle(a, b, c, color)
-  writer.addTriangle(a, c, d, color)
-
 proc addCircle(writer: var MeshWriter, center: Vec2, radius: float32, color: UiColor,
     scale = vec2(1.0'f32), offset = vec2(0.0'f32), rotation = 0.0'f32) =
   let cosine = cos(rotation.float64).float32
@@ -63,22 +60,86 @@ proc addCircle(writer: var MeshWriter, center: Vec2, radius: float32, color: UiC
       local.x * sine + local.y * cosine,
     )
   let transformedCenter = transform(center)
+  let aaHalfWidth = max(0.0'f32, writer.antialiasMeshWidth) * 0.5'f32
+  let innerRadius = max(0.0'f32, radius - aaHalfWidth)
+  let outerRadius = radius + aaHalfWidth
+  let clearColor = rgba(color.r, color.g, color.b, 0.0'f32)
   for segment in 0 ..< CircleSegments:
     let angle0 = segment.float32 / CircleSegments.float32 * PI.float32 * 2.0'f32
     let angle1 = (segment + 1).float32 / CircleSegments.float32 * PI.float32 * 2.0'f32
-    let point0 = transform(center + vec2(cos(angle0.float64).float32, sin(angle0.float64).float32) * radius)
-    let point1 = transform(center + vec2(cos(angle1.float64).float32, sin(angle1.float64).float32) * radius)
-    writer.addTriangle(transformedCenter, point0, point1, color)
+    let direction0 = vec2(cos(angle0.float64).float32, sin(angle0.float64).float32)
+    let direction1 = vec2(cos(angle1.float64).float32, sin(angle1.float64).float32)
+    let inner0 = transform(center + direction0 * innerRadius)
+    let inner1 = transform(center + direction1 * innerRadius)
+    writer.addTriangle(transformedCenter, inner0, inner1, color)
+    if aaHalfWidth > 0.0'f32:
+      let outer0 = transform(center + direction0 * outerRadius)
+      let outer1 = transform(center + direction1 * outerRadius)
+      writer.addTriangle(inner0, outer0, outer1, color)
+      writer.vertices[writer.count - 2].color = clearColor
+      writer.vertices[writer.count - 1].color = clearColor
+      writer.addTriangle(inner0, outer1, inner1, color)
+      writer.vertices[writer.count - 2].color = clearColor
+
+func cross2(a, b: Vec2): float32 {.inline.} =
+  a.x * b.y - a.y * b.x
+
+func offsetPolygonPoint(points: openArray[Vec2], pointIndex: int,
+    distance, normalSign: float32): Vec2 =
+  let previous = points[(pointIndex + points.len - 1) mod points.len]
+  let current = points[pointIndex]
+  let following = points[(pointIndex + 1) mod points.len]
+  let previousDirection = (current - previous).normalize()
+  let followingDirection = (following - current).normalize()
+  let previousNormal = vec2(-previousDirection.y, previousDirection.x) * normalSign
+  let followingNormal = vec2(-followingDirection.y, followingDirection.x) * normalSign
+  let previousLine = current + previousNormal * distance
+  let followingLine = current + followingNormal * distance
+  let denominator = previousDirection.cross2(followingDirection)
+  if abs(denominator) <= 1e-6'f32:
+    return current + previousNormal * distance
+  let lineDistance = (followingLine - previousLine).cross2(followingDirection) / denominator
+  previousLine + previousDirection * lineDistance
 
 proc addPolygon(writer: var MeshWriter, points: openArray[Vec2], color: UiColor) =
   if points.len < 3:
     return
+  let aaHalfWidth = max(0.0'f32, writer.antialiasMeshWidth) * 0.5'f32
+  var signedArea = 0.0'f32
+  for pointIndex in 0 ..< points.len:
+    signedArea += points[pointIndex].cross2(points[(pointIndex + 1) mod points.len])
+  let normalSign = if signedArea < 0.0'f32: 1.0'f32 else: -1.0'f32
   var center = vec2(0.0'f32)
-  for point in points:
-    center += point
+  for pointIndex in 0 ..< points.len:
+    let centerPoint = if aaHalfWidth > 0.0'f32:
+      points.offsetPolygonPoint(pointIndex, -aaHalfWidth, normalSign)
+    else:
+      points[pointIndex]
+    center += centerPoint
   center = center / points.len.float32
   for index in 0 ..< points.len:
-    writer.addTriangle(center, points[index], points[(index + 1) mod points.len], color)
+    let nextIndex = (index + 1) mod points.len
+    let inner0 = if aaHalfWidth > 0.0'f32:
+      points.offsetPolygonPoint(index, -aaHalfWidth, normalSign)
+    else:
+      points[index]
+    let inner1 = if aaHalfWidth > 0.0'f32:
+      points.offsetPolygonPoint(nextIndex, -aaHalfWidth, normalSign)
+    else:
+      points[nextIndex]
+    writer.addTriangle(center, inner0, inner1, color)
+    if aaHalfWidth > 0.0'f32:
+      let outer0 = points.offsetPolygonPoint(index, aaHalfWidth, normalSign)
+      let outer1 = points.offsetPolygonPoint(nextIndex, aaHalfWidth, normalSign)
+      let clearColor = rgba(color.r, color.g, color.b, 0.0'f32)
+      writer.addTriangle(inner0, outer0, outer1, color)
+      writer.vertices[writer.count - 2].color = clearColor
+      writer.vertices[writer.count - 1].color = clearColor
+      writer.addTriangle(inner0, outer1, inner1, color)
+      writer.vertices[writer.count - 2].color = clearColor
+
+proc addQuad(writer: var MeshWriter, a, b, c, d: Vec2, color: UiColor) =
+  writer.addPolygon([a, b, c, d], color)
 
 func transformPoint(point, pivot, offset, scale: Vec2, rotation: float32): Vec2 =
   let local = (point - pivot) * scale
@@ -250,7 +311,8 @@ proc buildControllerMesh(b: var UiBuilder, gamepad: var DemoGamepad,
     b.frame.arena[].alloc(MaxVertices * sizeof(UiVertex)))
   if vertexData == nil:
     return default(ArrayView[UiRenderCommand])
-  var writer = MeshWriter(vertices: vertexData, capacity: MaxVertices)
+  var writer = MeshWriter(vertices: vertexData, capacity: MaxVertices,
+    antialiasMeshWidth: b.antialiasMeshWidth)
 
   gamepad.updateVisualState(b)
   let controlColor = b.themeStyle(UiStyleIndexPanel)[].borderColor

@@ -34,6 +34,11 @@ var gRenderOnDemand = true
 var gHadInputThisFrame = false
 var gNumFramesWithoutInput = 0
 
+when defined(emscripten):
+  const defaultAntialiasMeshWidth = 1.0'f32
+else:
+  const defaultAntialiasMeshWidth = 0.0'f32
+
 # --- per-frame plot history for the settings window graphs ----------------------
 const PlotHistoryLen = 256
 var gMetricHistory: array[3, array[PlotHistoryLen, float32]]
@@ -206,7 +211,8 @@ proc ensureUiExampleInitialized() =
   if gUiExampleInitialized:
     return
 
-  b = newBuilder(uiSdlArrangeText, uiSdlBuildTextMesh)
+  b = newBuilder(uiSdlArrangeText, uiSdlBuildTextMesh,
+    antialiasMeshWidth = defaultAntialiasMeshWidth)
   discard b.addThemeTextStyle UiNodeText(
     text: "hello world".uiString,
     fontId: testFont,
@@ -426,17 +432,25 @@ proc buildSettingsWindow(b: var UiBuilder) =
           discard b.text("Rendering")
 
         b.tableLayout([tableColumnFit(), tableColumnFill()], 14, 10):
-          discard b.fit()
+          discard b.fillX().fitY()
+          when not defined(wasm):
+            b.node():
+              discard b.fit()
+              discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+              discard b.text("MSAA Samples")
+            if b.dropdown(["1x", "2x", "4x", "8x"], gMsaaSelected):
+              case gMsaaSelected
+              of 0: gSampleCount = GPU_SAMPLECOUNT_1
+              of 1: gSampleCount = GPU_SAMPLECOUNT_2
+              of 2: gSampleCount = GPU_SAMPLECOUNT_4
+              else: gSampleCount = GPU_SAMPLECOUNT_8
+
           b.node():
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
-            discard b.text("MSAA Samples")
-          if b.dropdown(["1x", "2x", "4x", "8x"], gMsaaSelected):
-            case gMsaaSelected
-            of 0: gSampleCount = GPU_SAMPLECOUNT_1
-            of 1: gSampleCount = GPU_SAMPLECOUNT_2
-            of 2: gSampleCount = GPU_SAMPLECOUNT_4
-            else: gSampleCount = GPU_SAMPLECOUNT_8
+            discard b.text("Mesh AA Width")
+          discard b.dragFloat(b.antialiasMeshWidth, defaultAntialiasMeshWidth,
+            0.0'f32, 4.0'f32)
 
           b.node():
             discard b.fit()

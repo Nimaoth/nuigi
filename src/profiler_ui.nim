@@ -8,7 +8,7 @@ import profiler
 
 include compat2
 
-var gShowNuiProfiler* = true
+var gShowNuiProfiler* = false
 
 # Proxy state used by the nuigi controls (the underlying `gprof` fields use the
 # same types, but some widgets only accept `var float32`, so we mirror them).
