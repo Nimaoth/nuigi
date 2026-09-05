@@ -9,14 +9,14 @@ struct VSInput {
     float2 position : TEXCOORD0;
     float2 uv : TEXCOORD1;
     float4 color : TEXCOORD2;
-    uint texture: TEXCOORD3;
+    uint textureIndex : TEXCOORD3;
 };
 
 struct VSOutput {
     float4 pos : SV_POSITION;
     float2 uv : TEXCOORD0;
     float4 color : TEXCOORD1;
-    nointerpolation uint texture : MATERIAL_ID;
+    nointerpolation uint textureIndex : MATERIAL_ID;
 };
 
 struct PSOutput {
@@ -47,7 +47,7 @@ VSOutput VSMain(VSInput input) {
     output.pos = mul(mvp, float4(input.position, 0.0, 1.0));
     output.color = input.color;
     output.uv = input.uv;
-    output.texture = input.texture;
+    output.textureIndex = input.textureIndex;
     return output;
 }
 
@@ -55,9 +55,9 @@ PSOutput PSMain(VSOutput input) {
     PSOutput output;
     float4 texColor;
     // texColor = u_texture0.Sample(u_sampler0, input.uv);
-    if (input.texture == 0) {
+    if (input.textureIndex == 0) {
         texColor = u_texture0.Sample(u_sampler0, input.uv);
-    } else if (input.texture == 1) {
+    } else if (input.textureIndex == 1) {
         texColor = u_texture1.Sample(u_sampler1, input.uv);
     } else {
         texColor = u_texture2.Sample(u_sampler2, input.uv);

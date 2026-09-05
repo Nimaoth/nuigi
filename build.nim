@@ -143,6 +143,26 @@ proc mesonCommand(args: string): string =
     return &"\"{windowsMesonPath}\" {args}"
   return &"meson {args}"
 
+proc requireProgram(program, installHint: string) =
+  if findExe(program).len == 0:
+    echo "Required build program not found: ", program
+    echo installHint
+    quit(1)
+
+proc copyLinuxLibrary(searchDir, libraryName: string) =
+  var found = false
+  createDir("build")
+  createDir("bin")
+  for path in walkDirRec(searchDir, yieldFilter = {pcFile, pcLinkToFile}):
+    let name = extractFilename(path)
+    if name == libraryName or name.startsWith(libraryName & "."):
+      found = true
+      copyFile(path, "build" / name)
+      copyFile(path, "bin" / name)
+  if not found:
+    echo "Could not find ", libraryName, " under ", searchDir
+    quit(1)
+
 proc buildSdl3(debug = false) =
   echo "buildSdl3"
   createDir("vendor")
@@ -150,11 +170,18 @@ proc buildSdl3(debug = false) =
     shell("git clone https://github.com/libsdl-org/SDL", "vendor")
 
   let mode = if debug: "Debug" else: "Release"
-  shell &"\"{findMsBuild()}\" VisualC/SDL/SDL.vcxproj /p:Configuration={mode} /p:Platform=x64", "vendor/SDL"
-  createDir("build")
-  createDir("bin")
-  copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.dll", "./bin/SDL3.dll"
-  copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.lib", "./build/SDL3.lib"
+  when defined(windows):
+    shell &"\"{findMsBuild()}\" VisualC/SDL/SDL.vcxproj /p:Configuration={mode} /p:Platform=x64", "vendor/SDL"
+    createDir("build")
+    createDir("bin")
+    copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.dll", "./bin/SDL3.dll"
+    copyFile &"vendor/SDL/VisualC/SDL/x64/{mode}/SDL3.lib", "./build/SDL3.lib"
+  else:
+    requireProgram("cmake", "On Ubuntu: sudo apt install cmake")
+    let buildDir = "build/sdl3"
+    shell &"cmake -S vendor/SDL -B {buildDir} -DCMAKE_BUILD_TYPE={mode} -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF"
+    shell &"cmake --build {buildDir} --config {mode} --parallel"
+    copyLinuxLibrary(buildDir, "libSDL3.so")
 
 proc buildSdl3Wasm() =
   # Build SDL3 as a static wasm library with the Emscripten toolchain so it can
@@ -193,10 +220,17 @@ proc buildFreetype(debug = false) =
   if not dirExists("vendor/freetype"):
     shell("git clone https://gitlab.freedesktop.org/freetype/freetype.git", "vendor")
   let mode = if debug: "Debug" else: "Release"
-  shell &"\"{findMsBuild()}\" -t:Rebuild -p:Configuration={mode} -p:Platform=x64 MSBuild.sln", "vendor/freetype"
-  createDir("build")
-  copyFile &"vendor/freetype/objs/x64/{mode}/freetype.dll", "./bin/freetype.dll"
-  copyFile &"vendor/freetype/objs/x64/{mode}/freetype.lib", "./build/freetype.lib"
+  when defined(windows):
+    shell &"\"{findMsBuild()}\" -t:Rebuild -p:Configuration={mode} -p:Platform=x64 MSBuild.sln", "vendor/freetype"
+    createDir("build")
+    copyFile &"vendor/freetype/objs/x64/{mode}/freetype.dll", "./bin/freetype.dll"
+    copyFile &"vendor/freetype/objs/x64/{mode}/freetype.lib", "./build/freetype.lib"
+  else:
+    requireProgram("cmake", "On Ubuntu: sudo apt install cmake")
+    let buildDir = "build/freetype"
+    shell &"cmake -S vendor/freetype -B {buildDir} -DCMAKE_BUILD_TYPE={mode} -DBUILD_SHARED_LIBS=ON -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE -DFT_DISABLE_ZLIB=TRUE"
+    shell &"cmake --build {buildDir} --config {mode} --parallel"
+    copyLinuxLibrary(buildDir, "libfreetype.so")
 
 proc buildHarfbuzz() =
   echo "buildHarfbuzz"
@@ -205,21 +239,26 @@ proc buildHarfbuzz() =
     shell("git clone https://github.com/harfbuzz/harfbuzz", "vendor")
 
   createDir("build")
-  let llvmBin = llvmBinDir()
-  let clangExe = if llvmBin.len > 0: "\"" & (llvmBin / "clang++.exe") & "\"" else: "clang++.exe"
+  when defined(windows):
+    let llvmBin = llvmBinDir()
+    let clangExe = if llvmBin.len > 0: "\"" & (llvmBin / "clang++.exe") & "\"" else: "clang++.exe"
 
-  # Make sure the LLVM bin dir (containing lld-link.exe) is on PATH so that
-  # -fuse-ld=lld-link resolves, both locally and on CI where LLVM may live in a
-  # location that is not on PATH.
-  let prevEnv = gShellEnv
-  if llvmBin.len > 0:
-    let basePath = if gShellEnv.hasKey("PATH"): gShellEnv["PATH"] else: getEnv("PATH")
-    gShellEnv["PATH"] = llvmBin & ";" & basePath
+    # Make sure the LLVM bin dir (containing lld-link.exe) is on PATH so that
+    # -fuse-ld=lld-link resolves, both locally and on CI where LLVM may live in a
+    # location that is not on PATH.
+    let prevEnv = gShellEnv
+    if llvmBin.len > 0:
+      let basePath = if gShellEnv.hasKey("PATH"): gShellEnv["PATH"] else: getEnv("PATH")
+      gShellEnv["PATH"] = llvmBin & ";" & basePath
 
-  shell &"{clangExe} -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
+    shell &"{clangExe} -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
 
-  gShellEnv = prevEnv
-  copyFile &"build/harfbuzz.dll", "./bin/harfbuzz.dll"
+    gShellEnv = prevEnv
+    copyFile &"build/harfbuzz.dll", "./bin/harfbuzz.dll"
+  else:
+    requireProgram("clang++", "On Ubuntu: sudo apt install clang")
+    shell "clang++ -shared -fPIC -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/libharfbuzz.so ./vendor/harfbuzz/src/harfbuzz.cc"
+    copyFile "build/libharfbuzz.so", "bin/libharfbuzz.so"
 
 proc buildFribidi() =
   echo "buildFribidi"
@@ -227,32 +266,40 @@ proc buildFribidi() =
   if not dirExists("vendor/fribidi"):
     shell("git clone https://github.com/fribidi/fribidi", "vendor")
 
-  let fribidiBuildDir = "build-shared-vs"
-  let fribidiSetupCmd = mesonCommand(&"setup {fribidiBuildDir} --default-library=shared -Ddocs=false -Dtests=false -Dbin=false")
-  if dirExists("vendor/fribidi/" & fribidiBuildDir):
-    shell(fribidiSetupCmd & " --reconfigure", "vendor/fribidi")
+  when defined(windows):
+    let fribidiBuildDir = "build-shared-vs"
+    let fribidiSetupCmd = mesonCommand(&"setup {fribidiBuildDir} --default-library=shared -Ddocs=false -Dtests=false -Dbin=false")
+    if dirExists("vendor/fribidi/" & fribidiBuildDir):
+      shell(fribidiSetupCmd & " --reconfigure", "vendor/fribidi")
+    else:
+      shell(fribidiSetupCmd & " --backend=vs", "vendor/fribidi")
+
+    shell &"\"{findMsBuild()}\" /m /v:minimal fribidi.sln", "vendor/fribidi/" & fribidiBuildDir
+
+    createDir("build")
+    var builtDll = ""
+    var builtLib = ""
+    for path in walkDirRec("vendor/fribidi/" & fribidiBuildDir):
+      let lowerPath = path.toLowerAscii()
+      if builtDll.len == 0 and lowerPath.endsWith(".dll") and lowerPath.contains("fribidi"):
+        builtDll = path
+      if builtLib.len == 0 and lowerPath.endsWith(".lib") and lowerPath.contains("fribidi"):
+        builtLib = path
+
+    if builtDll.len == 0:
+      echo "Could not find built FriBidi DLL in vendor/fribidi/", fribidiBuildDir
+      quit(1)
+
+    copyFile(builtDll, "./bin/fribidi.dll")
+    if builtLib.len > 0:
+      copyFile(builtLib, "./build/fribidi.lib")
   else:
-    shell(fribidiSetupCmd & " --backend=vs", "vendor/fribidi")
-
-  shell &"\"{findMsBuild()}\" /m /v:minimal fribidi.sln", "vendor/fribidi/" & fribidiBuildDir
-
-  createDir("build")
-  var builtDll = ""
-  var builtLib = ""
-  for path in walkDirRec("vendor/fribidi/" & fribidiBuildDir):
-    let lowerPath = path.toLowerAscii()
-    if builtDll.len == 0 and lowerPath.endsWith(".dll") and lowerPath.contains("fribidi"):
-      builtDll = path
-    if builtLib.len == 0 and lowerPath.endsWith(".lib") and lowerPath.contains("fribidi"):
-      builtLib = path
-
-  if builtDll.len == 0:
-    echo "Could not find built FriBidi DLL in vendor/fribidi/", fribidiBuildDir
-    quit(1)
-
-  copyFile(builtDll, "./bin/fribidi.dll")
-  if builtLib.len > 0:
-    copyFile(builtLib, "./build/fribidi.lib")
+    requireProgram("meson", "On Ubuntu: sudo apt install meson")
+    let buildDir = "build/fribidi"
+    let reconfigure = if dirExists(buildDir): " --reconfigure" else: ""
+    shell &"meson setup {buildDir} vendor/fribidi --buildtype=release --default-library=shared -Ddocs=false -Dtests=false -Dbin=false{reconfigure}"
+    shell &"meson compile -C {buildDir}"
+    copyLinuxLibrary(buildDir, "libfribidi.so")
 
 proc buildNuiDemo(compiler: NimCompiler) =
   let passthroughArgs = passthroughArgs.join(" ")
@@ -267,7 +314,13 @@ proc buildNuiDemo(compiler: NimCompiler) =
   else:
     gShellEnv = initTable[string, string]()
   echo "buildNuiDemo"
-  let sdlLink = if wasm: "--passL:-Lbuild/sdl3_wasm --passL:-lSDL3" else: "--passL:-Lbuild"
+  let sdlLink =
+    if wasm:
+      "--passL:-Lbuild/sdl3_wasm --passL:-lSDL3"
+    elif defined(windows):
+      "--passL:-Lbuild"
+    else:
+      "--passL:-Lbuild --passL:'-Wl,-rpath,\\$ORIGIN'"
   case compiler
   of Nim2:
     shell &"nim c {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
@@ -367,9 +420,19 @@ proc buildUiTestNimony() =
   )
 
 proc buildShader() =
-  shell "dxc.exe -T vs_6_0 -E VSMain ./src/nuigi/rendering/shaders/basic.hlsl -Fo ./assets/basic.vert.dxil"
-  shell "dxc.exe -T ps_6_0 -E PSMain ./src/nuigi/rendering/shaders/basic.hlsl -Fo ./assets/basic.frag.dxil"
-  shell "dxc.exe -T ps_6_0 -E PSMain ./src/nuigi/rendering/shaders/custom.frag.hlsl -Fo ./assets/custom.frag.dxil"
+  when defined(windows):
+    requireProgram("dxc.exe", "Install the DirectX Shader Compiler and add it to PATH")
+    shell "dxc.exe -T vs_6_0 -E VSMain ./src/nuigi/rendering/shaders/basic.hlsl -Fo ./assets/basic.vert.dxil"
+    shell "dxc.exe -T ps_6_0 -E PSMain ./src/nuigi/rendering/shaders/basic.hlsl -Fo ./assets/basic.frag.dxil"
+    shell "dxc.exe -T ps_6_0 -E PSMain ./src/nuigi/rendering/shaders/custom.frag.hlsl -Fo ./assets/custom.frag.dxil"
+  elif defined(linux):
+    requireProgram("glslc", "On Ubuntu: sudo apt install glslc")
+    shell "glslc -x hlsl -fshader-stage=vert -fentry-point=VSMain ./src/nuigi/rendering/shaders/basic.hlsl -o ./assets/basic.vert.spv"
+    shell "glslc -x hlsl -fshader-stage=frag -fentry-point=PSMain ./src/nuigi/rendering/shaders/basic.hlsl -o ./assets/basic.frag.spv"
+    shell "glslc -x hlsl -fshader-stage=frag -fentry-point=PSMain ./src/nuigi/rendering/shaders/custom.frag.hlsl -o ./assets/custom.frag.spv"
+  else:
+    echo "Shader compilation is not implemented for this platform"
+    quit(1)
 
 proc buildUiTest(compiler: NimCompiler) =
   case compiler
@@ -503,6 +566,11 @@ proc main() =
     removeDir("./build", false)
 
   of "demo":
+    when defined(linux):
+      if not fileExists("assets/basic.vert.spv") or
+          not fileExists("assets/basic.frag.spv") or
+          not fileExists("assets/custom.frag.spv"):
+        buildShader()
     buildNuiDemo(compiler)
 
   of "test":
@@ -544,6 +612,11 @@ proc main() =
     buildHarfbuzz()
     buildFribidi()
     buildUiTest(compiler)
+    when defined(linux):
+      if not fileExists("assets/basic.vert.spv") or
+          not fileExists("assets/basic.frag.spv") or
+          not fileExists("assets/custom.frag.spv"):
+        buildShader()
     buildNuiDemo(compiler)
 
   else:

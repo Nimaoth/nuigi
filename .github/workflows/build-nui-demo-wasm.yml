@@ -21,6 +21,86 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  build-linux:
+    name: Build and test native demo on Linux
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout the repo
+        uses: actions/checkout@v4.1.7
+
+      - name: Install Linux build and runtime dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential clang cmake meson ninja-build pkg-config glslc \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxfixes-dev \
+            libxi-dev libxss-dev libxtst-dev libxkbcommon-dev \
+            libvulkan1 mesa-vulkan-drivers vulkan-tools xvfb xauth
+
+      - name: Install Nim (nightly)
+        uses: iffy/install-nim@v5
+        with:
+          version: nightly:https://github.com/nim-lang/nightlies/releases/tag/2025-10-31-version-2-2-ab00c56904e3126ad826bb520d243513a139436a
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Nim compilation artifacts
+        uses: actions/cache@v4
+        with:
+          path: build/nimcache
+          key: ${{ runner.os }}-nim2-${{ hashFiles('build.nim', 'config.nims', 'nim.cfg', 'src/**/*.nim', 'tests/**/*.nim', 'examples/**/*.nim') }}-1
+          restore-keys: |
+            ${{ runner.os }}-nim2-
+
+      - name: Compile build.nim
+        run: nim c -o:build.exe build.nim
+
+      - name: Cache native dependencies
+        id: linux-deps-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/SDL
+            vendor/freetype
+            vendor/harfbuzz
+            vendor/fribidi
+            build/sdl3
+            build/freetype
+            build/fribidi
+            build/lib*.so*
+            bin/lib*.so*
+          key: ${{ runner.os }}-native-deps-${{ hashFiles('build.nim') }}-1
+
+      - name: Build native dependencies
+        if: ${{ steps.linux-deps-cache.outputs.cache-hit != 'true' }}
+        run: ./build.exe deps
+
+      - name: Build SPIR-V shaders
+        run: ./build.exe shader
+
+      - name: Run Nim 2 tests
+        run: ./build.exe test --nim2
+
+      - name: Build native demo
+        run: ./build.exe demo --nim2
+
+      - name: Smoke-test Vulkan demo
+        run: xvfb-run -a ./bin/demo.exe --test
+
+      - name: Stage native demo
+        run: |
+          mkdir -p native-demo
+          cp bin/demo.exe native-demo/
+          cp bin/*.so* native-demo/
+          cp -R assets native-demo/assets
+
+      - name: Upload native demo
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuigi-demo-linux
+          path: native-demo
+          if-no-files-found: error
+
   build-and-deploy:
     name: Build nuigi-demo (wasm) on Windows
     runs-on: windows-2022

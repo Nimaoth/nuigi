@@ -1021,7 +1021,7 @@ proc mainLoop() {.cdecl.} =
 
 proc main(quitImmediately: bool) =
   sdl3.setLogPriorities(LOG_PRIORITY_VERBOSE)
-  assert sdl3.init(INIT_VIDEO or INIT_GAMEPAD or INIT_EVENTS or INIT_AUDIO), "std init"
+  assert sdl3.init(INIT_VIDEO or INIT_GAMEPAD or INIT_EVENTS), "std init"
   echo "sdl init ok"
 
   # var audioSystem = AudioSystem()
@@ -1069,13 +1069,18 @@ proc main(quitImmediately: bool) =
 
   else:
     discard gFontRender.init()
-    var gpu = createGPUDevice(GPU_SHADERFORMAT_DXIL.uint32, debug, "direct3d12")
+    when defined(linux):
+      var gpu = createGPUDevice(GPU_SHADERFORMAT_SPIRV.uint32, debug, "vulkan")
+      const customFragPath = "./assets/custom.frag.spv"
+    else:
+      var gpu = createGPUDevice(GPU_SHADERFORMAT_DXIL.uint32, debug, "direct3d12")
+      const customFragPath = "./assets/custom.frag.dxil"
     discard gpu.claimWindowForGPUDevice(gWindow)
 
     discard initRender2D(gRender2D, gFontRender.addr, gpu, render2DTargetFormat)
-    if fileExists("./assets/custom.frag.dxil"):
+    if fileExists(customFragPath):
       try:
-        var customFrag = readFile("./assets/custom.frag.dxil")
+        var customFrag = readFile(customFragPath)
         if customFrag.len > 0:
           var customBytes = newSeq[uint8](customFrag.len)
           copyMem(customBytes[0].addr, customFrag.readRawData(), customFrag.len)

@@ -3,7 +3,7 @@
 ## Owns pipelines, materials, samplers, textures, staging buffers, and font
 ## atlas uploads, then translates `UiRenderCommand`s into SDL GPU passes.
 ## Applications must initialize and destroy `Render2D` against the same GPU
-## device and provide the compiled DXIL shaders from `assets/`.
+## device and provide the platform shaders compiled into `assets/`.
 
 import std/[os, syncio, times, tables, strutils, math]
 import nuigi/backend/sdl3/sdl3
@@ -15,11 +15,24 @@ const
   render2DTargetFormat* = GPU_TEXTUREFORMAT_B8G8R8A8_UNORM
   basicVertDxilPath* = "./assets/basic.vert.dxil"
   basicFragDxilPath* = "./assets/basic.frag.dxil"
+  basicVertSpirvPath* = "./assets/basic.vert.spv"
+  basicFragSpirvPath* = "./assets/basic.frag.spv"
   propTextureCreateFormat* = "SDL.texture.create.format".cstring
   propTextureCreateAccess* = "SDL.texture.create.access".cstring
   propTextureCreateWidth* = "SDL.texture.create.width".cstring
   propTextureCreateHeight* = "SDL.texture.create.height".cstring
   propTextureCreateGpuTexture* = "SDL.texture.create.gpu.texture".cstring
+
+when defined(linux):
+  const
+    render2DShaderFormat* = GPU_SHADERFORMAT_SPIRV.uint32
+    basicVertShaderPath* = basicVertSpirvPath
+    basicFragShaderPath* = basicFragSpirvPath
+else:
+  const
+    render2DShaderFormat* = GPU_SHADERFORMAT_DXIL.uint32
+    basicVertShaderPath* = basicVertDxilPath
+    basicFragShaderPath* = basicFragDxilPath
 
 type
   Render2DSamplerMode* {.pure.} = enum
@@ -353,7 +366,7 @@ proc loadShaderFromFile(device: GPUDevice, path: string, stage: GPUShaderStage, 
     code_size: code.len.csize_t,
     code: codePtr,
     entrypoint: entrypoint,
-    format: GPU_SHADERFORMAT_DXIL.uint32,
+    format: render2DShaderFormat,
     stage: stage,
     num_samplers: numSamplers,
     num_storage_textures: 0'u32,
@@ -520,7 +533,7 @@ proc registerMaterial*(r: var Render2D, fragmentShader: openArray[uint8], numUni
     code_size: fragmentShader.len.csize_t,
     code: codePtr,
     entrypoint: "PSMain",
-    format: GPU_SHADERFORMAT_DXIL.uint32,
+    format: render2DShaderFormat,
     stage: GPU_SHADERSTAGE_FRAGMENT,
     num_samplers: 3,
     num_storage_textures: 0'u32,
@@ -602,12 +615,12 @@ proc releaseShaders*(r: var Render2D) =
 proc loadBasicShaders(r: var Render2D): bool =
   prof("Render2D.loadBasicShaders")
   if r.vertexShader == nil:
-    r.vertexShader = loadShaderFromFile(r.device, basicVertDxilPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
+    r.vertexShader = loadShaderFromFile(r.device, basicVertShaderPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
   if r.vertexShader == nil:
     return false
 
   if r.fragmentShader == nil:
-    r.fragmentShader = loadShaderFromFile(r.device, basicFragDxilPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
+    r.fragmentShader = loadShaderFromFile(r.device, basicFragShaderPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
   if r.fragmentShader == nil:
     return false
 
@@ -617,11 +630,11 @@ proc reloadShaders(r: var Render2D): bool =
   prof("Render2D.reloadShaders")
   r.releaseShaders()
 
-  r.vertexShader = loadShaderFromFile(r.device, basicVertDxilPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
+  r.vertexShader = loadShaderFromFile(r.device, basicVertShaderPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
   if r.vertexShader == nil:
     return false
 
-  r.fragmentShader = loadShaderFromFile(r.device, basicFragDxilPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
+  r.fragmentShader = loadShaderFromFile(r.device, basicFragShaderPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
   if r.fragmentShader == nil:
     return false
 

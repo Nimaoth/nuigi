@@ -5,6 +5,7 @@
 *.lib
 *.dll
 *.o
+bin
 assets
 build.json
 .nev-session

@@ -12,7 +12,7 @@ struct VSOutput {
     float4 pos : SV_POSITION;
     float2 uv : TEXCOORD0;
     float4 color : TEXCOORD1;
-    nointerpolation uint texture : MATERIAL_ID;
+    nointerpolation uint textureIndex : MATERIAL_ID;
 };
 
 struct PSOutput {
