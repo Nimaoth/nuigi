@@ -3,6 +3,7 @@ include "../compat2"
 import std/[math, assertions, random]
 import intro
 import big_example
+import faq_tree_table
 import "../nuigi", "../widgets", "../flex", "../plot", "../widgets/tree_table"
 import "../dynamic_virtuallist"
 import "../mymath", "../arena", "../array_view"
@@ -1931,6 +1932,7 @@ proc buildAllExamples(b: var UiBuilder)
 
 var examples = [
   (fun: buildIntroPage, scrollBox: true, title: "Intro"),
+  (fun: buildFaqTreeTableExample, scrollBox: false, title: "FAQ"),
   (fun: buildFillExamples, scrollBox: true, title: "Fill"),
   (fun: buildFitExamples, scrollBox: true, title: "Fit"),
   (fun: buildAnchorExamples, scrollBox: true, title: "Anchors"),
