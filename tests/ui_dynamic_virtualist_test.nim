@@ -1,4 +1,4 @@
-import nuigi, dynamic_virtuallist, mymath
+import nuigi, nuigi/widgets/dynamic_virtuallist, nuigi/core/vecmath
 
 {.passL: "-Lbuild".}
 

@@ -2,9 +2,9 @@ import std/[monotimes, os, tables, times]
 when defined(nimony):
   import std/[assertions, dirs]
 
-import widgets/file_system_cursor
+import nuigi/widgets/file_system_cursor
 
-include compat2
+include nuigi/util/compat2
 
 template benchAssert(condition: bool) =
   when defined(nimony):

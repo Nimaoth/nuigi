@@ -1,4 +1,4 @@
-import nuigi, windows, mymath
+import nuigi, nuigi/widgets/windows, nuigi/core/vecmath
 
 {.passL: "-Lbuild".}
 

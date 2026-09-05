@@ -1,9 +1,10 @@
 import std/os
 when defined(nimony):
   import std/dirs
-import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/tree_table, widgets/file_system_cursor
+import nuigi, nuigi/widgets, nuigi/layout/[flex, grid], nuigi/core/[vecmath, arena, array_view]
+import nuigi/widgets/[tree_table, file_system_cursor]
 
-include compat2
+include nuigi/util/compat2
 
 {.passL: "-Lbuild".}
 

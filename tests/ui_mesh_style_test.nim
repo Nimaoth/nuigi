@@ -1,4 +1,4 @@
-import nuigi, mesh, mymath, arena, array_view, plot
+import nuigi, nuigi/rendering/mesh, nuigi/core/[vecmath, arena, array_view], nuigi/widgets/plot
 
 when defined(nimony):
   import std/assertions

@@ -1,4 +1,4 @@
-import widgets/tree_table
+import nuigi/widgets/tree_table
 import tree_table_seek_test
 
 when defined(nimony):

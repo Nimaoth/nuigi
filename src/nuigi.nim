@@ -3,15 +3,15 @@ import std/[assertions]
 when defined(nimony):
   import std/tables
 
-include compat2
+include nuigi/util/compat2
 
-import mymath, arena, array_view
-import profiler
-import mesh
-import text
+import nuigi/core/[vecmath, arena, array_view]
+import nuigi/debug/profiler
+import nuigi/rendering/mesh
+import nuigi/text/text
 export mesh, text
 
-from "."/hash as nui_hash import Hash, `!&`, `!$`
+from nuigi/core/hash as nui_hash import Hash, `!&`, `!$`
 
 type
   MaterialId* = uint64

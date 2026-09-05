@@ -1,6 +1,6 @@
 import std/[monotimes, times]
 
-import widgets/tree_table
+import nuigi/widgets/tree_table
 
 type
   BenchNode = ref object

@@ -1,14 +1,15 @@
 import std/[tables, assertions, os, hashes, syncio]
 import nuigi/backend/sdl3/sdl3
-import mymath
-import render2d, fonts
-import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, demo/gamepad_window, windows
-import profiler
-import profiler_ui
-import plot
-import timer
+import nuigi/core/vecmath
+import nuigi/rendering/render2d, nuigi/text/fonts
+import nuigi, nuigi/widgets, nuigi/debug/debug_panel, nuigi/styling/theme_editor
+import nuigi/demo/[demo_window, gamepad_window]
+import nuigi/widgets/windows
+import nuigi/debug/[profiler, profiler_ui]
+import nuigi/widgets/plot
+import nuigi/core/timer
 
-include compat2
+include nuigi/util/compat2
 
 
 var b: UiBuilder

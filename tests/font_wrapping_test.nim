@@ -1,4 +1,4 @@
-import fonts
+import nuigi/text/fonts
 
 proc lineCount(arrangement: UiTextArrangement): int =
   var baselines: seq[float32] = @[]

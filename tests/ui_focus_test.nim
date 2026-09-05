@@ -1,7 +1,7 @@
-import nuigi, mymath, widgets, colorpicker
-import widgets/tree_table
+import nuigi, nuigi/core/vecmath, nuigi/widgets, nuigi/widgets/colorpicker
+import nuigi/widgets/tree_table
 
-include compat2
+include nuigi/util/compat2
 
 when defined(nimony):
   import std/assertions

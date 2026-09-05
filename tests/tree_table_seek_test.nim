@@ -1,4 +1,4 @@
-import widgets/tree_table
+import nuigi/widgets/tree_table
 
 when defined(nimony):
   import std/assertions
