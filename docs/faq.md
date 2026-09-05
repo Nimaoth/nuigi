@@ -50,6 +50,12 @@ No. nuigi emits a flat list of rendering commands for rectangles, text, images, 
 
 The core nuigi library is platform independent: it consumes host-provided input and text callbacks and emits backend-agnostic rendering commands. The built-in SDL3 backend currently supports Windows and the web through WebAssembly. Linux support for that backend is planned.
 
+# Compilers and languages
+
+## Which compilers and languages does nuigi support?
+
+nuigi is written for Nim and supports both the Nim compiler and Nimony. It does not currently provide a C API, so using the library directly from C or other languages is not supported.
+
 # AI
 
 ## Is AI used to develop nuigi?
