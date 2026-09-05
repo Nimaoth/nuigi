@@ -62,8 +62,12 @@ type NimCompiler = enum
   NimonyLlvm
   Nlvm
 
+proc printCommandTiming(startedAt: float) =
+  echo "=== command finished in ", formatFloat(epochTime() - startedAt, ffDecimal, 3), " s ==="
+
 proc shell(command: string, workingDir: string = "") =
   echo "> ", command
+  let startedAt = epochTime()
   var p: Process
   if gShellEnv.len > 0:
     var envT: StringTableRef = newStringTable()
@@ -75,17 +79,20 @@ proc shell(command: string, workingDir: string = "") =
   else:
     p = startProcess(command, options = {poParentStreams, poUsePath, poEvalCommand}, workingDir = workingDir, env = nil)
   let res = p.waitForExit()
+  printCommandTiming(startedAt)
   if res != 0:
     echo "Command failed with code ", res, ": ", command
     quit(res)
 
 proc shellCapture(command: string, prefix: string, workingDir: string = "") =
   echo "> ", command
+  let startedAt = epochTime()
   let result = execCmdEx(
     command,
     workingDir = workingDir,
     options = {poUsePath, poEvalCommand, poStdErrToStdOut}
   )
+  printCommandTiming(startedAt)
   echo "=== ", prefix, " ==="
   if result.output.len > 0:
     stdout.write(result.output)
@@ -176,7 +183,7 @@ proc buildSdl3Wasm() =
       break
   if libPath == "":
     echo "wasm: could not find built SDL3 static library under build/sdl3_wasm"
-    quit(0)
+    quit(1)
   # copyFile(libPath, "./build/sdl3_wasm/libSDL3.a")
   echo "wasm: SDL3 wasm static lib ready at build/sdl3_wasm/libSDL3.a"
 
@@ -241,7 +248,7 @@ proc buildFribidi() =
 
   if builtDll.len == 0:
     echo "Could not find built FriBidi DLL in vendor/fribidi/", fribidiBuildDir
-    quit(0)
+    quit(1)
 
   copyFile(builtDll, "./bin/fribidi.dll")
   if builtLib.len > 0:
