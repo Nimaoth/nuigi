@@ -1,5 +1,5 @@
 import std/[tables, assertions, os, hashes, syncio]
-import sdl3
+import nuigi/backend/sdl3/sdl3
 import mymath
 import render2d, fonts
 import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, demo/gamepad_window, windows

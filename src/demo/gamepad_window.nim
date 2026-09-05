@@ -1,4 +1,4 @@
-import sdl3
+import nuigi/backend/sdl3/sdl3
 import mymath
 import arena, array_view, mesh, nuigi, widgets, windows
 

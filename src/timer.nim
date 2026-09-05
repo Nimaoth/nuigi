@@ -2,7 +2,7 @@
 when defined(emscripten):
   proc emscriptenGetNow(): float64 {.importc: "emscripten_get_now".}
 elif defined(sdl3):
-  import sdl3
+  import nuigi/backend/sdl3/sdl3
 else:
   import std/monotimes
 

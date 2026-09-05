@@ -1,5 +1,6 @@
 import std/[os, syncio, times, tables, strutils, math]
-import sdl3, profiler, mymath, fonts, nuigi, array_view
+import nuigi/backend/sdl3/sdl3
+import profiler, mymath, fonts, nuigi, array_view
 
 include compat2
 
