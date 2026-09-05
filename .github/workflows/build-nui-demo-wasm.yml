@@ -35,6 +35,31 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Clone Nimony
+        run: |
+          git clone https://github.com/nim-lang/nimony
+          git -C nimony checkout a843b98c91d1c57eb5e1f9e21b23435a3ad898ee
+
+      - name: Cache Nimony build
+        id: nimony-cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            nimony/bin
+            nimony/nimcache2
+            nimony/hastur.exe
+          key: ${{ runner.os }}-nimony-a843b98c91d1c57eb5e1f9e21b23435a3ad898ee
+
+      - name: Build Nimony
+        if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }}
+        working-directory: nimony
+        run: |
+          nim c -o:hastur.exe .\src\hastur.nim
+          .\hastur.exe --release build all
+
+      - name: Add Nimony to PATH
+        run: Add-Content $env:GITHUB_PATH "${{ github.workspace }}\nimony\bin"
+
       - name: Cache nimble modules / emsdk / nimcache
         id: cache
         uses: actions/cache@v3
@@ -82,14 +107,14 @@ jobs:
       - name: Build test nim2
         run: ./build.exe test --nim2
 
+      - name: Build test nimony
+        run: ./build.exe test --nimony
+
       - name: Build demo native
         run: ./build.exe demo
 
       - name: Run demo
         run: ./bin/demo.exe --test
-
-      # - name: Build test nimony
-      #   run: ./build.exe test --nimony
 
       # 2) Build the nuigi-demo as wasm (html + js + wasm) via the build tool.
       #    EMSDK is read by build.nim to activate the emscripten environment.
