@@ -1,5 +1,5 @@
 import std/[os, syncio, tables, unicode, strutils, math, hashes, assertions]
-import sdl3, profiler, mymath, text, mesh
+import profiler, timer, mymath, text, mesh
 export text
 
 include compat2
@@ -89,7 +89,7 @@ type
   TextMeshVertex* = object
     pos*: Vec2
     uv*: Vec2
-    color*: FColor
+    color*: UiColor
 
   TextMesh* = object
     data*: nil ptr UncheckedArray[TextMeshVertex]
@@ -100,7 +100,7 @@ type
     arrangement: UiTextArrangement
     pos: Vec2
     screenOffset: Vec2
-    color: FColor
+    color: UiColor
     transform: UiAffine2
     flags: FontRenderFlags
     vertices: seq[TextMeshVertex]
@@ -418,9 +418,9 @@ proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UIn
     return
 
   prof("packFontGlyphOnDemand")
-  let packingStart = getTicksNS()
+  let packingStart = timer.getTicksNS()
   if not r.ensureFtPixelSize(fontIndex, fontSize):
-    r.glyphPackingTimeNs += getTicksNS() - packingStart
+    r.glyphPackingTimeNs += timer.getTicksNS() - packingStart
     return
   let face = r.fonts[fontIndex].face
   var delta = FT_Vector(x: (subpixelPhase * glyphSubpixelStep26Dot6).clong, y: 0)
@@ -453,7 +453,7 @@ proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UIn
 
   var resetDelta = FT_Vector()
   FT_Set_Transform(face, nil, resetDelta)
-  r.glyphPackingTimeNs += getTicksNS() - packingStart
+  r.glyphPackingTimeNs += timer.getTicksNS() - packingStart
 
 when useHarfbuzz:
   proc tryBuildArrangementWithHarfBuzz(r: var FontRender, text: string, fontSize: float32, sizeIdx: int, asc: cfloat, desc: cfloat, arrangement: var UiTextArrangement, primaryFont: int, maxWidth: float32 = -1.0'f32): bool {.raises: [].} =
@@ -954,7 +954,7 @@ proc textMeshFlagsBits(flags: FontRenderFlags): uint64 {.inline, raises: [].} =
     result = result or 2'u64
 
 proc textMeshCacheKey(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
-    color: FColor, transform: UiAffine2, flags: FontRenderFlags): uint64 {.raises: [].} =
+    color: UiColor, transform: UiAffine2, flags: FontRenderFlags): uint64 {.raises: [].} =
   result = 14695981039346656037'u64
   result.mixTextMeshHash(arrangement.fontSize)
   result.mixTextMeshHash(arrangement.contentHash.uint64)
@@ -976,7 +976,7 @@ proc textMeshCacheKey(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
   result.mixTextMeshHash(arrangement.glyphs.len.uint64)
 
 proc cachedTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangement,
-    pos, screenOffset: Vec2, color: FColor, transform: UiAffine2): TextMesh {.raises: [].} =
+    pos, screenOffset: Vec2, color: UiColor, transform: UiAffine2): TextMesh {.raises: [].} =
   prof("cachedTextMesh")
   result = TextMesh()
   if r.textMeshCache.hasKey(key):
@@ -1003,7 +1003,7 @@ proc cachedTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangeme
         result.count = 0
 
 proc storeTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangement,
-    pos, screenOffset: Vec2, color: FColor, transform: UiAffine2,
+    pos, screenOffset: Vec2, color: UiColor, transform: UiAffine2,
     vertices: seq[TextMeshVertex], complete: bool): TextMesh {.raises: [].} =
   prof("storeTextMesh")
   result = TextMesh()
@@ -1041,7 +1041,7 @@ proc storeTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangemen
     result.count = entry.vertices.len
 
 proc buildTextMesh*(r: var FontRender, arrangement: UiTextArrangement,
-  pos, screenOffset: Vec2, color: FColor, transform: UiAffine2): TextMesh {.raises: [].} =
+  pos, screenOffset: Vec2, color: UiColor, transform: UiAffine2): TextMesh {.raises: [].} =
   if arrangement.glyphs.len == 0:
     return TextMesh()
 

@@ -1,5 +1,4 @@
 import std/[strutils]
-import sdl3
 import mymath, arena, array_view
 import nuigi
 import widgets
@@ -8,6 +7,8 @@ import profiler
 
 include compat2
 
+const NS_PER_MS: uint64     = 1000000
+const NS_PER_US: uint64     = 1000
 var gShowNuiProfiler* = false
 
 # Proxy state used by the nuigi controls (the underlying `gprof` fields use the

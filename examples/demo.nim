@@ -6,6 +6,7 @@ import nuigi, widgets, debug_panel, theme_editor, demo/demo_window, demo/gamepad
 import profiler
 import profiler_ui
 import plot
+import timer
 
 include compat2
 
@@ -129,8 +130,7 @@ proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, 
 
 proc uiSdlBuildTextMesh(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
     color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
-  let meshColor = FColor(r: color.r, g: color.g, b: color.b, a: color.a)
-  let mesh = gFontRender.buildTextMesh(arrangement, pos, screenOffset, meshColor, transform)
+  let mesh = gFontRender.buildTextMesh(arrangement, pos, screenOffset, color, transform)
   return (cast[nil ptr UncheckedArray[UiVertex]](mesh.data), mesh.count)
 
 proc themeEditorListFonts(): seq[(string, UiFontId)] {.raises: [], gcsafe.} =
@@ -211,8 +211,13 @@ proc ensureUiExampleInitialized() =
   if gUiExampleInitialized:
     return
 
+  proc openUrl(url: string): bool {.nimcall, raises: [].} =
+    var urlCopy = url
+    openURL(toCString(urlCopy))
+
   b = newBuilder(uiSdlArrangeText, uiSdlBuildTextMesh,
     antialiasMeshWidth = defaultAntialiasMeshWidth)
+  b.openUrlFn = openUrl
   discard b.addThemeTextStyle UiNodeText(
     text: "hello world".uiString,
     fontId: testFont,
@@ -886,18 +891,9 @@ when defined(wasm):
       else:
         discard
 
-proc perfNow*(): uint64 =
-  when not defined(nimony):
-    when defined(emscripten):
-      return uint64(emscriptenGetNow() * 1e6)
-    else:
-      return getTicksNS()
-  else:
-    return 0
-
 proc mainLoop() {.cdecl.} =
   try:
-    var now = perfNow().float64 / NS_PER_SECOND.float64
+    var now = timer.getTicksNS().float64 / NS_PER_SECOND.float64
     let dt = now - last
     last = now
 
@@ -913,7 +909,7 @@ proc mainLoop() {.cdecl.} =
     when defined(wasm):
       let renderer = gWindow.getRenderer()
 
-    let tickStart = (perfNow().float64 / NS_PER_MS.float64).float32
+    let tickStart = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32
 
     block:
       prof("tick")
@@ -998,7 +994,7 @@ proc mainLoop() {.cdecl.} =
             gRender2D.clear()
             b.renderNewUi()
 
-      let tickDt = (perfNow().float64 / NS_PER_MS.float64).float32 - tickStart
+      let tickDt = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32 - tickStart
       gFps = fps
       gFrame = dt * 1000
       gTick = tickDt
@@ -1103,7 +1099,7 @@ proc main(quitImmediately: bool) =
     discard gFontRender.addFontFace("assets/dontuse/fonts/ProFont Bold For Powerline.ttf")
 
   # Initialize shared loop state and start the loop.
-  last = perfNow().float64 / NS_PER_SECOND.float64 - 0.016
+  last = timer.getTicksNS().float64 / NS_PER_SECOND.float64 - 0.016
   fps = 60.0
   running = true
 

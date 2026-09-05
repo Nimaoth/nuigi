@@ -767,6 +767,8 @@ type
   UiBuildTextMeshFn* = proc(arrangement: UiTextArrangement, pos: Vec2,
     screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
     ## Callback that rasterizes `arrangement` into renderer-owned `UiVertex` data (runs during render-command build).
+  UiOpenUrlFn* = proc(url: string): bool {.nimcall, raises: [].}
+    ## Optional callback that asks the host application to open a URL.
 
   DragData* = object
     ## Data for the current drag operation, owned by `UiBuilder`.
@@ -886,6 +888,8 @@ type
       ## Callback that lays out text (set at `newBuilder`).
     buildTextMesh*: nil UiBuildTextMeshFn
       ## Optional callback that builds text meshes (set at `newBuilder`).
+    openUrlFn*: nil UiOpenUrlFn
+      ## Optional callback supplied by the host application for opening URLs.
     fonts*: Table[string, UiFontId]
       ## Maps font names to loaded font IDs.
     fontScale*: float32
@@ -2577,6 +2581,12 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
   result.frameOutput.clearFrameOutput()
   if result.themeStyles.len >= int(UiStyleIndexDefault):
     result.defaultStyle = result.themeStyles[int(UiStyleIndexDefault) - 1]
+
+proc openUrl*(b: var UiBuilder, url: string): bool {.raises: [].} =
+  let openUrlFn = b.openUrlFn
+  if openUrlFn != nil:
+    return openUrlFn(url)
+  false
 
 proc findNodeIndexById*(nodes: openArray[UiNode], id: UiNodeId, indexHint = -1): int =
   ## Find a node's index by its ID in a node array. Uses indexHint for a fast local search first.

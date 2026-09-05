@@ -1,5 +1,4 @@
 include "../compat2"
-import sdl3
 import "../nuigi", "../widgets"
 
 when not defined(nimony):
@@ -20,4 +19,4 @@ proc buildIntroPage*(b: var UiBuilder) =
       discard b.fillX().copyTextStyleIndex(UiStyleIndexMutedText).fontSize(14)
 
     if b.button("Open GitHub repository"):
-      discard openURL("https://github.com/Nimaoth/nuigi")
+      discard b.openUrl("https://github.com/Nimaoth/nuigi")

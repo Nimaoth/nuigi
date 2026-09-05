@@ -1,26 +1,14 @@
 import std/[tables, assertions, strutils]
+import timer
 
 include compat2
 
 when defined(profiler) and not defined(nimony):
-  import sdl3, mymath
-
-# Timing source:
-#   - native:          SDL_GetTicksNS  (nanoseconds)
-#   - wasm/emscripten: emscripten_get_now() -> performance.now() (ms, sub-ms
-#                      resolution), scaled to nanoseconds.
-# Timestamps are always stored as nanoseconds, so the display/path code is
-# identical on both backends and no precision is lost: performance.now() has
-# microsecond resolution and storing ns just appends three zero digits.
-when defined(emscripten):
-  proc emscriptenGetNow*(): float64 {.importc: "emscripten_get_now".}
+  import mymath
 
 proc profNow*(): uint64 =
   when defined(profiler) and not defined(nimony):
-    when defined(emscripten):
-      return uint64(emscriptenGetNow() * 1e6)
-    else:
-      return getTicksNS()
+    return timer.getTicksNS()
   else:
     return 0
 
@@ -208,7 +196,7 @@ when defined(profiler) and not defined(nimony):
 
   proc profilerBeginFrame*(setFrameStart = true) =
     proc toMs(ticks: uint64): float64 =
-      return ticks.float64 / NS_PER_MS.float64
+      return ticks.float64 / 1000000
     if gprof.record:
       let nowTicks = lastEventTimestamp("frame", gprof.frameIndex)
       if setFrameStart:
