@@ -110,11 +110,30 @@ jobs:
       - name: Build test nimony
         run: ./build.exe test --nimony
 
-      - name: Build demo native
-        run: ./build.exe demo
+      - name: Build demo native with Nim 2
+        run: ./build.exe demo --nim2
 
-      - name: Run demo
+      - name: Build demo native with Nimony
+        run: ./build.exe demo --nimony
+
+      - name: Run Nim 2 demo
         run: ./bin/demo.exe --test
+
+      - name: Stage native demos
+        run: |
+          New-Item -ItemType Directory -Force -Path native-demo | Out-Null
+          Copy-Item bin/demo.exe native-demo/
+          Copy-Item bin/demo-nimony.exe native-demo/
+          Copy-Item bin/*.dll native-demo/
+          Copy-Item *.dxil native-demo/
+          Copy-Item assets native-demo/assets -Recurse
+
+      - name: Upload native demos
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuigi-demo-windows
+          path: native-demo
+          if-no-files-found: error
 
       # 2) Build the nuigi-demo as wasm (html + js + wasm) via the build tool.
       #    EMSDK is read by build.nim to activate the emscripten environment.
