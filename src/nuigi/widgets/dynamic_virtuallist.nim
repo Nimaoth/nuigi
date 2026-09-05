@@ -1,3 +1,10 @@
+## Virtualized scrolling list for rows with variable, initially unknown heights.
+##
+## The list samples rendered row heights, estimates unmeasured content, and
+## builds only the visible range through a deferred callback. Its persistent
+## storage also adjusts scroll offsets when measurements change so the visible
+## anchor remains stable; a custom row layout can handle width-dependent rows.
+
 import nuigi
 import nuigi/debug/profiler
 

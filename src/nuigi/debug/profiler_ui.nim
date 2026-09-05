@@ -1,3 +1,10 @@
+## Nuigi visualization and controls for the optional profiler.
+##
+## Converts recorded event ranges into a flame graph and rolling statistics
+## into plot series, with controls for capture, scale, frame selection, and
+## stop conditions. The module mirrors some profiler fields in widget-friendly
+## scalar state and has useful data only when profiling was compiled in.
+
 import std/[strutils]
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi

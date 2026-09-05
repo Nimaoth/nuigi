@@ -1,3 +1,10 @@
+## FAQ data model, parser, and tree-table cursor used by the demo.
+##
+## Builds a topic/question/answer hierarchy, exposes it through `TreeCursor`,
+## and demonstrates stable-key tree refresh and custom row presentation. WASM
+## builds read the FAQ markdown at compile time; native builds use the seeded
+## content established by this module.
+
 include nuigi/util/compat2
 
 import nuigi, nuigi/widgets, nuigi/layout/flex, nuigi/widgets/tree_table

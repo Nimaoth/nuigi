@@ -1,3 +1,10 @@
+## Allocation and bookkeeping for the rasterized glyph atlas.
+##
+## `FontAtlas` tracks packed glyph rectangles by font and integer size, grows
+## up to a configured maximum, and records dirty bounds for partial GPU
+## uploads. Packing and rasterization are performed by `text/fonts`; this
+## module only owns atlas placement, cache records, and reset/resize state.
+
 import std/tables
 include nuigi/util/compat2
 

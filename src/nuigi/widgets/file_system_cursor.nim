@@ -1,3 +1,10 @@
+## Filesystem-backed `TreeCursor` implementation for tree-table widgets.
+##
+## Each cursor clone has independent navigation state while sharing a cache of
+## sorted directory listings and entry kinds. Paths are the stable node keys;
+## refresh or replace the cache when external filesystem changes must become
+## visible.
+
 import std/os
 import std/algorithm
 import std/strutils
@@ -7,7 +14,6 @@ when defined(nimony):
 
 import nuigi/widgets/tree_table, nuigi/debug/profiler
 
-# Shared, clone-transparent cache of directory listings and entry kinds.
 type
   FileSystemEntryKind* = enum
     File, Folder
@@ -33,8 +39,6 @@ proc newFileSystemCache*(): FileSystemCache =
   result.listings = initTable[string, seq[string]]()
   result.kinds = initTable[string, FileSystemEntryKind]()
 
-# A cursor that walks a directory tree. Each node is a file or directory rooted
-# at the working directory.
 type
   FileSystemCursor* = ref object of TreeCursor
     cache*: FileSystemCache

@@ -1,3 +1,11 @@
+## Virtualized hierarchical table driven by a navigable `TreeCursor`.
+##
+## Concrete cursors expose stable keys and cloneable navigation over arbitrary
+## trees. `TreeTable` persists expansion state in an intrinsic indexed tree,
+## reconciles it when source data changes, and exposes only visible rows to the
+## dynamic virtual list. Cursor instances represent positions and must not be
+## shared as mutable traversal state.
+
 import nuigi
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/rendering/mesh
@@ -8,8 +16,6 @@ import nuigi/widgets/dynamic_virtuallist, nuigi/debug/profiler
 
 include nuigi/util/compat2
 
-# A cursor identifies a node within a value tree and can be navigated with the
-# moveNext/enterChild/exitChild/movePrev methods. Concrete types subclass it.
 type
   TreeCursor* = ref object of RootRef
     fieldName*: string

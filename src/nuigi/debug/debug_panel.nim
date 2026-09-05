@@ -1,3 +1,10 @@
+## In-application diagnostics panel for inspecting a live nuigi builder.
+##
+## Provides allocation-light DFS traversal of the previous frame's node tree,
+## virtualized node details, source navigation, UI memory and command statistics,
+## animation counts, and event-trace controls. It is debug tooling rather than
+## part of the widget API.
+
 import nuigi
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler

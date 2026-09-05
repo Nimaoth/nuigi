@@ -1,4 +1,9 @@
-
+// Default vertex and fragment shader pair for Render2D.
+//
+// The vertex stage applies the frame projection and forwards UV, color, and
+// texture selection. The fragment stage samples one of the bound textures and
+// outputs premultiplied UI color. Register spaces follow SDL3 GPU conventions;
+// keep them synchronized with the bindings created in rendering/render2d.nim.
 
 struct VSInput {
     float2 position : TEXCOORD0;

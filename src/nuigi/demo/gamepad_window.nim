@@ -1,3 +1,10 @@
+## SDL3 gamepad input adapter and interactive controller visualization.
+##
+## Discovers connected pads, translates their buttons and axes into nuigi's
+## navigation-neutral input snapshot, and renders live controller state with
+## raw UI meshes. SDL handles are owned here and must follow the module's
+## open/update/close lifecycle.
+
 import nuigi/backend/sdl3/sdl3
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/rendering/mesh, nuigi, nuigi/widgets, nuigi/widgets/windows

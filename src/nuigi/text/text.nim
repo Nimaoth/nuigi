@@ -1,3 +1,10 @@
+## Renderer-independent records for measured and shaped text.
+##
+## A `UiTextArrangement` stores the glyph IDs, font selection, positions,
+## metrics, and content hash produced by the application's text measurement
+## callback. The UI core caches these arrangements before a renderer turns
+## them into atlas-backed meshes.
+
 import std/hashes, nuigi/core/vecmath
 
 type

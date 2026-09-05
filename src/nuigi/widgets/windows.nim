@@ -1,3 +1,9 @@
+## Draggable, resizable, collapsible windows and their containing window space.
+##
+## Per-window geometry lives in node storage. The window space separately
+## tracks a monotonic activation order and performs deferred construction so
+## active windows render on top without making callers reorder their code.
+
 import std/sequtils
 import nuigi
 import nuigi/core/vecmath

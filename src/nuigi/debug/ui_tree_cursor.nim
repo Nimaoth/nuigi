@@ -1,13 +1,15 @@
+## Adapts a completed nuigi node tree to the generic tree-table cursor API.
+##
+## The cursor walks `UiBuilder.previousFrame` directly and intentionally does
+## no caching. Its creation-time cutoff excludes nodes built by the inspector
+## itself, preventing the debug tree from recursively displaying its own rows;
+## the builder must outlive every cursor clone.
+
 import nuigi
 import nuigi/widgets/tree_table
 
 include nuigi/util/compat2
 
-# Walks the live UiBuilder node tree without caching.
-# Each call recomputes children from `builder.previousFrame.nodes` links.
-# `cutoff` snapshots `frame.nodes.len` at cursor creation so the
-# virtual-list rows created for the tree-table itself are not
-# visible as children (avoids self-recursion). No other caching.
 type
   UiTreeCursor* = ref object of TreeCursor
     builder*: ptr UiBuilder

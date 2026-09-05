@@ -1,3 +1,10 @@
+## Flexbox-style layout extension for nuigi nodes.
+##
+## Stores flex container and child properties in builder-side arrays and
+## resolves direction, wrapping, basis, growth, shrinkage, gaps, alignment,
+## and justification through nuigi's custom-layout hook. Configure children
+## before their containing node is closed and laid out.
+
 import nuigi, nuigi/core/[arena, array_view], nuigi/debug/profiler
 
 type

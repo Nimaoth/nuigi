@@ -1,3 +1,10 @@
+## Detailed flex and grid playgrounds used by the demo catalog.
+##
+## Holds shared option tables and mutable example settings, then builds visual
+## scenarios for direction, wrapping, alignment, tracks, placement, and gaps.
+## This module demonstrates layout APIs rather than defining layout behavior;
+## the engines themselves live in `nuigi/layout/flex` and `nuigi/layout/grid`.
+
 import std/[math]
 import nuigi, nuigi/widgets, nuigi/layout/[flex, grid]
 import nuigi/core/[vecmath, arena, array_view]

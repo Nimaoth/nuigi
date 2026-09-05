@@ -1,3 +1,9 @@
+## Grid layout extension built on nuigi's custom-layout mechanism.
+##
+## Supports pixel, fractional, and automatic tracks; explicit or automatic
+## child placement; row/column flow; gaps; and flex-style alignment. Grid
+## metadata is arena-backed and indexed alongside the frame's UI nodes.
+
 import nuigi, nuigi/layout/flex, nuigi/core/[arena, array_view, vecmath], nuigi/debug/profiler
 
 type

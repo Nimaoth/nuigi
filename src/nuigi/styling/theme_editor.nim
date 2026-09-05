@@ -1,3 +1,10 @@
+## Interactive editor for nuigi style and text-theme slots.
+##
+## Builds a virtualized UI for inspecting colors, typography, borders, and
+## generated primary-color themes. `ThemeEditor` holds selection and list
+## state between frames; optional callbacks let the host enumerate and resolve
+## its own fonts without coupling this module to a font backend.
+
 import nuigi
 import nuigi/core/vecmath
 import nuigi/debug/profiler

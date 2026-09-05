@@ -1,3 +1,10 @@
+## Compile-time optional frame and scoped-event profiler.
+##
+## With `-d:profiler` under Nim 2, instrumentation records timestamped begin/end
+## events and rolling frame statistics in global buffers for `profiler_ui`.
+## Without that define, or under Nimony, the public timing hooks collapse to
+## inexpensive no-ops so instrumented call sites need no conditional code.
+
 import std/[tables, assertions, strutils]
 import nuigi/core/timer
 

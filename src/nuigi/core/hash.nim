@@ -1,4 +1,8 @@
-# This is a fork of Nim2 stdlib hash.nim, but with `int` replaced with `int64`.
+## Stable 64-bit hashing primitives used for UI IDs and internal tables.
+##
+## This is a fork of Nim 2's standard `hashes` implementation with its hash
+## integer widened to `uint64`. Build compound hashes with `!&`, then finalize
+## them with `!$`.
 
 include nuigi/util/compat2
 

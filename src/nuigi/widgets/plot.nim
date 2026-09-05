@@ -1,3 +1,10 @@
+## Immediate-mode line and filled-area plot geometry.
+##
+## Callers describe each series with a sampling function and axis ranges;
+## `buildPlotVertices` emits raw UI render commands with optional antialiased
+## lines, fills, and a mouse crosshair. Sampling is uniform in X, so resolution
+## controls both cost and visual fidelity.
+
 import std/strutils
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler, nuigi, nuigi/rendering/mesh

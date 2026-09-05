@@ -1,3 +1,10 @@
+## Renderer-independent UI geometry and render-command definitions.
+##
+## Provides colors, vertices, affine transforms, rounded-corner and border
+## data, plus mesh builders for filled and stroked shapes with optional
+## antialiasing. `UiRenderCommand` is the contract between the UI core and a
+## concrete renderer such as `render2d`.
+
 import nuigi/core/[vecmath, arena]
 import nuigi/debug/profiler
 

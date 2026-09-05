@@ -1,3 +1,9 @@
+## HSV color conversion helpers and an interactive color-picker widget.
+##
+## The picker combines saturation/value, hue, and alpha controls rendered as
+## custom meshes. `ColorPickerStorage` persists both HSV state and popup state
+## under the widget's stable node ID, while the public value remains `UiColor`.
+
 import std/math
 import nuigi, nuigi/core/[array_view, arena, vecmath], nuigi/debug/profiler
 import nuigi/rendering/mesh

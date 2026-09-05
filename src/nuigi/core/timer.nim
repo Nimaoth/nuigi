@@ -1,4 +1,9 @@
-# Monotonic timestamps in nanoseconds across supported backends.
+## Monotonic nanosecond timestamps for profiling and frame bookkeeping.
+##
+## The implementation selects Emscripten, SDL3, or the Nim standard monotonic
+## clock at compile time. Values are suitable for elapsed-time measurements,
+## not wall-clock dates.
+
 when defined(emscripten):
   proc emscriptenGetNow(): float64 {.importc: "emscripten_get_now".}
 elif defined(sdl3):

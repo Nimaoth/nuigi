@@ -1,3 +1,9 @@
+## Introductory page for the bundled nuigi demo.
+##
+## Builds the short project overview and repository link shown by the demo
+## window. The exported dummy builder proc is a Nim 2 code-generation
+## workaround and is not part of the UI example itself.
+
 include nuigi/util/compat2
 import nuigi, nuigi/widgets
 

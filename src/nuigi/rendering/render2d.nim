@@ -1,3 +1,10 @@
+## SDL3 GPU renderer for nuigi's renderer-independent command stream.
+##
+## Owns pipelines, materials, samplers, textures, staging buffers, and font
+## atlas uploads, then translates `UiRenderCommand`s into SDL GPU passes.
+## Applications must initialize and destroy `Render2D` against the same GPU
+## device and provide the compiled DXIL shaders from `assets/`.
+
 import std/[os, syncio, times, tables, strutils, math]
 import nuigi/backend/sdl3/sdl3
 import nuigi/debug/profiler, nuigi/core/[vecmath, array_view], nuigi/text/fonts, nuigi

@@ -1,3 +1,10 @@
+## Main catalog of interactive nuigi feature demonstrations.
+##
+## Composes tabs and examples for sizing, layout, controls, scrolling,
+## virtualized data, plots, trees, and platform-dependent filesystem browsing.
+## Module-level variables intentionally preserve demo control values between
+## immediate-mode frames; production widgets should prefer node storage.
+
 include nuigi/util/compat2
 
 import std/[math, assertions, random]

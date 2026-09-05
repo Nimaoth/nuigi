@@ -1,3 +1,10 @@
+## Standard controls built from nuigi's low-level node API.
+##
+## Contains labels, buttons, checkboxes, sliders, text fields, tooltips,
+## scroll boxes, fixed-height virtual lists, and related helpers. Stateful
+## controls use stable node IDs and `UiNodeStorageData`; many scrolling widgets
+## defer child construction until the viewport size is known.
+
 import std/math
 import nuigi
 import nuigi/core/[vecmath, arena, array_view]

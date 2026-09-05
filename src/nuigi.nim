@@ -1,3 +1,11 @@
+## Core of nuigi's immediate-mode UI system.
+##
+## A `UiBuilder` rebuilds an arena-backed node tree each frame, preserves
+## state through stable node IDs, resolves layout in multiple passes, and
+## emits renderer-independent `UiRenderCommand`s. Higher-level controls are
+## implemented in `nuigi/widgets`; this module owns their low-level building,
+## layout, interaction, focus, animation, storage, and rendering primitives.
+
 import std/[assertions]
 
 when defined(nimony):

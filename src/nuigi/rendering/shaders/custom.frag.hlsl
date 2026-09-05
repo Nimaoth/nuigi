@@ -1,3 +1,9 @@
+// Demo fragment effect used to exercise Render2D custom materials.
+//
+// `params.x` supplies time and `params.yz` the mouse position in normalized
+// UV coordinates. SDL3 requires fragment-stage uniform buffers in space3, so
+// the binding must remain aligned with Render2D's custom-material setup.
+
 cbuffer Effect : register(b0, space3) { // SDL3 requires fragment uniforms to use space3
     float4 params; // x = time, yz = mouse uv (0..1), w = unused
 };

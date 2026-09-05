@@ -1,3 +1,10 @@
+## Non-owning, mutable views over contiguous memory.
+##
+## `ArrayView` carries a pointer, logical length, and capacity so arena-backed
+## arrays and C-compatible buffers can use open-array-like indexing and
+## iteration without allocating. The caller must keep the underlying storage
+## alive and must not grow a view beyond its capacity.
+
 import std/assertions
 
 include nuigi/util/compat2

@@ -1,3 +1,9 @@
+## Segmented stack allocator used for short-lived UI data.
+##
+## Small allocations are served from reusable buckets. Savepoints allow a
+## group of allocations to be released together, while oversized allocations
+## receive dedicated buckets. `Arena` owns its buckets and cannot be copied.
+
 import std/[assertions]
 import nuigi/core/array_view
 
@@ -5,9 +11,6 @@ include nuigi/util/compat2
 
 const defaultBucketSize = 4 * 1024
 
-# This is a stack memory allocator which uses a segmented stack / arena / buckets
-# Small allocations reuse the same memory over and over, big allocations
-# are allocated in new buckets, and freed when restoring the stack size to a save point.
 type
   Bucket = object
     # data: seq[uint8]

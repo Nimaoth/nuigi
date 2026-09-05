@@ -1,3 +1,10 @@
+## Generates a complete nuigi theme from one primary color.
+##
+## Surface, border, interaction, and text slots are derived in HSV space so
+## callers receive arrays compatible with `UiBuilder`'s style indices. This is
+## a palette factory; runtime style lookup and per-node overrides remain in the
+## UI core.
+
 import std/math
 import nuigi
 import nuigi/widgets/colorpicker

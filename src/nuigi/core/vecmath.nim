@@ -1,3 +1,9 @@
+## Small vector and matrix math layer shared by layout and rendering.
+##
+## Defines generic 2D/3D/4D vectors, integer vectors, `Mat4`, component-wise
+## operators, interpolation, geometry helpers, and transforms. Most operations
+## are inlined; the module also re-exports `std/math` for its scalar helpers.
+
 import std/[math, hashes]
 export math
 
