@@ -11,6 +11,7 @@ switch("stackTrace", "off")
 switch("d", "nuiDebug")
 switch("d", "profiler")
 switch("path", "src")
+switch("hints", "off")
 
 when defined(wasm):
   echo "build wasm"

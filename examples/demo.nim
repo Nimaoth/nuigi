@@ -1076,9 +1076,9 @@ proc main(quitImmediately: bool) =
     discard gpu.claimWindowForGPUDevice(gWindow)
 
     discard initRender2D(gRender2D, gFontRender.addr, gpu, render2DTargetFormat)
-    if fileExists("./custom.frag.dxil"):
+    if fileExists("./assets/custom.frag.dxil"):
       try:
-        var customFrag = readFile("./custom.frag.dxil")
+        var customFrag = readFile("./assets/custom.frag.dxil")
         if customFrag.len > 0:
           var customBytes = newSeq[uint8](customFrag.len)
           copyMem(customBytes[0].addr, customFrag.readRawData(), customFrag.len)
@@ -1088,7 +1088,7 @@ proc main(quitImmediately: bool) =
         discard
 
     discard gFontRender.addSystemDefaultFonts()
-    discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Regular.ttf")
+    # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Regular.ttf")
     # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-MediumItalic.ttf")
     # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-Medium.ttf")
     # discard gFontRender.addFontFace("assets/fonts/Ubuntu/Ubuntu-LightItalic.ttf")

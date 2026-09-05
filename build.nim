@@ -367,9 +367,9 @@ proc buildUiTestNimony() =
   )
 
 proc buildShader() =
-  shell "dxc.exe -T vs_6_0 -E VSMain ./src/basic.hlsl -Fo basic.vert.dxil"
-  shell "dxc.exe -T ps_6_0 -E PSMain ./src/basic.hlsl -Fo basic.frag.dxil"
-  shell "dxc.exe -T ps_6_0 -E PSMain ./src/custom.frag.hlsl -Fo custom.frag.dxil"
+  shell "dxc.exe -T vs_6_0 -E VSMain ./src/basic.hlsl -Fo ./assets/basic.vert.dxil"
+  shell "dxc.exe -T ps_6_0 -E PSMain ./src/basic.hlsl -Fo ./assets/basic.frag.dxil"
+  shell "dxc.exe -T ps_6_0 -E PSMain ./src/custom.frag.hlsl -Fo ./assets/custom.frag.dxil"
 
 proc buildUiTest(compiler: NimCompiler) =
   case compiler

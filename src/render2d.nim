@@ -5,8 +5,8 @@ include compat2
 
 const
   render2DTargetFormat* = GPU_TEXTUREFORMAT_B8G8R8A8_UNORM
-  basicVertDxilPath* = "./basic.vert.dxil"
-  basicFragDxilPath* = "./basic.frag.dxil"
+  basicVertDxilPath* = "./assets/basic.vert.dxil"
+  basicFragDxilPath* = "./assets/basic.frag.dxil"
   propTextureCreateFormat* = "SDL.texture.create.format".cstring
   propTextureCreateAccess* = "SDL.texture.create.access".cstring
   propTextureCreateWidth* = "SDL.texture.create.width".cstring
