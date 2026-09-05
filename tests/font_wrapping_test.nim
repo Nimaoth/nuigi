@@ -20,7 +20,7 @@ proc main() =
   doAssert renderer.init(flags = {})
   defer: renderer.deinit()
 
-  let fontId = renderer.addFontFace("assets/fonts/Ubuntu/Ubuntu-Regular.ttf")
+  let fontId = renderer.addFontFace("assets/dontuse/fonts/DejaVuSansMono.ttf")
   doAssert fontId >= 0
 
   let fontSize = 20.0'f32
