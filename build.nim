@@ -77,7 +77,7 @@ proc shell(command: string, workingDir: string = "") =
   let res = p.waitForExit()
   if res != 0:
     echo "Command failed with code ", res, ": ", command
-    quit(0)
+    quit(res)
 
 proc shellCapture(command: string, prefix: string, workingDir: string = "") =
   echo "> ", command
@@ -93,7 +93,7 @@ proc shellCapture(command: string, prefix: string, workingDir: string = "") =
       stdout.write('\n')
   if result.exitCode != 0:
     echo "Command failed with code ", result.exitCode, ": ", command
-    quit(0)
+    quit(result.exitCode)
   else:
     echo "=== ", prefix, " succeeded (success, ok) ==="
 
