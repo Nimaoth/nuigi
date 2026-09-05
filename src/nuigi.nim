@@ -1369,7 +1369,8 @@ proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inlin
 proc ensureNodeStyle*(b: var UiBuilder, node: ptr UiNode): var UiStyle {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's style data.
   if b.currentNode.styleIndex.int <= b.themeStyles.len:
-    b.frame.styles.add(b.frame.styles[b.currentNode.styleIndex])
+    let currentStyle = b.frame.styles[b.currentNode.styleIndex]
+    b.frame.styles.add(currentStyle)
     node.styleIndex = b.frame.styles.len.uint16
     return b.frame.styles[^1]
   if node.styleIndex == 0:
@@ -3071,7 +3072,7 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
     return
   var directionFound = false
   var direction = NavLeft
-  for candidateDirection in UiNavigationDirection:
+  for candidateDirection in low(UiNavigationDirection) .. high(UiNavigationDirection):
     if candidateDirection in input.navigationPressed:
       direction = candidateDirection
       directionFound = true

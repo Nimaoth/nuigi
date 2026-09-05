@@ -1,4 +1,4 @@
-import std/[monotimes, strformat, times]
+import std/[monotimes, times]
 
 import widgets/tree_table
 
@@ -13,6 +13,7 @@ type
     parents: seq[BenchNode]
 
 proc copyPath(path: seq[int]): seq[int] =
+  result = @[]
   for index in path:
     result.add(index)
 
@@ -46,7 +47,7 @@ method moveNext(cursor: BenchCursor, count: int = 1): bool =
   if cursor.index + count >= siblings.len:
     return false
   cursor.index += count
-  cursor.path[^1] = cursor.index
+  cursor.path[cursor.path.high] = cursor.index
   cursor.node = siblings[cursor.index]
   return true
 
@@ -83,8 +84,8 @@ proc addChild(parent: BenchNode, key: string): BenchNode =
   parent.children.add(result)
 
 proc cursorFor(node: BenchNode): BenchCursor =
-  var nodes: seq[BenchNode]
-  var current = node
+  var nodes: seq[BenchNode] = @[]
+  var current: nil BenchNode = node
   while current != nil:
     nodes.add(current)
     current = current.parent
@@ -116,14 +117,16 @@ proc buildScenario(prefixCount, depth: int): (TreeTable, TreeCursor) =
 
 proc benchmark(name: string, prefixCount, depth, iterations: int) =
   let (tree, visibleCursor) = buildScenario(prefixCount, depth)
+  tree.renderedCursors = @[visibleCursor]
   for warmup in 0 ..< 3:
-    tree.refreshRenderedNodes([visibleCursor])
+    tree.refreshRenderedNodes()
 
   let started = getMonoTime()
   for iteration in 0 ..< iterations:
-    tree.refreshRenderedNodes([visibleCursor])
+    tree.refreshRenderedNodes()
   let elapsed = (getMonoTime() - started).inNanoseconds.float64 / 1_000_000.0
-  echo &"{name}: {elapsed / iterations.float64:.3f} ms/refresh ({tree.expandedCount} expanded nodes, depth {depth})"
+  debugLog(name & ": " & $(elapsed / iterations.float64) & " ms/refresh (" &
+    $tree.expandedCount & " expanded nodes, depth " & $depth & ")")
 
 proc benchmarkSharedChain(depth, leafCount, iterations: int) =
   let root = BenchNode(key: "root")
@@ -133,7 +136,7 @@ proc benchmarkSharedChain(depth, leafCount, iterations: int) =
     parent = parent.addChild("chain-" & $level)
     expandedNodes.add(parent)
 
-  var visibleCursors: seq[TreeCursor]
+  var visibleCursors: seq[TreeCursor] = @[]
   for index in 0 ..< leafCount:
     let leaf = parent.addChild("leaf-" & $index)
     visibleCursors.add(cursorFor(leaf))
@@ -141,14 +144,16 @@ proc benchmarkSharedChain(depth, leafCount, iterations: int) =
   var tree = TreeTable(cursor: cursorFor(root))
   for node in expandedNodes:
     tree.toggleNode(cursorFor(node))
+  tree.renderedCursors = visibleCursors
   for warmup in 0 ..< 3:
-    tree.refreshRenderedNodes(visibleCursors)
+    tree.refreshRenderedNodes()
 
   let started = getMonoTime()
   for iteration in 0 ..< iterations:
-    tree.refreshRenderedNodes(visibleCursors)
+    tree.refreshRenderedNodes()
   let elapsed = (getMonoTime() - started).inNanoseconds.float64 / 1_000_000.0
-  echo &"shared chain: {elapsed / iterations.float64:.3f} ms/refresh ({leafCount} rendered leaves, depth {depth})"
+  debugLog("shared chain: " & $(elapsed / iterations.float64) & " ms/refresh (" &
+    $leafCount & " rendered leaves, depth " & $depth & ")")
 
 proc benchmarkShiftedSubtree(childCount, iterations: int) =
   let root = BenchNode(key: "root")
@@ -159,19 +164,21 @@ proc benchmarkShiftedSubtree(childCount, iterations: int) =
   let tree = TreeTable(cursor: cursorFor(root))
   tree.expandAll()
   let visibleNode = branch.children[^1]
+  tree.renderedCursors = @[TreeCursor(cursorFor(visibleNode))]
 
   let started = getMonoTime()
   for iteration in 0 ..< iterations:
     root.children.insert(BenchNode(key: "inserted", parent: root), 0)
-    tree.refreshRenderedNodes([TreeCursor(cursorFor(visibleNode))])
+    tree.refreshRenderedNodes()
     root.children.delete(0)
-    tree.refreshRenderedNodes([TreeCursor(cursorFor(visibleNode))])
+    tree.refreshRenderedNodes()
   let refreshCount = iterations * 2
   let elapsed = (getMonoTime() - started).inNanoseconds.float64 / 1_000_000.0
-  echo &"shifted subtree: {elapsed / refreshCount.float64:.3f} ms/refresh ({tree.expandedCount} expanded nodes)"
+  debugLog("shifted subtree: " & $(elapsed / refreshCount.float64) &
+    " ms/refresh (" & $tree.expandedCount & " expanded nodes)")
 
 when isMainModule:
-  echo "tree table refresh benchmark"
+  debugLog("tree table refresh benchmark")
   benchmark("front chain", 0, 64, 100)
   benchmark("late chain", 10_000, 64, 20)
   benchmarkSharedChain(64, 1_000, 100)

@@ -1448,7 +1448,7 @@ method moveNext*(c: DemoTreeCursor, count: int = 1): bool =
   let siblings = c.parents[^1].children
   if c.index + count < siblings.len:
     c.index += count
-    c.path[^1] = c.index
+    c.path[c.path.high] = c.index
     c.node = siblings[c.index]
     c.fieldName = c.node.name
     return true
@@ -1461,7 +1461,7 @@ method movePrev*(c: DemoTreeCursor, count: int = 1): bool =
     return true
   if c.index >= count:
     c.index -= count
-    c.path[^1] = c.index
+    c.path[c.path.high] = c.index
     c.node = c.parents[^1].children[c.index]
     c.fieldName = c.node.name
     return true
@@ -1599,7 +1599,13 @@ proc buildDemoTreeDropGradient(b: var UiBuilder, nodeIdx: int, userData: int) =
     discard b.customRenderCommands(commands)
 
 when not defined(wasm):
-  var fsCursor = fileSystemCursor(getCurrentDir() / "fs-demo")
+  proc demoFileSystemRoot(): string {.raises: [].} =
+    try:
+      return getCurrentDir() / "fs-demo"
+    except:
+      return "." / "fs-demo"
+
+  var fsCursor = fileSystemCursor(demoFileSystemRoot())
   type
     FileDragUserData = ref object of UiDragUserData
       cursor: FileSystemCursor

@@ -177,12 +177,12 @@ proc testAntialiasedPlotGeometry() =
   )]
   var plainBuilder = newBuilder(fixedMeasureText)
   discard plainBuilder.beginUiFrame(100.0'f32, 100.0'f32)
-  let plainCommands = plainBuilder.buildPlotVertices(vec2(0.0'f32), vec2(100.0'f32),
+  var plainCommands = plainBuilder.buildPlotVertices(vec2(0.0'f32), vec2(100.0'f32),
     vec2(0.0'f32, 1.0'f32), vec2(0.0'f32, 1.0'f32), plotSeries,
     resolution = 2, lineThickness = 4.0'f32)
   var antialiasedBuilder = newBuilder(fixedMeasureText, antialiasMeshWidth = 2.0'f32)
   discard antialiasedBuilder.beginUiFrame(100.0'f32, 100.0'f32)
-  let antialiasedCommands = antialiasedBuilder.buildPlotVertices(vec2(0.0'f32), vec2(100.0'f32),
+  var antialiasedCommands = antialiasedBuilder.buildPlotVertices(vec2(0.0'f32), vec2(100.0'f32),
     vec2(0.0'f32, 1.0'f32), vec2(0.0'f32, 1.0'f32), plotSeries,
     resolution = 2, lineThickness = 4.0'f32)
   require(plainCommands.high == 0 and antialiasedCommands.high == 0,

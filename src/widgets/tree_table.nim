@@ -2,7 +2,7 @@ import nuigi
 import mymath
 import mesh
 import arena, array_view
-import std/[monotimes, tables, times]
+import std/[monotimes, tables, times, assertions]
 
 import widgets
 import dynamic_virtuallist, profiler
@@ -52,7 +52,7 @@ type
     walkIndex*: int
     walkNode*: int # Index into TreeTable.nodes which is the walkCursors ExpandedNode or the parents ExpandedNode
     nodesIndex: int # Index into nodes where we currently are while rendering items
-    renderedCursors: seq[TreeCursor]
+    renderedCursors*: seq[TreeCursor]
     searchFilter*: string
     scrollOffset*: Vec2
     rowRenderer: TreeTableRowRenderer
@@ -117,7 +117,7 @@ type
     ## Mirrors `TreeTableOptions` but stores columns as an arena pointer for the layout pass.
     columnGap*: float32
     columnCount*: int
-    columns*: ptr UncheckedArray[TableColumn]
+    columns*: nil ptr UncheckedArray[TableColumn]
     showColumnLines*: bool
     columnLineThickness*: float32
     columnLineColor*: UiColor
@@ -184,6 +184,7 @@ proc initTreeTableOptions*(
     hoverColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomHoverColor: bool = false): TreeTableOptions =
   ## Creates options from explicit column, separator, indentation, and row colors.
+  result = default(TreeTableOptions)
   result.columns = @columns
   result.columnGap = columnGap
   result.showColumnLines = showColumnLines
@@ -408,7 +409,7 @@ proc recomputeTotals(e: TreeTable) =
   prof("recomputeTotals")
   if e.rootNode < 0:
     return
-  var stack: seq[(int, bool)]
+  var stack: seq[(int, bool)] = @[]
   stack.add((e.rootNode, false))
   while stack.len > 0:
     let (nodeIndex, visited) = stack.pop()
@@ -475,7 +476,7 @@ proc updateExpandedCursor(e: TreeTable, nodeIndex: int, cursor: TreeCursor) =
 proc findExpandedNode(e: TreeTable, key: string): int =
   ## Returns the active slot for a key, or -1 when it is not expanded.
   prof("findExpandedNode")
-  if e.nodeByKey.hasKey(key): e.nodeByKey[key] else: -1
+  if e.nodeByKey.hasKey(key): e.nodeByKey.getOrQuit(key) else: -1
 
 proc refreshNode(e: TreeTable, cursor: TreeCursor): int =
   ## Refreshes one expanded node and reconciles its expanded direct children.
@@ -507,13 +508,13 @@ proc refreshRenderedNode*(e: TreeTable, cursor: TreeCursor) =
   discard e.refreshNode(cursor)
   e.recomputeTotals()
 
-proc refreshRenderedNodes*(e: TreeTable, cursors: openArray[TreeCursor]) =
+proc refreshRenderedNodes*(e: TreeTable) =
   ## Validates retained visible cursors and their ancestors without scanning
   ## unrelated branches.
   prof("refreshRenderedNodes")
   var refreshedIndexes = initTable[string, int]()
-  for renderedCursor in cursors:
-    var chain: seq[TreeCursor]
+  for renderedCursor in e.renderedCursors:
+    var chain: seq[TreeCursor] = @[]
     var chainCursor = renderedCursor.clone()
     var refreshedAncestorIndex = -1
     block:
@@ -629,7 +630,7 @@ proc seek*(e: TreeTable, targetRow: int): bool =
     if e.walkIndex < targetRow:
       prof("slow step")
       if not e.walkCursor.enterChild():
-        echo "failed to enter child ", e.walkIndex, " < ", targetRow, ", ", targetChild, ", ", e.walkCursor.path
+        echo "failed to enter child ", e.walkIndex, " < ", targetRow, ", ", targetChild
         e.walkIndex = targetRow
         return false
       inc e.walkIndex
@@ -832,7 +833,7 @@ proc expandAll*(e: TreeTable) =
   ## Expands every non-leaf node and builds the linked topology in preorder.
   e.initializeTopology()
   let rootIndex = e.addExpandedNode(e.cursor, -1)
-  var stack: seq[(TreeCursor, int)]
+  var stack: seq[(TreeCursor, int)] = @[]
   stack.add((e.cursor.clone(), rootIndex))
   while stack.len > 0:
     let (cursor, parentIndex) = stack.pop()
@@ -1007,7 +1008,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
         # chevron mesh via custom render command (right when collapsed, down when expanded)
         discard b.deferBuild(buildChevronDeferred, if isExpanded: 1 else: 0)
 
-  e.rowRenderer(b, e.walkCursor, index)
+  onRaiseQuit(e.rowRenderer(b, e.walkCursor, index))
 
 iterator tableCells(b: UiBuilder, rowIdx: int): int =
   ## Yields direct row children that participate in tree-table column layout.
@@ -1018,6 +1019,7 @@ iterator tableCells(b: UiBuilder, rowIdx: int): int =
 
 proc tableCellCount(b: UiBuilder, rowIdx: int): int =
   ## Counts direct row children that participate in tree-table column layout.
+  result = 0
   for childIdx in b.tableCells(rowIdx):
     discard childIdx
     inc result
@@ -1040,7 +1042,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
   # -------------------------------------------------------------------------
   if userData == 0:
     let gap = baseGap
-    var colWidths: seq[float32] = @[0]
+    var colWidths: seq[float32] = @[0.0'f32]
     for rowIdx in b.children(nodeIdx):
       var k = 0
       var firstTwoColumns: float32 = 0.0
@@ -1080,7 +1082,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           child.size.x = colWidths[k - 1]
           child.flags.incl SizeXKnown
           if child.size.x != oldSize:
-            b.postProcessChildren(childIdx)
+              discard b.postProcessChildren(childIdx)
         rowHeight = max(rowHeight, child.size.y)
         cursor += cw + rowGap
         row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
@@ -1209,7 +1211,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           child.size.x = nameW
           child.flags.incl SizeXKnown
           if nameW != oldW:
-            b.postProcessChildren(childIdx)
+            discard b.postProcessChildren(childIdx)
           child.pos.x = cursor
           child.pos.y = 0.0'f32
           rowHeight = max(rowHeight, child.size.y)
@@ -1223,7 +1225,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           child.size.x = cw
           child.flags.incl SizeXKnown
           if cw != oldW:
-            b.postProcessChildren(childIdx)
+            discard b.postProcessChildren(childIdx)
           child.pos.x = cursor
           child.pos.y = 0.0'f32
           rowHeight = max(rowHeight, child.size.y)
@@ -1253,7 +1255,7 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           child.size.x = colWidths[k - 1]
           child.flags.incl SizeXKnown
           if child.size.x != oldSize:
-            b.postProcessChildren(childIdx)
+            discard b.postProcessChildren(childIdx)
         rowHeight = max(rowHeight, child.size.y)
         cursor += cw + gap
         row.contentExtent.x = max(row.contentExtent.x, child.pos.x + child.size.x)
@@ -1383,8 +1385,10 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
   block:
     prof("step")
     while ctx.walkIndex < itemIndex:
-      if not stepForward(ctx.walkCursor, ctx, ctx.walkNode):
+      var walkCursor = ctx.walkCursor
+      if not stepForward(walkCursor, ctx, ctx.walkNode):
         break
+      ctx.walkCursor = walkCursor
       ctx.walkIndex += 1
   ctx.renderedCursors.add(ctx.walkCursor.clone())
   treeTableField(b, ctx, itemIndex)
@@ -1420,19 +1424,19 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
     KeyLeft in input.keysRepeated or NavLeft in input.navigationPressed
   if rightPressed and not b.wasFocusNavigationHandled() and
       ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
-    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    let focusedCursor = ctx.focusCursors.getOrQuit(b.focusedNode.nodeIdValue())
     if focusedCursor.childCount() > 0 and
         ctx.findExpandedNode(focusedCursor.cursorKey()) < 0:
       ctx.expandNode(focusedCursor)
       b.anythingAnimating = true
   elif leftPressed and not b.wasFocusNavigationHandled() and
       ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
-    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    let focusedCursor = ctx.focusCursors.getOrQuit(b.focusedNode.nodeIdValue())
     if ctx.findExpandedNode(focusedCursor.cursorKey()) >= 0:
       ctx.toggleNode(focusedCursor)
       b.anythingAnimating = true
 
-  ctx.refreshRenderedNodes(ctx.renderedCursors)
+  ctx.refreshRenderedNodes()
   ctx.renderedCursors.setLen(0)
 
   try:
@@ -1440,8 +1444,9 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       ctx.expandNode(ctx.pendingExpandCursor)
       ctx.pendingExpandCursor = nil
       b.anythingAnimating = true
-    if ctx.pendingToggleCursor != nil:
-      toggleNode(ctx, ctx.pendingToggleCursor)
+    let pendingToggleCursor = ctx.pendingToggleCursor
+    if pendingToggleCursor != nil:
+      toggleNode(ctx, pendingToggleCursor)
       ctx.pendingToggleCursor = nil
       b.anythingAnimating = true
   except:
@@ -1464,7 +1469,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   let count = ctx.countVisible()
   if b.wasFocusChangedByKeyboard() and ctx.listStorage != nil and
       ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
-    let focusedCursor = ctx.focusCursors[b.focusedNode.nodeIdValue()]
+    let focusedCursor = ctx.focusCursors.getOrQuit(b.focusedNode.nodeIdValue())
     let focusedRow = ctx.visibleRowIndex(focusedCursor)
     if focusedRow >= 0:
       ctx.listStorage.centerItem(focusedRow)
@@ -1476,7 +1481,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   var layoutUserData = 0
   if hasColumns or hasColumnLines or hasIndentLines:
     var colArr: ArrayView[TableColumn]
-    var colPtr: ptr UncheckedArray[TableColumn] = nil
+    var colPtr: nil ptr UncheckedArray[TableColumn] = nil
     var colCount = 0
     if hasColumns:
       colArr = b.frame.arena[].allocArray(options.columns.len, TableColumn)

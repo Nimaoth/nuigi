@@ -156,6 +156,18 @@ when defined(nimony):
     for item in src:
       dest.add(item)
 
+  proc insert*[T: HasDefault](dest: var seq[T]; item: T; index: int) =
+    ## Nimony shim for host Nim's sequence insertion operation.
+    if index < 0 or index > dest.len:
+      quit "insert: index out of bounds"
+    let oldLen = dest.len
+    dest.setLen(oldLen + 1)
+    var position = oldLen
+    while position > index:
+      dest[position] = dest[position - 1]
+      dec position
+    dest[index] = item
+
   template gcsafeb*(body: untyped): untyped =
     body
 

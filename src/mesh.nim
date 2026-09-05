@@ -210,7 +210,7 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
   let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
   let points = cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   let outerPoints = if aaRing:
-    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   if data == nil or points == nil or (aaRing and outerPoints == nil):
@@ -224,7 +224,7 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
   ), innerSize)
   points.writeRoundedBoundary(nil, pos + vec2(aaHalfWidth), innerSize,
     innerRadii, segments, uniformBorderColors(color))
-  if aaRing:
+  if outerPoints != nil:
     let outerRadii = UiCornerRadii(
       topLeft: normalized.topLeft + aaHalfWidth,
       topRight: normalized.topRight + aaHalfWidth,
@@ -337,11 +337,11 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
   let inner = cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   let pointColors = cast[ptr UncheckedArray[UiColor]](arena[].alloc(boundaryCount * sizeof(UiColor)))
   let outerAa = if hasAaRing:
-    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   let innerAa = if innerAaRing:
-    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   if data == nil or outer == nil or inner == nil or pointColors == nil or
@@ -363,7 +363,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
     rectSize - vec2(aaWidth), solidOuterRadii, segments, colors)
   inner.writeRoundedBoundary(nil, innerPos - vec2(aaHalfWidth),
     innerSize + vec2(aaWidth), solidInnerRadii, segments, colors)
-  if hasAaRing:
+  if outerAa != nil:
     let expandedRadii = UiCornerRadii(
       topLeft: outerRadii.topLeft + aaHalfWidth,
       topRight: outerRadii.topRight + aaHalfWidth,
@@ -372,7 +372,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
     )
     outerAa.writeRoundedBoundary(nil, pos - vec2(aaHalfWidth),
       rectSize + vec2(aaWidth), expandedRadii, segments, colors)
-  if innerAaRing:
+  if innerAa != nil:
     let insetRadii = UiCornerRadii(
       topLeft: max(0.0'f32, innerRadii.topLeft - aaHalfWidth),
       topRight: max(0.0'f32, innerRadii.topRight - aaHalfWidth),
@@ -392,7 +392,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
     data[vertexIndex] = UiVertex(pos: outer[next], color: pointColors[next]); inc vertexIndex
     data[vertexIndex] = UiVertex(pos: inner[next], color: pointColors[next]); inc vertexIndex
 
-  if hasAaRing:
+  if outerAa != nil:
     for i in 0 ..< boundaryCount:
       let next = (i + 1) mod boundaryCount
       let clear0 = UiColor(r: pointColors[i].r, g: pointColors[i].g, b: pointColors[i].b, a: 0.0'f32)
@@ -404,7 +404,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
       data[vertexIndex] = UiVertex(pos: outerAa[next], color: clear1); inc vertexIndex
       data[vertexIndex] = UiVertex(pos: outerAa[i], color: clear0); inc vertexIndex
 
-  if innerAaRing:
+  if innerAa != nil:
     for i in 0 ..< boundaryCount:
       let next = (i + 1) mod boundaryCount
       let clear0 = UiColor(r: pointColors[i].r, g: pointColors[i].g, b: pointColors[i].b, a: 0.0'f32)
@@ -495,7 +495,7 @@ func offsetChevronPolygon(points: array[6, Vec2], distance: float32): array[6, V
       result[pointIndex] = previousLine + previousDirection * lineDistance
 
 proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
-    color: UiColor, thickness: float32 = -1.0'f32, angle: float32 = PI * 0.5'f32,
+  color: UiColor, thickness: float32 = -1.0'f32, angle: float32 = float32(PI) * 0.5'f32,
     antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
   ## Build a thick "V" / ">" chevron symbol.
   ##
@@ -532,9 +532,9 @@ proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
   t = clamp(t, 1.0'f32, min(w, h) * 0.45'f32)
   # angle handling: preserve angle by scaling chevron to fit
   var effAngle = angle
-  if effAngle <= 0.05'f32 or effAngle >= PI - 0.05'f32 or effAngle != effAngle:
-    effAngle = PI * 0.5'f32
-  effAngle = clamp(effAngle, 0.1'f32, PI - 0.1'f32)
+  if effAngle <= 0.05'f32 or effAngle >= float32(PI) - 0.05'f32 or effAngle != effAngle:
+    effAngle = float32(PI) * 0.5'f32
+  effAngle = clamp(effAngle, 0.1'f32, float32(PI) - 0.1'f32)
   let halfAngle = effAngle * 0.5'f32
   let tanHalf = tan(halfAngle.float64).float32
   var effW = w

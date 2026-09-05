@@ -27,6 +27,7 @@ type
     tree: MutableTree
 
 proc copyPath(path: seq[int]): seq[int] =
+  result = @[]
   for index in path:
     result.add(index)
 
@@ -63,7 +64,7 @@ method moveNext(cursor: MutableCursor, count: int = 1): bool =
   if cursor.index + count >= siblings.len:
     return false
   cursor.index += count
-  cursor.path[^1] = cursor.index
+  cursor.path[cursor.path.high] = cursor.index
   cursor.node = siblings[cursor.index]
   cursor.fieldName = cursor.node.key
   return true
@@ -136,7 +137,8 @@ proc testVisibleChainRebasesShiftedIndices() =
   treeTable.toggleNode(leafCursor)
 
   root.children.insert(MutableNode(key: "inserted"), 0)
-  treeTable.refreshRenderedNodes([leafCursor])
+  treeTable.renderedCursors = @[leafCursor]
+  treeTable.refreshRenderedNodes()
 
   let branchIndex = treeTable.expandedIndex("branch")
   let leafIndex = treeTable.expandedIndex("leaf")
@@ -154,7 +156,8 @@ proc testVisibleChainRebasesShiftedIndices() =
   mutableTree.resolveCalls = 0
   mutableTree.hintHits = 0
   mutableTree.fallbackSearches = 0
-  treeTable.refreshRenderedNodes([treeTable.nodes[leafIndex].cursor])
+  treeTable.renderedCursors = @[treeTable.nodes[leafIndex].cursor]
+  treeTable.refreshRenderedNodes()
   require(mutableTree.resolveCalls > 0, "visible chain should be validated")
   require(mutableTree.fallbackSearches == 0,
     "unchanged visible chains should resolve entirely through index hints")
@@ -175,7 +178,8 @@ proc testVisibleChainPrunesDeletedAncestor() =
   treeTable.toggleNode(leafCursor)
 
   root.children.delete(0)
-  treeTable.refreshRenderedNodes([leafCursor])
+  treeTable.renderedCursors = @[leafCursor]
+  treeTable.refreshRenderedNodes()
 
   require(treeTable.expandedIndex("branch") < 0,
     "a deleted visible ancestor should be removed")
@@ -240,7 +244,8 @@ proc testSharedParentChainsResolveExpandedEdgesOnce() =
 
   mutableTree.resolveCalls = 0
   mutableTree.exitCalls = 0
-  treeTable.refreshRenderedNodes([firstLeafCursor, secondLeafCursor])
+  treeTable.renderedCursors = @[firstLeafCursor, secondLeafCursor]
+  treeTable.refreshRenderedNodes()
 
   require(mutableTree.resolveCalls == 4,
     "shared expanded edges should resolve once, plus once per collapsed leaf")
@@ -297,7 +302,7 @@ proc testExpandNodeIsIdempotent() =
     "expanding an expanded node should not change visible totals")
 
 proc runTests() =
-  echo "tree table refresh tests"
+  debugLog("tree table refresh tests")
   testVisibleChainRebasesShiftedIndices()
   testVisibleChainPrunesDeletedAncestor()
   testExpandedSlotsRemainStableAndReuseFreeSlots()
@@ -305,7 +310,7 @@ proc runTests() =
   testIncrementalExpandAllCompletesAcrossBudgets()
   testExpandNodeIsIdempotent()
   runTreeTableSeekTests()
-  echo "tree table refresh tests succeeded"
+  debugLog("tree table refresh tests succeeded")
 
 when isMainModule:
   runTests()

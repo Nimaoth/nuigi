@@ -1,7 +1,9 @@
-import os
-import algorithm
-import strutils
-import tables
+import std/os
+import std/algorithm
+import std/strutils
+import std/tables
+when defined(nimony):
+  import std/dirs
 
 import tree_table, profiler
 
@@ -15,7 +17,10 @@ type
     kinds*: Table[string, FileSystemEntryKind]
 
   FileSystemCursorLocation = ref object
-    parent: FileSystemCursorLocation
+    when defined(nimony):
+      parent: nil FileSystemCursorLocation
+    else:
+      parent: FileSystemCursorLocation
     fullPath: string
     parentPath: string
     fieldName: string
@@ -46,8 +51,11 @@ func kind*(c: FileSystemCursor): FileSystemEntryKind {.inline.} =
 
 func rootPath*(c: FileSystemCursor): string =
   var location = c.location
-  while location.parent != nil:
-    location = location.parent
+  while true:
+    let parent = location.parent
+    if parent == nil:
+      break
+    location = parent
   location.fullPath
 
 proc pathWithIndex(path: seq[int], index: int): seq[int] =
@@ -72,10 +80,10 @@ proc copyPathPrefix(path: seq[int], count: int): seq[int] =
     result.add(path[index])
 
 proc rebaseLocation(location: FileSystemCursorLocation, path: seq[int], depth: int): FileSystemCursorLocation =
-  let parent = if location.parent == nil:
-    nil
-  else:
-    rebaseLocation(location.parent, path, depth - 1)
+  let locationParent = location.parent
+  var parent: nil FileSystemCursorLocation = nil
+  if locationParent != nil:
+    parent = rebaseLocation(locationParent, path, depth - 1)
   result = FileSystemCursorLocation(
     parent: parent,
     fullPath: location.fullPath,
@@ -87,29 +95,42 @@ proc rebaseLocation(location: FileSystemCursorLocation, path: seq[int], depth: i
 
 proc entryKind(cache: FileSystemCache, path: string): FileSystemEntryKind =
   if path in cache.kinds:
-    return cache.kinds[path]
+    return cache.kinds.getOrDefault(path, File)
   result = if dirExists(path): Folder else: File
   cache.kinds[path] = result
 
 proc comparablePath(path: string): string =
-  result = absolutePath(path)
-  normalizePath(result)
+  try:
+    result = absolutePath(path)
+    normalizePath(result)
+  except:
+    result = path
   when defined(windows):
     result = result.toLowerAscii()
 
-proc listEntries(cache: FileSystemCache, path: string): lent seq[string] =
-  if path in cache.listings:
-    return cache.listings[path]
-  var entries: seq[string]
-  if dirExists(path):
-    for kind, entryPath in walkDir(path):
-      entries.add(extractFilename(entryPath))
-      cache.kinds[entryPath] =
-        if kind == pcDir or kind == pcLinkToDir: Folder else: File
-    cache.kinds[path] = Folder
-    entries.sort()
-  cache.listings[path] = entries
-  return cache.listings[path]
+proc listEntries(cache: FileSystemCache, directoryPath: string): ptr seq[string] =
+  if directoryPath in cache.listings:
+    return cache.listings.mgetOrPut(directoryPath, @[]).addr
+  var entries: seq[string] = @[]
+  if dirExists(directoryPath):
+    when defined(nimony):
+      try:
+        for kind, entryPath in walkDir(path(directoryPath)):
+          let entryPathString = $entryPath
+          entries.add(extractFilename(entryPathString))
+          cache.kinds[entryPathString] =
+            if kind == pcDir or kind == pcLinkToDir: Folder else: File
+      except:
+        discard
+    else:
+      for kind, entryPath in walkDir(directoryPath):
+        entries.add(extractFilename(entryPath))
+        cache.kinds[entryPath] =
+          if kind == pcDir or kind == pcLinkToDir: Folder else: File
+    cache.kinds[directoryPath] = Folder
+    entries.sort(system.cmp[string])
+  cache.listings[directoryPath] = entries
+  return cache.listings.mgetOrPut(directoryPath, @[]).addr
 
 method clone*(c: FileSystemCursor): TreeCursor =
   return c.cursorAt(c.location)
@@ -119,14 +140,13 @@ method updatePath*(c: FileSystemCursor, path: seq[int]) =
 
 method replacePathPrefix*(c: FileSystemCursor, oldPrefixLen: int, newPrefix: seq[int]) =
   if oldPrefixLen != newPrefix.len:
-    proc replacedPath(): seq[int] =
-      let suffixLen = max(0, c.path.len - oldPrefixLen)
-      result = newSeq[int](newPrefix.len + suffixLen)
-      for index in 0 ..< newPrefix.len:
-        result[index] = newPrefix[index]
-      for index in 0 ..< suffixLen:
-        result[newPrefix.len + index] = c.path[oldPrefixLen + index]
-    c.updatePath(replacedPath())
+    let suffixLen = max(0, c.path.len - oldPrefixLen)
+    var replacedPath = newSeq[int](newPrefix.len + suffixLen)
+    for index in 0 ..< newPrefix.len:
+      replacedPath[index] = newPrefix[index]
+    for index in 0 ..< suffixLen:
+      replacedPath[newPrefix.len + index] = c.path[oldPrefixLen + index]
+    c.updatePath(replacedPath)
     return
 
   var sharedDepth = 0
@@ -135,11 +155,14 @@ method replacePathPrefix*(c: FileSystemCursor, oldPrefixLen: int, newPrefix: seq
   if sharedDepth == newPrefix.len:
     return
 
-  var oldLocations: seq[FileSystemCursorLocation]
+  var oldLocations: seq[FileSystemCursorLocation] = @[]
   var sharedLocation = c.location
   while sharedLocation.path.len > sharedDepth:
     oldLocations.add(sharedLocation)
-    sharedLocation = sharedLocation.parent
+    let parent = sharedLocation.parent
+    if parent == nil:
+      break
+    sharedLocation = parent
 
   var parentLocation = sharedLocation
   for locationIndex in countdown(oldLocations.high, 0):
@@ -165,8 +188,8 @@ method cursorKey*(c: FileSystemCursor): string =
   return c.fullPath
 
 method childCount*(c: FileSystemCursor): int =
-  let listing {.cursor.} = listEntries(c.cache, c.fullPath)
-  return listing.len
+  let listing = listEntries(c.cache, c.fullPath)
+  return listing[].len
 
 proc resolveListedChild(c, expected: FileSystemCursor, listing: openArray[string]): TreeCursor =
   let name = expected.fieldName
@@ -204,15 +227,15 @@ method resolveChild*(c: FileSystemCursor, child: TreeCursor): TreeCursor =
   let expected = FileSystemCursor(child)
   if expected.parentPath != c.fullPath:
     return nil
-  let listing {.cursor.} = listEntries(c.cache, c.fullPath)
-  return resolveListedChild(c, expected, listing)
+  let listing = listEntries(c.cache, c.fullPath)
+  return resolveListedChild(c, expected, listing[])
 
 method enterChild*(c: FileSystemCursor): bool =
   prof("enterChild")
-  let listing {.cursor.} = listEntries(c.cache, c.fullPath)
-  if listing.len == 0:
+  let listing = listEntries(c.cache, c.fullPath)
+  if listing[].len == 0:
     return false
-  let name = listing[0]
+  let name = listing[][0]
   let fullPath = c.fullPath / name
   c.applyLocation(FileSystemCursorLocation(
     parent: c.location,
@@ -226,42 +249,44 @@ method enterChild*(c: FileSystemCursor): bool =
 
 method moveNext*(c: FileSystemCursor, count: int = 1): bool =
   prof("moveNext")
-  if c.location.parent == nil:
+  let parent = c.location.parent
+  if parent == nil:
     return false
-  let listing {.cursor.} = listEntries(c.cache, c.parentPath)
-  if listing.len == 0:
+  let listing = listEntries(c.cache, c.parentPath)
+  if listing[].len == 0:
     return false
-  if c.index + count < listing.len:
+  if c.index + count < listing[].len:
     let index = c.index + count
-    let name = listing[index]
+    let name = listing[][index]
     let fullPath = c.parentPath / name
     c.applyLocation(FileSystemCursorLocation(
-      parent: c.location.parent,
+      parent: parent,
       fullPath: fullPath,
       parentPath: c.parentPath,
       fieldName: name,
-      path: pathWithIndex(c.location.parent.path, index),
+      path: pathWithIndex(parent.path, index),
       index: index,
       kind: entryKind(c.cache, fullPath)))
     return true
   return false
 
 method movePrev*(c: FileSystemCursor, count: int = 1): bool =
-  if c.location.parent == nil:
+  let parent = c.location.parent
+  if parent == nil:
     return false
-  let listing {.cursor.} = listEntries(c.cache, c.parentPath)
-  if listing.len == 0:
+  let listing = listEntries(c.cache, c.parentPath)
+  if listing[].len == 0:
     return false
   if c.index >= count:
     let index = c.index - count
-    let name = listing[index]
+    let name = listing[][index]
     let fullPath = c.parentPath / name
     c.applyLocation(FileSystemCursorLocation(
-      parent: c.location.parent,
+      parent: parent,
       fullPath: fullPath,
       parentPath: c.parentPath,
       fieldName: name,
-      path: pathWithIndex(c.location.parent.path, index),
+      path: pathWithIndex(parent.path, index),
       index: index,
       kind: entryKind(c.cache, fullPath)))
     return true
@@ -269,16 +294,17 @@ method movePrev*(c: FileSystemCursor, count: int = 1): bool =
 
 method exitChild*(c: FileSystemCursor): bool =
   prof("exitChild")
-  if c.location.parent == nil:
+  let parent = c.location.parent
+  if parent == nil:
     return false
-  c.applyLocation(c.location.parent)
+  c.applyLocation(parent)
   return true
 
 # Creates a cursor rooted at `root` (defaults to the current working directory).
 # `cache` is shared across all clones of a tree; a new one is allocated if nil.
-proc fileSystemCursor*(root: string = getCurrentDir(), cache: FileSystemCache = nil): FileSystemCursor =
+proc fileSystemCursor*(root: string = os.getCurrentDir(), cache: nil FileSystemCache = nil): FileSystemCursor =
   let name = extractFilename(root)
-  let cursorCache = if cache != nil: cache else: newFileSystemCache()
+  let cursorCache = if cache != nil: cast[FileSystemCache](cache) else: newFileSystemCache()
   result = FileSystemCursor(cache: cursorCache)
   result.applyLocation(FileSystemCursorLocation(
     fullPath: root,
@@ -310,12 +336,16 @@ proc moveTo*(dragged, target: FileSystemCursor): bool =
   let sourceParent = dragged.parentPath
   let destination = target.fullPath / dragged.fieldName
   try:
-    case dragged.kind
-    of File:
-      moveFile(dragged.fullPath, destination)
-    of Folder:
-      moveDir(dragged.fullPath, destination)
-  except OSError:
+    when defined(nimony):
+      if not tryMoveFSObject(dragged.fullPath, destination, dragged.kind == Folder):
+        return false
+    else:
+      case dragged.kind
+      of File:
+        moveFile(dragged.fullPath, destination)
+      of Folder:
+        moveDir(dragged.fullPath, destination)
+  except:
     return false
 
   dragged.cache.listings.del(sourceParent)

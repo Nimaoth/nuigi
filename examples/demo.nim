@@ -449,8 +449,10 @@ proc buildSettingsWindow(b: var UiBuilder) =
             discard b.fit()
             discard b.copyTextStyleIndex(UiStyleIndexLabelText)
             discard b.text("Mesh AA Width")
-          discard b.dragFloat(b.antialiasMeshWidth, defaultAntialiasMeshWidth,
+          var antialiasMeshWidth = b.antialiasMeshWidth
+          discard b.dragFloat(antialiasMeshWidth, defaultAntialiasMeshWidth,
             0.0'f32, 4.0'f32)
+          b.antialiasMeshWidth = antialiasMeshWidth
 
           b.node():
             discard b.fit()

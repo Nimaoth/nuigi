@@ -2,6 +2,14 @@ import sdl3
 import mymath
 import arena, array_view, mesh, nuigi, widgets, windows
 
+include compat2
+
+proc cStringValue(value: cstring): string =
+  when defined(nimony):
+    fromCString(value)
+  else:
+    $value
+
 const
   GamepadAxisCount = int(GAMEPAD_AXIS_COUNT)
   GamepadButtonCount = int(GAMEPAD_BUTTON_COUNT)
@@ -33,7 +41,7 @@ type
     capacity: int
     antialiasMeshWidth: float32
 
-func mixColor(a, b: UiColor, amount: float32): UiColor =
+proc mixColor(a, b: UiColor, amount: float32): UiColor =
   let t = clamp(amount, 0.0'f32, 1.0'f32)
   rgba(
     a.r + (b.r - a.r) * t,
@@ -53,12 +61,13 @@ proc addCircle(writer: var MeshWriter, center: Vec2, radius: float32, color: UiC
     scale = vec2(1.0'f32), offset = vec2(0.0'f32), rotation = 0.0'f32) =
   let cosine = cos(rotation.float64).float32
   let sine = sin(rotation.float64).float32
-  proc transform(point: Vec2): Vec2 =
-    let local = (point - center) * scale
-    center + offset + vec2(
-      local.x * cosine - local.y * sine,
-      local.x * sine + local.y * cosine,
-    )
+  template transform(point: Vec2): Vec2 =
+    block:
+      let local = (point - center) * scale
+      center + offset + vec2(
+        local.x * cosine - local.y * sine,
+        local.x * sine + local.y * cosine,
+      )
   let transformedCenter = transform(center)
   let aaHalfWidth = max(0.0'f32, writer.antialiasMeshWidth) * 0.5'f32
   let innerRadius = max(0.0'f32, radius - aaHalfWidth)
@@ -168,12 +177,12 @@ proc addGamepad(input: var DemoGamepadInput, instanceId: JoystickID) =
     return
   let handle = openGamepad(instanceId)
   if handle == nil:
-    echo "Could not open gamepad ", instanceId, ": ", $getError()
+    debugLog("Could not open gamepad " & $instanceId & ": " & cStringValue(getError()))
     return
   let namePtr = getGamepadName(handle)
-  let name = if namePtr == nil: "Unknown gamepad" else: $namePtr
+  let name = if namePtr == nil: "Unknown gamepad" else: cStringValue(namePtr)
   input.gamepads.add DemoGamepad(handle: handle, instanceId: instanceId, name: name)
-  echo "Gamepad added: ", name, " (", instanceId, ")"
+  debugLog("Gamepad added: " & name & " (" & $instanceId & ")")
 
 proc removeGamepad(input: var DemoGamepadInput, instanceId: JoystickID) =
   let index = input.findGamepad(instanceId)
@@ -181,7 +190,7 @@ proc removeGamepad(input: var DemoGamepadInput, instanceId: JoystickID) =
     return
   let releasedSouth = input.gamepads[index].buttons[ord(GAMEPAD_BUTTON_SOUTH)]
   let releasedEast = input.gamepads[index].buttons[ord(GAMEPAD_BUTTON_EAST)]
-  echo "Gamepad removed: ", input.gamepads[index].name, " (", instanceId, ")"
+  debugLog("Gamepad removed: " & input.gamepads[index].name & " (" & $instanceId & ")")
   closeGamepad(input.gamepads[index].handle)
   input.gamepads.delete(index)
   if releasedSouth and not input.anyButtonDown(GAMEPAD_BUTTON_SOUTH):
@@ -258,7 +267,7 @@ proc handleEvent*(input: var DemoGamepadInput, event: var Event): bool =
     let index = input.findGamepad(event.gdevice.which)
     if index >= 0:
       let namePtr = getGamepadName(input.gamepads[index].handle)
-      input.gamepads[index].name = if namePtr == nil: "Unknown gamepad" else: $namePtr
+      input.gamepads[index].name = if namePtr == nil: "Unknown gamepad" else: cStringValue(namePtr)
   of EVENT_GAMEPAD_BUTTON_DOWN, EVENT_GAMEPAD_BUTTON_UP:
     input.updateButton(event.gbutton.which, event.gbutton.button.int, event.gbutton.down)
   of EVENT_GAMEPAD_AXIS_MOTION:
@@ -326,7 +335,7 @@ proc buildControllerMesh(b: var UiBuilder, gamepad: var DemoGamepad,
     gamepad.visualAxes[ord(GAMEPAD_AXIS_LEFT_TRIGGER)]
   let bodyOffset = vec2(triggerLean * 2.0'f32, abs(triggerLean) * 1.5'f32)
 
-  proc bodyPoint(x, y: float32): Vec2 =
+  template bodyPoint(x, y: float32): Vec2 =
     transformPoint(origin + vec2(x, y), bodyPivot, bodyOffset, vec2(1.0'f32), bodyRotation)
 
   let shellControlPoints = [
@@ -336,14 +345,14 @@ proc buildControllerMesh(b: var UiBuilder, gamepad: var DemoGamepad,
     bodyPoint(176, 190), bodyPoint(143, 264), bodyPoint(100, 274), bodyPoint(66, 220),
     bodyPoint(46, 112),
   ]
-  var shell: array[shellControlPoints.len * 2, Vec2]
+  var shell = default(array[shellControlPoints.len * 2, Vec2])
   for pointIndex in 0 ..< shellControlPoints.len:
     let current = shellControlPoints[pointIndex]
     let next = shellControlPoints[(pointIndex + 1) mod shellControlPoints.len]
     shell[pointIndex * 2] = current * 0.75'f32 + next * 0.25'f32
     shell[pointIndex * 2 + 1] = current * 0.25'f32 + next * 0.75'f32
   writer.addPolygon(shell, controlColor)
-  var innerShell: array[shell.len, Vec2]
+  var innerShell = default(array[shell.len, Vec2])
   for pointIndex in 0 ..< shell.len:
     innerShell[pointIndex] = bodyPivot + (shell[pointIndex] - bodyPivot) * 0.975'f32
   writer.addPolygon(innerShell, bodyColor)
@@ -475,7 +484,7 @@ proc buildGamepadWindow*(input: var DemoGamepadInput, b: var UiBuilder) =
             discard b.fit().text("No gamepad connected")
         for gamepadIndex in 0 ..< input.gamepads.len:
           let gamepad = input.gamepads[gamepadIndex].addr
-          b.pushId(gamepad.instanceId.uint64)
+          discard b.pushId(gamepad.instanceId.uint64)
           b.layoutVertical:
             discard b.fillX().fitY().gap(4)
             b.node():

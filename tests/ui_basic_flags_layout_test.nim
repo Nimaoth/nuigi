@@ -1,4 +1,6 @@
 import std/os
+when defined(nimony):
+  import std/dirs
 import nuigi, widgets, flex, grid, mymath, arena, array_view, widgets/tree_table, widgets/file_system_cursor
 
 include compat2
@@ -16,6 +18,26 @@ proc require(cond: bool, msg: string) =
     assert cond, msg
   else:
     doAssert(cond, msg)
+
+proc createTestDir(directory: string) =
+  when defined(nimony):
+    onRaiseQuit(createDir(path(directory)))
+  else:
+    createDir(directory)
+
+proc removeTestDir(directory: string) =
+  when defined(nimony):
+    try:
+      for kind, entryPath in walkDir(path(directory)):
+        if kind == pcDir or kind == pcLinkToDir:
+          removeTestDir($entryPath)
+        else:
+          removeFile(entryPath)
+      removeDir(path(directory))
+    except:
+      quit "FAILURE: removeTestDir(" & directory & ")"
+  else:
+    removeDir(directory)
 
 proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
@@ -35,7 +57,7 @@ proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
   b
 
 var dragUiCallbackCalls = 0
-var dragUiCallbackUserData: UiDragUserData = nil
+var dragUiCallbackUserData: nil UiDragUserData = nil
 var dragUiCallbackCanDrop = false
 
 proc buildTestDragUi(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
@@ -92,7 +114,7 @@ method moveNext*(c: TestTreeCursor, count: int = 1): bool =
   let parentChildCount = if (c.path.len - 1) < c.maxDepth: c.childrenPerNode else: 0
   if c.index + count < parentChildCount:
     c.index += count
-    c.path[^1] = c.index
+    c.path[c.path.high] = c.index
     c.fieldName = treeName(c.path)
     return true
   return false
@@ -115,7 +137,10 @@ proc expectedTreeNamesRec(result: var seq[string], prefix: seq[int], depth, maxD
   if depth > maxDepth:
     return
   for i in 0 ..< childrenPerNode:
-    let p = prefix & @[i]
+    var p = newSeqOfCap[int](prefix.len + 1)
+    for value in prefix:
+      p.add(value)
+    p.add(i)
     var name = "n"
     for x in p:
       name.add("_")
@@ -124,6 +149,7 @@ proc expectedTreeNamesRec(result: var seq[string], prefix: seq[int], depth, maxD
     expectedTreeNamesRec(result, p, depth + 1, maxDepth, childrenPerNode)
 
 proc expectedTreeNames(maxDepth, childrenPerNode: int): seq[string] =
+  result = @[]
   result.add("root")
   expectedTreeNamesRec(result, @[], 1, maxDepth, childrenPerNode)
 
@@ -820,8 +846,8 @@ proc testDragUiCallbackAndDropState() =
 proc testFileSystemCursorDragAndDrop() =
   let root = getTempDir() / "nuigi-file-drag-test"
   if dirExists(root):
-    removeDir(root)
-  createDir(root)
+    removeTestDir(root)
+  createTestDir(root)
   try:
     let sourceParentPath = root / "source"
     let sourceFolderPath = sourceParentPath / "folder"
@@ -830,17 +856,17 @@ proc testFileSystemCursorDragAndDrop() =
     let targetPath = root / "target"
     let unrelatedPath = root / "unrelated"
     let cachedKindPath = root / "cached-kind"
-    createDir(sourceParentPath)
-    createDir(sourceFolderPath)
-    createDir(sourceChildPath)
-    createDir(targetPath)
-    createDir(unrelatedPath)
-    createDir(cachedKindPath)
-    writeFile(sourceFilePath, "drag")
+    createTestDir(sourceParentPath)
+    createTestDir(sourceFolderPath)
+    createTestDir(sourceChildPath)
+    createTestDir(targetPath)
+    createTestDir(unrelatedPath)
+    createTestDir(cachedKindPath)
+    onRaiseQuit(writeFile(sourceFilePath, "drag"))
 
     let cache = newFileSystemCache()
     require(fileSystemCursor(cachedKindPath, cache).kind == Folder, "initial directory kind should be Folder")
-    removeDir(cachedKindPath)
+    removeTestDir(cachedKindPath)
     require(fileSystemCursor(cachedKindPath, cache).kind == Folder, "shared cache should serve entry kind without rechecking the filesystem")
     let rootCursor = fileSystemCursor(root, cache)
     let sourceParent = fileSystemCursor(sourceParentPath, cache)
@@ -862,7 +888,7 @@ proc testFileSystemCursorDragAndDrop() =
     require(sourceParent.childCount() == 2, "source listing should be cached before the move")
     require(target.childCount() == 0, "target listing should be empty before the move")
     require(unrelated.childCount() == 0, "unrelated listing should be cached before the move")
-    writeFile(unrelatedPath / "late.txt", "cached")
+    onRaiseQuit(writeFile(unrelatedPath / "late.txt", "cached"))
 
     var sourceNav = FileSystemCursor(rootCursor.clone())
     require(sourceNav.enterChild(), "source folder should be reachable from root")
@@ -890,13 +916,13 @@ proc testFileSystemCursorDragAndDrop() =
     tree.toggleNode(sourceFolderNav)
     tree.toggleNode(targetNav)
 
-    proc expandedIndex(key: string): int =
+    proc expandedIndex(tree: TreeTable, key: string): int =
       for i in 0 .. tree.nodes.high:
         if tree.nodes[i].cursor != nil and tree.nodes[i].cursor.cursorKey() == key:
           return i
       return -1
 
-    let targetExpandedIndex = expandedIndex(targetPath)
+    let targetExpandedIndex = expandedIndex(tree, targetPath)
     require(targetExpandedIndex >= 0 and tree.nodes[targetExpandedIndex].childCount == 0,
       "target expansion should begin with a cached zero child count")
 
@@ -906,15 +932,15 @@ proc testFileSystemCursorDragAndDrop() =
     require(unrelated.childCount() == 0, "moving should not invalidate an unrelated listing")
 
     tree.refreshRenderedNode(sourceNav)
-    require(expandedIndex(sourceFolderPath) < 0, "rendered source should remove its missing expanded child")
-    let sourceExpandedIndex = expandedIndex(sourceParentPath)
+    require(expandedIndex(tree, sourceFolderPath) < 0, "rendered source should remove its missing expanded child")
+    let sourceExpandedIndex = expandedIndex(tree, sourceParentPath)
     require(sourceExpandedIndex >= 0 and tree.nodes[sourceExpandedIndex].childCount == 1,
       "rendered source should refresh its cached child count")
-    require(tree.nodes[expandedIndex(targetPath)].childCount == 0,
+    require(tree.nodes[expandedIndex(tree, targetPath)].childCount == 0,
       "non-rendered target should retain its cached child count")
 
     tree.refreshRenderedNode(targetNav)
-    require(tree.nodes[expandedIndex(targetPath)].childCount == 1,
+    require(tree.nodes[expandedIndex(tree, targetPath)].childCount == 1,
       "rendered target should refresh its cached child count")
 
     require(sourceFile.moveTo(target), "eligible file move should succeed")
@@ -924,7 +950,7 @@ proc testFileSystemCursorDragAndDrop() =
     require(target.childCount() == 2, "target cache should refresh after both moves")
   finally:
     if dirExists(root):
-      removeDir(root)
+      removeTestDir(root)
 
 type
   ReverseChildMode = enum
@@ -1656,7 +1682,7 @@ proc testTreeTableTreeTexts() =
   b.flushDeferredNodes()
 
   # Collect every tree-name label (texts ending with ':').
-  var foundNames: seq[string]
+  var foundNames: seq[string] = @[]
   for i in 0 ..< b.frame.texts.len:
     let t = b.frame.texts[i].text.value
     if t.len > 0 and t[^1] == ':':
@@ -1674,6 +1700,12 @@ proc testTreeTableTreeTexts() =
     if b.nodes[i].nodeDebugName() == "tree-table-row":
       rowNodeIdx = i
       break
+  if rowNodeIdx < 0:
+    for i in 0 ..< b.nodes.len:
+      let textIndex = b.nodes[i].textIndex.int
+      if textIndex > 0 and b.frame.texts[textIndex - 1].text.value == "root:":
+        rowNodeIdx = b.nodes[i].parent.int
+        break
   require(rowNodeIdx >= 0, "expected at least one tree row node")
 
   var colXs: seq[float32]

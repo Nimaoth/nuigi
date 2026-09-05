@@ -67,14 +67,14 @@ method moveNext(c: FocusTreeCursor, count: int = 1): bool =
   if c.path.len == 0 or c.index + count >= c.childrenPerNode:
     return false
   c.index += count
-  c.path[^1] = c.index
+  c.path[c.path.high] = c.index
   true
 
 method movePrev(c: FocusTreeCursor, count: int = 1): bool =
   if c.path.len == 0 or c.index - count < 0:
     return false
   c.index -= count
-  c.path[^1] = c.index
+  c.path[c.path.high] = c.index
   true
 
 proc testTreeTableFocusNavigation() =
@@ -87,7 +87,7 @@ proc testTreeTableFocusNavigation() =
     let _ = index
     b.label(cursor.cursorKey())
 
-  proc buildTree(b: var UiBuilder) =
+  proc buildTree(b: var UiBuilder) {.closure.} =
     b.node("focus-tree-table"):
       discard b.size(400.0'f32, 400.0'f32)
       if not initialized:
@@ -100,7 +100,7 @@ proc testTreeTableFocusNavigation() =
   proc rowFocusItem(b: UiBuilder, row: int): UiFocusItem =
     for item in b.frame.focusItems:
       if item.tabOrder == row and item.nodeIndex >= 0 and
-          b.frame.nodes[item.nodeIndex].nodeDebugName() == "tree-table-row":
+          FocusActivatable notin item.flags:
         return item
     require(false, "missing tree-table focus item for row " & $row)
     UiFocusItem()
@@ -229,7 +229,7 @@ proc testKeyboardFocusTraversal() =
   var firstId = noneNodeId()
   var secondId = noneNodeId()
 
-  proc buildFocusItems(b: var UiBuilder) =
+  proc buildFocusItems(b: var UiBuilder) {.closure.} =
     b.node("first-focus-item"):
       firstId = b.currentNode.id
       discard b.focusable()
@@ -282,7 +282,7 @@ proc testExplicitTabOrder() =
   var firstId = noneNodeId()
   var secondId = noneNodeId()
 
-  proc buildItems(b: var UiBuilder) =
+  proc buildItems(b: var UiBuilder) {.closure.} =
     b.node("built-first"):
       secondId = b.currentNode.id
       discard b.focusable(tabOrder = 20)
@@ -309,7 +309,7 @@ proc testExplicitDirectionalNavigation() =
   var leftId = noneNodeId()
   var rightId = noneNodeId()
 
-  proc buildItems(b: var UiBuilder, requestLeft = false) =
+  proc buildItems(b: var UiBuilder, requestLeft = false) {.closure.} =
     b.node("left-item"):
       leftId = b.currentNode.id
       discard b.focusable()

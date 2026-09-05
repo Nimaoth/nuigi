@@ -223,7 +223,7 @@ proc dynamicVirtualList*(b: var UiBuilder,
     inItemHeightHint: float32,
     inBuildItem: UiDynamicVirtualListItemProc,
   inItemUserData: int = 0,
-  inCustomRowLayout: UiCustomLayoutProc = nil,
+  inCustomRowLayout: nil UiCustomLayoutProc = nil,
   inCustomRowLayoutUserData: int = 0): UiDynamicVirtualListStorage {.discardable.} =
   prof("dynamicVirtualList")
   let scrollSpeed = 20.0'f32
