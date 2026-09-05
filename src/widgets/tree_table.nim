@@ -63,10 +63,12 @@ type
     highlightHoveredRow*: bool
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
+    indentationStep: float32
     focusRootId: UiNodeId
     focusCursors: Table[uint64, TreeCursor]
     focusCursorsInitialized: bool
     listStorage: UiDynamicVirtualListStorage
+    hideRoot*: bool
 
   TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
 
@@ -76,6 +78,8 @@ type
     columns*: seq[TableColumn]
       ## Per-logical-column sizing (logical 0 = combined indent+name, logical N>=1 = physical N+1).
       ## Same semantics as `widgets.tableColumn*` – Fixed/Fit/Fill/Proportional.
+    hideRoot*: bool
+      ## When true, the root is kept expanded but omitted from rendered rows.
     columnGap*: float32
       ## Gap between logical columns (also the gap between indent and name inside logical 0).
     showColumnLines*: bool
@@ -145,6 +149,7 @@ proc defaultTreeTableOptions*(): TreeTableOptions =
   ## Creates the standard tree-table appearance and layout options.
   result = TreeTableOptions(
     columns: @[],
+    hideRoot: false,
     columnGap: 4.0'f32,
     showColumnLines: false,
     columnLineThickness: 1.0'f32,
@@ -182,10 +187,12 @@ proc initTreeTableOptions*(
     hasCustomAlternatingColors: bool = false,
     highlightHoveredRow: bool = true,
     hoverColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
-    hasCustomHoverColor: bool = false): TreeTableOptions =
+    hasCustomHoverColor: bool = false,
+    hideRoot: bool = false): TreeTableOptions =
   ## Creates options from explicit column, separator, indentation, and row colors.
   result = default(TreeTableOptions)
   result.columns = @columns
+  result.hideRoot = hideRoot
   result.columnGap = columnGap
   result.showColumnLines = showColumnLines
   result.columnLineThickness = columnLineThickness
@@ -660,6 +667,12 @@ func preorderLess*(a, b: TreeCursor): bool =
 proc toggleNode*(e: var TreeTable, cursor: TreeCursor) =
   ## Toggles expansion while preserving stable slots and linked logical order.
   prof("toggleNode")
+  if e.hideRoot and cursor.cursorKey() == e.cursor.cursorKey():
+    if not e.initialized:
+      e.initializeTopology()
+    if e.rootNode < 0:
+      discard e.addExpandedNode(e.cursor, -1)
+    return
   e.expandAllWork.setLen(0)
   e.expandingAll = false
   if not e.initialized:
@@ -741,7 +754,8 @@ proc collapseAll*(e: var TreeTable) =
 
 proc countVisible(e: TreeTable): int =
   ## Returns the root plus all visible descendants of expanded nodes.
-  if e.rootNode < 0: 1 else: 1 + e.nodes[e.rootNode].totalChildren
+  let total = if e.rootNode < 0: 1 else: 1 + e.nodes[e.rootNode].totalChildren
+  if e.hideRoot: max(0, total - 1) else: total
 
 proc treeFocusId(e: TreeTable, cursor: TreeCursor): UiNodeId =
   e.focusRootId.deriveNodeId("tree-table-row:" & cursor.cursorKey())
@@ -749,7 +763,7 @@ proc treeFocusId(e: TreeTable, cursor: TreeCursor): UiNodeId =
 proc visibleRowIndex(e: TreeTable, cursor: TreeCursor): int =
   ## Resolves a visible cursor to its preorder row using expanded subtree totals.
   if cursor.path.len == 0:
-    return 0
+    return if e.hideRoot: -1 else: 0
   if e.rootNode < 0:
     return -1
   result = 0
@@ -770,6 +784,8 @@ proc visibleRowIndex(e: TreeTable, cursor: TreeCursor): int =
         break
     if depthIndex < cursor.path.high:
       parentIndex = nextParentIndex
+  if e.hideRoot:
+    dec result
 
 proc focusScopeId(e: TreeTable, cursor: TreeCursor): UiNodeId =
   if cursor.path.len == 0:
@@ -819,6 +835,8 @@ proc previousVisibleCursor(e: TreeTable, cursor: TreeCursor): TreeCursor =
   result = cursor.clone()
   if not result.movePrev():
     if result.exitChild():
+      if e.hideRoot and result.path.len == 0:
+        return nil
       return
     return nil
   while e.nodeIsExpanded(result, 0):
@@ -984,7 +1002,8 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   if not isExpanded:
     targetCursor = e.walkCursor.clone()
     if targetCursor.exitChild():
-      b.focusNavigationTarget(rowFocusId, NavLeft, b.registerFocusTarget(e, targetCursor))
+      if not e.hideRoot or targetCursor.path.len > 0:
+        b.focusNavigationTarget(rowFocusId, NavLeft, b.registerFocusTarget(e, targetCursor))
   targetCursor = e.walkCursor.clone()
   if isExpanded and targetCursor.enterChild():
     b.focusNavigationTarget(rowFocusId, NavRight, b.registerFocusTarget(e, targetCursor))
@@ -998,7 +1017,10 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   b.layoutHorizontal:
     discard b.fit().gap(2)
     b.node:
-      discard b.size(e.walkCursor.depth.float32 * 20, 1)
+      let rootDepth = if e.hideRoot: 1 else: 0
+      discard b.size(
+        max(0, e.walkCursor.depth - rootDepth).float32 * e.indentationStep,
+        1)
     b.node:
       b.debugName("symbol")
       discard b.size(14, 14).alignCenter()
@@ -1379,12 +1401,13 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
   if ctx.walkCursor == nil:
     ctx.walkCursor = ctx.cursor.clone()
     ctx.walkIndex = 0
+  let targetIndex = itemIndex + (if ctx.hideRoot: 1 else: 0)
   if ctx.walkIndex == 0:
-    if not ctx.seek(itemIndex):
+    if not ctx.seek(targetIndex):
       return
   block:
     prof("step")
-    while ctx.walkIndex < itemIndex:
+    while ctx.walkIndex < targetIndex:
       var walkCursor = ctx.walkCursor
       if not stepForward(walkCursor, ctx, ctx.walkNode):
         break
@@ -1406,6 +1429,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   if NodeStorageParent notin b.currentNode.flags:
     b.nodeStorageParent()
   ctx.cursor = cursor
+  ctx.hideRoot = options.hideRoot
   ctx.walkCursor = nil
   ctx.rowRenderer = rowRenderer
   ctx.alternatingRowBackground = options.alternatingRowBackground
@@ -1415,7 +1439,13 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.highlightHoveredRow = options.highlightHoveredRow
   ctx.hoverColor = options.hoverColor
   ctx.hasCustomHoverColor = options.hasCustomHoverColor
+  ctx.indentationStep = if options.indentationStep > 0.001'f32:
+    options.indentationStep
+  else:
+    20.0'f32
   ensureNodes(ctx)
+  if ctx.hideRoot and ctx.rootNode < 0:
+    ctx.expandNode(cursor)
 
   let input = b.frameCtx.input
   let rightPressed = KeyRight in input.keysPressed or

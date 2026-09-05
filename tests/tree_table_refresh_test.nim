@@ -301,6 +301,32 @@ proc testExpandNodeIsIdempotent() =
   require(treeTable.nodes[treeTable.rootNode].totalChildren == visibleCount,
     "expanding an expanded node should not change visible totals")
 
+proc testHiddenRootRemainsExpanded() =
+  let root = MutableNode(key: "root", children: @[
+    MutableNode(key: "first"),
+    MutableNode(key: "second")])
+  let rootCursor = newCursor(root, MutableTree())
+  var treeTable = TreeTable(cursor: rootCursor, hideRoot: true)
+
+  treeTable.toggleNode(rootCursor)
+  require(treeTable.rootNode >= 0,
+    "a hidden root should be initialized as expanded")
+  require(treeTable.nodes[treeTable.rootNode].totalChildren == 2,
+    "a hidden expanded root should expose its children")
+
+  treeTable.toggleNode(rootCursor)
+  require(treeTable.rootNode >= 0,
+    "a hidden root should not be collapsible")
+  require(treeTable.expandedCount == 1,
+    "repeated hidden-root toggles should not duplicate its expanded slot")
+
+  let defaults = defaultTreeTableOptions()
+  require(not defaults.hideRoot,
+    "tree tables should render their root by default")
+  let hidden = initTreeTableOptions([], hideRoot = true)
+  require(hidden.hideRoot,
+    "the options initializer should accept hidden-root mode")
+
 proc runTests() =
   debugLog("tree table refresh tests")
   testVisibleChainRebasesShiftedIndices()
@@ -309,6 +335,7 @@ proc runTests() =
   testSharedParentChainsResolveExpandedEdgesOnce()
   testIncrementalExpandAllCompletesAcrossBudgets()
   testExpandNodeIsIdempotent()
+  testHiddenRootRemainsExpanded()
   runTreeTableSeekTests()
   debugLog("tree table refresh tests succeeded")
 
