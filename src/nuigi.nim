@@ -1368,6 +1368,10 @@ proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inlin
 
 proc ensureNodeStyle*(b: var UiBuilder, node: ptr UiNode): var UiStyle {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's style data.
+  if b.currentNode.styleIndex.int <= b.themeStyles.len:
+    b.frame.styles.add(b.frame.styles[b.currentNode.styleIndex])
+    node.styleIndex = b.frame.styles.len.uint16
+    return b.frame.styles[^1]
   if node.styleIndex == 0:
     node.styleIndex = (b.frame.styles.len + 1).uint16
     b.frame.styles.add(b.defaultStyle)
@@ -1716,8 +1720,6 @@ proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: uint16) {.inline
   let slot = int(styleIndex)
   if slot <= 0 or slot > b.frame.styles.len:
     return
-  if b.currentNode.styleIndex.int < b.themeStyles.len:
-    b.currentNode.styleIndex = 0
   b.ensureNodeStyle(b.currentNode) = b.frame.styles[slot - 1]
 
 proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: int) {.inline.} =

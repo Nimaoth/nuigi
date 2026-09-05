@@ -6,6 +6,7 @@ import flex, grid
 
 import nev_navigation
 import widgets
+import dynamic_virtuallist
 
 include compat2
 
@@ -74,9 +75,29 @@ proc applyDebugOutlineToNode(b: var UiBuilder, targetId: UiNodeId, cutoff: int) 
       break
 
   if targetIdx >= 0:
-    var s = b.ensureNodeStyle(b.nodes[targetIdx].addr).addr
-    s.borderWidth = max(s.borderWidth, 2.0'f32)
-    s.borderColor = accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0)
+    let target = b.nodes[targetIdx].addr
+    let targetPos = b.absoluteNodePos(targetIdx)
+    let overlayIdx = b.currentNodeIndex(b.overlays)
+    if overlayIdx < 0:
+      return
+    let overlay = b.nodes[overlayIdx].addr
+    let overlayStyle = b.nodeStyle(overlay)
+    let overlayContentPos = b.absoluteNodePos(overlayIdx) + vec2(overlayStyle.paddingX, overlayStyle.paddingY)
+    let outlineColor = accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0)
+    var commands = b.frame.arena[].allocEmptyArray(1, UiRenderCommand)
+    commands.add UiRenderCommand(
+      kind: CmdRectStroke,
+      nodeIndex: targetIdx.int32,
+      color: outlineColor,
+      size: target.size,
+      radius: b.nodeStyle(target).cornerRadius,
+      thickness: 2.0'f32,
+    )
+    b.withParent(overlayIdx):
+      b.node("debug-node-outline"):
+        discard b.position(targetPos.x - overlayContentPos.x, targetPos.y - overlayContentPos.y)
+        discard b.size(target.size.x, target.size.y).padding(0).noHover()
+        discard b.customRenderCommands(commands)
 
 type
   UiNodeStorageStats = object
@@ -496,24 +517,21 @@ type
     cursor: DebugTreeCursor
     lastRenderedIndex: int
     cutoff: int
-    viewportH: float32
 
   DebugPanel* = object
-    scrollOffset: float
-    scrollOffset2: float
     rowHoverTarget: UiNodeId
     rowHoverFromTree: bool
     treeListData: DebugTreeListData
+    treeListStorage: UiDynamicVirtualListStorage
 
 proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall.} =
   prof("buildDebugListEntry")
   if userData == 0:
     return
+  discard b.fitY()
   let panel = cast[ptr DebugPanel](userData)
   let data = panel.treeListData.addr
   if data.lastRenderedIndex < 0:
-    if b.stack.len >= 2:
-      data.viewportH = b.frame.nodes[b.stack[^2]].size.y
     data.cursor = initDebugTreeCursor(0)
     data.cursor.skipToN(b.nodes, data.cutoff, itemIndex)
   else:
@@ -624,22 +642,16 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
           let targetNodeIdx = b.currentNodeIndex(debugPanel.rowHoverTarget)
           if targetNodeIdx >= 0 and targetNodeIdx < cutoff:
             let targetItemIdx = dfsIndexOf(b.nodes, cutoff, targetNodeIdx)
-            if targetItemIdx >= 0:
-              let itemH = 24.0'f32
-              let vpH = debugPanel.treeListData.viewportH
-              if debugPanel.rowHoverFromTree:
-                let margin = float(itemH)
-                let itemTop = float(targetItemIdx) * float(itemH)
-                let itemBot = itemTop + float(itemH)
-                if itemTop - margin < debugPanel.scrollOffset2:
-                  debugPanel.scrollOffset2 = itemTop - margin
-                elif itemBot + margin > debugPanel.scrollOffset2 + float(vpH):
-                  debugPanel.scrollOffset2 = itemBot + margin - float(vpH)
-              else:
-                let itemCenter = float(targetItemIdx) * float(itemH) + float(itemH) * 0.5
-                debugPanel.scrollOffset2 = itemCenter - float(vpH) * 0.5
+            if targetItemIdx >= 0 and not debugPanel.rowHoverFromTree and debugPanel.treeListStorage != nil:
+              debugPanel.treeListStorage.centerItem(targetItemIdx)
         let rowHeight = b.themeTextStyle(UiStyleIndexDefaultText).fontSize * b.fontScale + 6
-        b.virtualList(debugPanel.scrollOffset2, cutoff, rowHeight, buildDebugListEntry, cast[int](debugPanel.addr))
+        b.layoutVertical("debug-panel-list-layout"):
+          discard b.fill()
+          debugPanel.treeListStorage = b.dynamicVirtualList(
+            cutoff,
+            rowHeight,
+            buildDebugListEntry,
+            cast[int](debugPanel.addr))
 
   if debugPanel.rowHoverTarget != noneNodeId():
     b.applyDebugOutlineToNode(debugPanel.rowHoverTarget, cutoff)

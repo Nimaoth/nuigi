@@ -60,6 +60,7 @@ type
     alternatingColorEven*: UiColor
     alternatingColorOdd*: UiColor
     hasCustomAlternatingColors*: bool
+    highlightHoveredRow*: bool
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
     focusRootId: UiNodeId
@@ -104,6 +105,8 @@ type
     alternatingColorOdd*: UiColor
       ## Background for odd rows (index % 2 == 1). Falls back to `UiStyleIndexRowAlt`.
     hasCustomAlternatingColors*: bool
+    highlightHoveredRow*: bool
+      ## When true, hovering a row highlights its full background.
     hoverColor*: UiColor
       ## Hover highlight. When custom, used verbatim; otherwise a theme hover
       ## color distinct from both alternating colors (`ButtonHover`).
@@ -156,6 +159,7 @@ proc defaultTreeTableOptions*(): TreeTableOptions =
     alternatingColorEven: UiColor(r: 0, g: 0, b: 0, a: 0),
     alternatingColorOdd: UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomAlternatingColors: false,
+    highlightHoveredRow: true,
     hoverColor: UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomHoverColor: false,
   )
@@ -176,6 +180,7 @@ proc initTreeTableOptions*(
     alternatingColorEven: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     alternatingColorOdd: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomAlternatingColors: bool = false,
+    highlightHoveredRow: bool = true,
     hoverColor: UiColor = UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomHoverColor: bool = false): TreeTableOptions =
   ## Creates options from explicit column, separator, indentation, and row colors.
@@ -195,6 +200,7 @@ proc initTreeTableOptions*(
   result.alternatingColorOdd = alternatingColorOdd
   result.hasCustomAlternatingColors = hasCustomAlternatingColors or
     (alternatingColorEven.a > 0.001'f32 or alternatingColorOdd.a > 0.001'f32)
+  result.highlightHoveredRow = highlightHoveredRow
   result.hoverColor = hoverColor
   result.hasCustomHoverColor = hasCustomHoverColor or hoverColor.a > 0.001'f32
 
@@ -942,7 +948,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
     discard b.fillBackground().backgroundColor(bg)
 
   let hovered = b.wasHovered(includeChildren = true)
-  if hovered:
+  if e.highlightHoveredRow and hovered:
     let hoverBg = if e.hasCustomHoverColor: e.hoverColor
       else: b.themeStyle(UiStyleIndexButtonHover)[].fillColor
     discard b.fillBackground().backgroundColor(hoverBg)
@@ -992,10 +998,10 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
     discard b.fit().gap(2)
     b.node:
       discard b.size(e.walkCursor.depth.float32 * 20, 1)
-    if hasChildren:
-      b.node:
-        b.debugName("symbol")
-        discard b.size(14, 14).alignCenter()
+    b.node:
+      b.debugName("symbol")
+      discard b.size(14, 14).alignCenter()
+      if hasChildren:
         if b.wasClicked(includeChildren = true):
           e.pendingToggleCursor = e.walkCursor.clone()
         # chevron mesh via custom render command (right when collapsed, down when expanded)
@@ -1402,6 +1408,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.alternatingColorEven = options.alternatingColorEven
   ctx.alternatingColorOdd = options.alternatingColorOdd
   ctx.hasCustomAlternatingColors = options.hasCustomAlternatingColors
+  ctx.highlightHoveredRow = options.highlightHoveredRow
   ctx.hoverColor = options.hoverColor
   ctx.hasCustomHoverColor = options.hasCustomHoverColor
   ensureNodes(ctx)
@@ -1463,13 +1470,10 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       ctx.listStorage.centerItem(focusedRow)
   b.label("Items: " & $count):
     discard b.fitX()
-  ctx.listStorage = b.dynamicVirtualList(count, 24.0'f32, buildTreeTableRow, b.currentNodeIndex)
-  let last = b.frame.nodes[b.lastNodeIndex].addr
-  let containerIndex = b.frame.nodes[last.lastChild].nextSibling
-
   let hasColumns = options.columns.len > 0
   let hasColumnLines = options.showColumnLines
   let hasIndentLines = options.showIndentationLines
+  var layoutUserData = 0
   if hasColumns or hasColumnLines or hasIndentLines:
     var colArr: ArrayView[TableColumn]
     var colPtr: ptr UncheckedArray[TableColumn] = nil
@@ -1501,11 +1505,14 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       hoverColor: options.hoverColor,
       hasCustomHoverColor: options.hasCustomHoverColor,
     )
-    b.withParent(b.frame.nodes[containerIndex].id):
-      discard b.customLayout(treeTableColumnLayout, cast[int](layoutArr.data))
-  else:
-    b.withParent(b.frame.nodes[containerIndex].id):
-      discard b.customLayout(treeTableColumnLayout, 0)
+    layoutUserData = cast[int](layoutArr.data)
+  ctx.listStorage = b.dynamicVirtualList(
+    count,
+    24.0'f32,
+    buildTreeTableRow,
+    b.currentNodeIndex,
+    treeTableColumnLayout,
+    layoutUserData)
   b.popFocusScope()
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, columns: openArray[TableColumn], columnGap: float32, rowRenderer: TreeTableRowRenderer) =

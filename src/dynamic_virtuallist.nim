@@ -9,6 +9,7 @@ type UiDynamicVirtualListHeight* = object
 
 type UiDynamicVirtualListStorage* = ref object of UiNodeStorageData
   heights*: seq[UiDynamicVirtualListHeight]
+  renderedItemIndexes: seq[int]
   measuredHeightTotal*: float32
   itemCount: int
   heightHint: float32
@@ -16,6 +17,9 @@ type UiDynamicVirtualListStorage* = ref object of UiNodeStorageData
   scrollVelocityY: float32
   buildItem: UiDynamicVirtualListItemProc
   buildItemUserData: int
+  customRowLayout: UiCustomLayoutProc
+  customRowLayoutUserData: int
+  previousFirstVisibleItem: int
   viewportHeight: float32
   scrollbarTrackIndex: int
   scrollbarThumbIndex: int
@@ -24,7 +28,7 @@ proc getOrCreateDynamicVirtualListStorage*(b: var UiBuilder, node: ptr UiNode): 
   let existing = b.nodeStorageGet(node)
   if existing != nil:
     return cast[UiDynamicVirtualListStorage](existing)
-  var storage = UiDynamicVirtualListStorage()
+  var storage = UiDynamicVirtualListStorage(previousFirstVisibleItem: -1)
   b.nodeStorage(node, storage)
   return storage
 
@@ -159,31 +163,68 @@ proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: in
 
   var visibleBottom = storage.scrollOffsetY + viewportHeight
   var itemIndex = storage.firstVisibleItem(storage.itemCount, heightHint, storage.scrollOffsetY)
+  let firstRenderedItem = itemIndex
+  let firstItemEnteredFromAbove = storage.previousFirstVisibleItem >= 0 and
+    firstRenderedItem < storage.previousFirstVisibleItem
   storage.viewportHeight = viewportHeight
+  storage.renderedItemIndexes.setLen(0)
 
   while itemIndex < storage.itemCount:
     let itemTop = storage.estimatedItemTop(itemIndex, heightHint)
-    if itemTop >= visibleBottom:
+    let isLookaheadItem = itemTop >= visibleBottom
+    if isLookaheadItem and storage.customRowLayout == nil:
       break
     let itemNodeIndex = b.nodes.len
+    storage.renderedItemIndexes.add(itemIndex)
     b.node(itemIndex.uint64):
       discard b.position(0.0'f32, itemTop - storage.scrollOffsetY).fillX()
       storage.buildItem(b, itemIndex, storage.buildItemUserData)
     discard b.postProcessChildren(itemNodeIndex)
-
-    let measuredHeight = max(1.0'f32, b.nodes[itemNodeIndex].size.y)
-    let heightDelta = storage.cacheHeight(itemIndex, measuredHeight)
-    if itemTop < storage.scrollOffsetY and abs(heightDelta) > 0.0001'f32:
-      storage.scrollOffsetY += heightDelta
-      visibleBottom += heightDelta
-      b.nodes[itemNodeIndex].pos.y -= heightDelta
+    if storage.customRowLayout == nil:
+      let previousHeight = storage.estimatedItemHeight(itemIndex, heightHint)
+      let measuredHeight = max(1.0'f32, b.nodes[itemNodeIndex].size.y)
+      let heightDelta = storage.cacheHeight(itemIndex, measuredHeight)
+      let preserveFollowingRows = itemIndex == firstRenderedItem and
+        firstItemEnteredFromAbove
+      if (itemTop + previousHeight <= storage.scrollOffsetY or
+          preserveFollowingRows) and
+          abs(heightDelta) > 0.0001'f32:
+        storage.scrollOffsetY += heightDelta
+        visibleBottom += heightDelta
+        b.nodes[itemNodeIndex].pos.y -= heightDelta
     inc itemIndex
+    if isLookaheadItem:
+      break
+
+  if storage.customRowLayout != nil:
+    storage.customRowLayout(b, nodeIdx, storage.customRowLayoutUserData)
+    var renderedListIndex = 0
+    for itemNodeIdx in b.children(nodeIdx):
+      if renderedListIndex >= storage.renderedItemIndexes.len:
+        break
+      let renderedItemIndex = storage.renderedItemIndexes[renderedListIndex]
+      let oldItemTop = storage.estimatedItemTop(renderedItemIndex, heightHint)
+      let previousHeight = storage.estimatedItemHeight(renderedItemIndex, heightHint)
+      let measuredHeight = max(1.0'f32, b.nodes[itemNodeIdx].size.y)
+      let heightDelta = storage.cacheHeight(renderedItemIndex, measuredHeight)
+      let preserveFollowingRows = renderedListIndex == 0 and
+        firstItemEnteredFromAbove
+      if (oldItemTop + previousHeight <= storage.scrollOffsetY or
+          preserveFollowingRows) and
+          abs(heightDelta) > 0.0001'f32:
+        storage.scrollOffsetY += heightDelta
+      let correctedItemTop = storage.estimatedItemTop(renderedItemIndex, heightHint)
+      b.nodes[itemNodeIdx].pos.y = correctedItemTop - storage.scrollOffsetY
+      inc renderedListIndex
+  storage.previousFirstVisibleItem = firstRenderedItem
 
 proc dynamicVirtualList*(b: var UiBuilder,
     inItemCount: int,
     inItemHeightHint: float32,
     inBuildItem: UiDynamicVirtualListItemProc,
-  inItemUserData: int = 0): UiDynamicVirtualListStorage {.discardable.} =
+  inItemUserData: int = 0,
+  inCustomRowLayout: UiCustomLayoutProc = nil,
+  inCustomRowLayoutUserData: int = 0): UiDynamicVirtualListStorage {.discardable.} =
   prof("dynamicVirtualList")
   let scrollSpeed = 20.0'f32
   let scrollDamping = 10.0'f32
@@ -211,6 +252,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
       storage.heightHint = heightHint
       storage.buildItem = inBuildItem
       storage.buildItemUserData = inItemUserData
+      storage.customRowLayout = inCustomRowLayout
+      storage.customRowLayoutUserData = inCustomRowLayoutUserData
 
       let input = b.frameCtx.input
       let frameTime = min(0.1'f32, max(0.0'f32, b.frameCtx.animationTick))
@@ -257,7 +300,12 @@ proc dynamicVirtualList*(b: var UiBuilder,
       discard b.fillBackground()
 
       if viewportIndex >= 0 and viewportIndex < b.nodes.len:
-        let viewportHeight = max(1.0'f32, b.nodes[viewportIndex].size.y)
+        let currentViewportHeight = b.nodes[viewportIndex].size.y
+        let viewportHeight = max(1.0'f32,
+          if storage.viewportHeight > 0.0'f32:
+            storage.viewportHeight
+          else:
+            currentViewportHeight)
         let totalHeight = storage.estimatedTotalHeight(itemCount, heightHint)
         if totalHeight > viewportHeight:
           scrollRange = max(1.0'f32, totalHeight - viewportHeight)
