@@ -1,6 +1,5 @@
 switch("mm", "arc")
 switch("d", "useMalloc")
-switch("d", "vmathObjBased")
 switch("nimcache", "./build/nimcache")
 switch("debuginfo", "on")
 switch("debugger", "native")

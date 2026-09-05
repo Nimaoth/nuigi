@@ -1,7 +1,7 @@
 
 import std/[parseopt, options, strutils, os, strformat, dirs, files, sequtils, unicode, osproc, times, tables, json, jsonutils, threadpool, sets, sugar, algorithm, strtabs]
 
-let windowsMesonPath = "meson.exe"
+let windowsMesonPath = "C:/Users/nimao/AppData/Roaming/Python/Python310/Scripts/meson.exe"
 
 proc findMsBuild(): string =
   # Locate MSBuild.exe so the same build works locally and on CI (e.g. GitHub
@@ -270,15 +270,15 @@ proc buildNuiDemo(compiler: NimCompiler) =
   let sdlLink = if wasm: "--passL:-Lbuild/sdl3_wasm --passL:-lSDL3" else: "--passL:-Lbuild"
   case compiler
   of Nim2:
-    shell &"nim c {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nim c {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nim2Ic:
-    shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
+    shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
     shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
-    shell &"nimony l -d:llvm {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nimony l -d:llvm {outFlag} -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:
-    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
 
   if wasm:
     createDir("build")

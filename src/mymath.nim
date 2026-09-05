@@ -1,8 +1,4 @@
-when not defined(nimony):
-  import vmath
-  export vmath
-
-when defined(nimony):
+when true:
   ##[
 
   Your one stop shop for vector math routines for 2d and 3d graphics.
@@ -35,7 +31,7 @@ when defined(nimony):
 
   ]##
 
-  import std/[math, strutils, hashes, formatfloat]
+  import std/[math, hashes]
   export math
 
   {.push inline.}
@@ -53,9 +49,6 @@ when defined(nimony):
     proc `<=`(a, b: Self): bool
     proc `<`(a, b: Self): bool
     proc `==`(a, b: Self): bool
-    proc `div`(a, b: Self): bool
-    proc `mod`(a, b: Self): bool
-    proc `zmod`(a, b: Self): bool
     proc trunc(f: Self): Self
     proc sqrt(f: Self): Self
     proc abs(f: Self): Self
@@ -74,9 +67,6 @@ when defined(nimony):
     proc `<=`(a, b: Self): bool
     proc `<`(a, b: Self): bool
     proc `==`(a, b: Self): bool
-    proc `div`(a, b: Self): bool
-    proc `mod`(a, b: Self): bool
-    proc `zmod`(a, b: Self): bool
     proc trunc(f: Self): Self
     proc sqrt(f: Self): Self
     proc sin(f: Self): Self
@@ -84,6 +74,18 @@ when defined(nimony):
 
   type HasAlmostEq = concept
     proc `~=`(a, b: Self): bool
+
+  type HashableValue = concept
+    proc hash(value: Self): Hash
+
+  type ModuloScalar = concept
+    proc `mod`(a, b: Self): Self
+
+  type DivScalar = concept
+    proc `div`(a, b: Self): Self
+
+  type ZmodScalar = concept
+    proc `zmod`(a, b: Self): Self
 
   type
     GVec2*[T] = object
@@ -374,9 +376,9 @@ when defined(nimony):
   func vec3*(): Vec3 = gvec3[float32](float32(0), float32(0), float32(0))
   func vec4*(): Vec4 = gvec4[float32](float32(0), float32(0), float32(0), float32(0))
 
-  func vec2*[T](x, y: T): Vec2 = gvec2[float32](x.float32, y.float32)
-  func vec3*[T](x, y, z: T): Vec3 = gvec3[float32](x.float32, y.float32, z.float32)
-  func vec4*[T](x, y, z, w: T): Vec4 = gvec4[float32](x.float32, y.float32, z.float32, w.float32)
+  func vec2*[T, U](x: T, y: U): Vec2 = gvec2[float32](x.float32, y.float32)
+  func vec3*[T, U, V](x: T, y: U, z: V): Vec3 = gvec3[float32](x.float32, y.float32, z.float32)
+  func vec4*[T, U, V, W](x: T, y: U, z: V, w: W): Vec4 = gvec4[float32](x.float32, y.float32, z.float32, w.float32)
 
   func vec2*[T](x: T): Vec2 = gvec2[float32](x.float32, x.float32)
   func vec3*[T](x: T): Vec3 = gvec3[float32](x.float32, x.float32, x.float32)
@@ -432,10 +434,6 @@ when defined(nimony):
 
   # func uvec4*(ivec4: IVec4): Uvec4 =
   #   uvec4(ivec4.x.uint32, ivec4.y.uint32, ivec4.z.uint32, ivec4.w.uint32)
-
-  # when not defined(nimdoc) or not isMainModule:
-  #   # TODO when https://github.com/nim-lang/Nim/issues/13063 is fixed use macros.
-  #   include vmath/swizzle
 
   # func `==`*[T: Scalar](a, b: GVec2[T]): bool =
   #   a.x == b.x and a.y == b.y
@@ -495,35 +493,35 @@ when defined(nimony):
   func `/`*[T: Scalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`/`(a, b.x), `/`(a, b.y), `/`(a, b.z))
   func `/`*[T: Scalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`/`(a, b.x), `/`(a, b.y), `/`(a, b.z), `/`(a, b.w))
 
-  func `mod`*[T: Scalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`mod`(a.x, b.x), `mod`(a.y, b.y))
-  func `mod`*[T: Scalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`mod`(a.x, b.x), `mod`(a.y, b.y), `mod`(a.z, b.z))
-  func `mod`*[T: Scalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`mod`(a.x, b.x), `mod`(a.y, b.y), `mod`(a.z, b.z), `mod`(a.w, b.w))
-  func `mod`*[T: Scalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`mod`(a.x, b), `mod`(a.y, b))
-  func `mod`*[T: Scalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`mod`(a.x, b), `mod`(a.y, b), `mod`(a.z, b))
-  func `mod`*[T: Scalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`mod`(a.x, b), `mod`(a.y, b), `mod`(a.z, b), `mod`(a.w, b))
-  func `mod`*[T: Scalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`mod`(a, b.x), `mod`(a, b.y))
-  func `mod`*[T: Scalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`mod`(a, b.x), `mod`(a, b.y), `mod`(a, b.z))
-  func `mod`*[T: Scalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`mod`(a, b.x), `mod`(a, b.y), `mod`(a, b.z), `mod`(a, b.w))
+  func `mod`*[T: ModuloScalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`mod`(a.x, b.x), `mod`(a.y, b.y))
+  func `mod`*[T: ModuloScalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`mod`(a.x, b.x), `mod`(a.y, b.y), `mod`(a.z, b.z))
+  func `mod`*[T: ModuloScalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`mod`(a.x, b.x), `mod`(a.y, b.y), `mod`(a.z, b.z), `mod`(a.w, b.w))
+  func `mod`*[T: ModuloScalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`mod`(a.x, b), `mod`(a.y, b))
+  func `mod`*[T: ModuloScalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`mod`(a.x, b), `mod`(a.y, b), `mod`(a.z, b))
+  func `mod`*[T: ModuloScalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`mod`(a.x, b), `mod`(a.y, b), `mod`(a.z, b), `mod`(a.w, b))
+  func `mod`*[T: ModuloScalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`mod`(a, b.x), `mod`(a, b.y))
+  func `mod`*[T: ModuloScalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`mod`(a, b.x), `mod`(a, b.y), `mod`(a, b.z))
+  func `mod`*[T: ModuloScalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`mod`(a, b.x), `mod`(a, b.y), `mod`(a, b.z), `mod`(a, b.w))
 
-  func `div`*[T: Scalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`div`(a.x, b.x), `div`(a.y, b.y))
-  func `div`*[T: Scalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`div`(a.x, b.x), `div`(a.y, b.y), `div`(a.z, b.z))
-  func `div`*[T: Scalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`div`(a.x, b.x), `div`(a.y, b.y), `div`(a.z, b.z), `div`(a.w, b.w))
-  func `div`*[T: Scalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`div`(a.x, b), `div`(a.y, b))
-  func `div`*[T: Scalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`div`(a.x, b), `div`(a.y, b), `div`(a.z, b))
-  func `div`*[T: Scalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`div`(a.x, b), `div`(a.y, b), `div`(a.z, b), `div`(a.w, b))
-  func `div`*[T: Scalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`div`(a, b.x), `div`(a, b.y))
-  func `div`*[T: Scalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`div`(a, b.x), `div`(a, b.y), `div`(a, b.z))
-  func `div`*[T: Scalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`div`(a, b.x), `div`(a, b.y), `div`(a, b.z), `div`(a, b.w))
+  func `div`*[T: DivScalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`div`(a.x, b.x), `div`(a.y, b.y))
+  func `div`*[T: DivScalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`div`(a.x, b.x), `div`(a.y, b.y), `div`(a.z, b.z))
+  func `div`*[T: DivScalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`div`(a.x, b.x), `div`(a.y, b.y), `div`(a.z, b.z), `div`(a.w, b.w))
+  func `div`*[T: DivScalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`div`(a.x, b), `div`(a.y, b))
+  func `div`*[T: DivScalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`div`(a.x, b), `div`(a.y, b), `div`(a.z, b))
+  func `div`*[T: DivScalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`div`(a.x, b), `div`(a.y, b), `div`(a.z, b), `div`(a.w, b))
+  func `div`*[T: DivScalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`div`(a, b.x), `div`(a, b.y))
+  func `div`*[T: DivScalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`div`(a, b.x), `div`(a, b.y), `div`(a, b.z))
+  func `div`*[T: DivScalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`div`(a, b.x), `div`(a, b.y), `div`(a, b.z), `div`(a, b.w))
 
-  func `zmod`*[T: Scalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y))
-  func `zmod`*[T: Scalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y), `zmod`(a.z, b.z))
-  func `zmod`*[T: Scalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y), `zmod`(a.z, b.z), `zmod`(a.w, b.w))
-  func `zmod`*[T: Scalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`zmod`(a.x, b), `zmod`(a.y, b))
-  func `zmod`*[T: Scalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`zmod`(a.x, b), `zmod`(a.y, b), `zmod`(a.z, b))
-  func `zmod`*[T: Scalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`zmod`(a.x, b), `zmod`(a.y, b), `zmod`(a.z, b), `zmod`(a.w, b))
-  func `zmod`*[T: Scalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`zmod`(a, b.x), `zmod`(a, b.y))
-  func `zmod`*[T: Scalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`zmod`(a, b.x), `zmod`(a, b.y), `zmod`(a, b.z))
-  func `zmod`*[T: Scalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`zmod`(a, b.x), `zmod`(a, b.y), `zmod`(a, b.z), `zmod`(a, b.w))
+  func `zmod`*[T: ZmodScalar](a, b: GVec2[T]): GVec2[T] = gvec2[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y))
+  func `zmod`*[T: ZmodScalar](a, b: GVec3[T]): GVec3[T] = gvec3[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y), `zmod`(a.z, b.z))
+  func `zmod`*[T: ZmodScalar](a, b: GVec4[T]): GVec4[T] = gvec4[T](`zmod`(a.x, b.x), `zmod`(a.y, b.y), `zmod`(a.z, b.z), `zmod`(a.w, b.w))
+  func `zmod`*[T: ZmodScalar](a: GVec2[T], b: T): GVec2[T] = gvec2[T](`zmod`(a.x, b), `zmod`(a.y, b))
+  func `zmod`*[T: ZmodScalar](a: GVec3[T], b: T): GVec3[T] = gvec3[T](`zmod`(a.x, b), `zmod`(a.y, b), `zmod`(a.z, b))
+  func `zmod`*[T: ZmodScalar](a: GVec4[T], b: T): GVec4[T] = gvec4[T](`zmod`(a.x, b), `zmod`(a.y, b), `zmod`(a.z, b), `zmod`(a.w, b))
+  func `zmod`*[T: ZmodScalar](a: T, b: GVec2[T]): GVec2[T] = gvec2[T](`zmod`(a, b.x), `zmod`(a, b.y))
+  func `zmod`*[T: ZmodScalar](a: T, b: GVec3[T]): GVec3[T] = gvec3[T](`zmod`(a, b.x), `zmod`(a, b.y), `zmod`(a, b.z))
+  func `zmod`*[T: ZmodScalar](a: T, b: GVec4[T]): GVec4[T] = gvec4[T](`zmod`(a, b.x), `zmod`(a, b.y), `zmod`(a, b.z), `zmod`(a, b.w))
 
   func `+=`*[T: Scalar](a: var GVec2[T], b: GVec2[T]) =
     `+=`(a.x, b.x)
@@ -1889,15 +1887,15 @@ when defined(nimony):
   #   result.y = arcsin(2 * (w * y - z * x))
   #   result.z = arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))
 
-  func hash*[T: Hashable](x: GVec2[T]): Hash {.inline.} =
+  func hash*[T: HashableValue](x: GVec2[T]): Hash {.inline.} =
     result = hash(x.x) !& hash(x.y)
     result = !$result
 
-  func hash*[T: Hashable](x: GVec3[T]): Hash {.inline.} =
+  func hash*[T: HashableValue](x: GVec3[T]): Hash {.inline.} =
     result = hash(x.x) !& hash(x.y) !& hash(x.z)
     result = !$result
 
-  func hash*[T: Hashable](x: GVec4[T]): Hash {.inline.} =
+  func hash*[T: HashableValue](x: GVec4[T]): Hash {.inline.} =
     result = hash(x.x) !& hash(x.y) !& hash(x.z) !& hash(x.w)
     result = !$result
 

@@ -6,4 +6,3 @@ license       = "MIT"
 srcDir        = "src"
 
 requires "nim >= 2.2.6"
-requires "vmath"
