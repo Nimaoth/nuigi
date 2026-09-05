@@ -1620,8 +1620,23 @@ when not defined(wasm):
     discard b.text(dragData.cursor.fieldName & (if canDrop: " - move here" else: " - cannot move here")).fit()
 
 var treeTableShowColumnLines = true
+var treeTableHideRoot = false
+var treeTableColumnGap = 4.0'f32
+var treeTableColumnLineThickness = 1.0'f32
+var treeTableColumnLineColor = rgba(0.55, 0.58, 0.64, 1.0)
+var treeTableCustomColumnLineColor = false
 var treeTableShowIndentationLines = true
+var treeTableIndentationLineThickness = 1.0'f32
+var treeTableIndentationLineColor = rgba(0.45, 0.48, 0.54, 1.0)
+var treeTableCustomIndentationLineColor = false
+var treeTableIndentationStep = 20.0'f32
 var treeTableAlternatingRowColors = true
+var treeTableAlternatingColorEven = rgba(0.16, 0.17, 0.20, 1.0)
+var treeTableAlternatingColorOdd = rgba(0.20, 0.21, 0.24, 1.0)
+var treeTableCustomAlternatingColors = false
+var treeTableHighlightHoveredRow = true
+var treeTableHoverColor = rgba(0.28, 0.36, 0.48, 1.0)
+var treeTableCustomHoverColor = false
 var treeTableAlternatingRowHeights = false
 proc buildTreeTableExample(b: var UiBuilder) =
   let parent = b.currentNode
@@ -1641,11 +1656,59 @@ proc buildTreeTableExample(b: var UiBuilder) =
       discard b.fillX().fontSize(13)
         .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.layoutVertical("tree-table-options"):
-      discard b.fitX().fitY().gap(12)
-      if b.checkbox("Show column lines", treeTableShowColumnLines): discard
-      if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
-      if b.checkbox("Alternating background colors", treeTableAlternatingRowColors): discard
-      if b.checkbox("Alternating row heights", treeTableAlternatingRowHeights): discard
+      discard b.fillX().fitY().gap(8)
+      b.node("tree-table-options-scroll"):
+        discard b.fillX().height(220).padding(4)
+        b.scrollBox:
+          b.tableLayout([tableColumnFit(), tableColumnFill()], 12.0'f32, 4.0'f32):
+            discard b.fillX().fitY()
+
+            template optionRow(name: string, body: untyped) =
+              b.node:
+                discard b.fitY().padding(4)
+                discard b.text(name).fit()
+              b.node:
+                discard b.fillX().fitY().padding(4)
+                body
+
+            optionRow("Hide root"):
+              if b.checkbox("", treeTableHideRoot, fillXInVertical = false): discard
+            optionRow("Column gap"):
+              discard b.dragFloat(treeTableColumnGap, 4.0'f32, 0.0'f32, 40.0'f32)
+            optionRow("Show column lines"):
+              if b.checkbox("", treeTableShowColumnLines, fillXInVertical = false): discard
+            optionRow("Column line thickness"):
+              discard b.dragFloat(treeTableColumnLineThickness, 1.0'f32, 1.0'f32, 10.0'f32)
+            optionRow("Custom column line color"):
+              if b.checkbox("", treeTableCustomColumnLineColor, fillXInVertical = false): discard
+            optionRow("Column line color"):
+              if b.colorPicker(treeTableColumnLineColor): discard
+            optionRow("Show indentation lines"):
+              if b.checkbox("", treeTableShowIndentationLines, fillXInVertical = false): discard
+            optionRow("Indentation line thickness"):
+              discard b.dragFloat(treeTableIndentationLineThickness, 1.0'f32, 1.0'f32, 10.0'f32)
+            optionRow("Custom indentation line color"):
+              if b.checkbox("", treeTableCustomIndentationLineColor, fillXInVertical = false): discard
+            optionRow("Indentation line color"):
+              if b.colorPicker(treeTableIndentationLineColor): discard
+            optionRow("Indentation step"):
+              discard b.dragFloat(treeTableIndentationStep, 20.0'f32, 1.0'f32, 80.0'f32)
+            optionRow("Alternating background colors"):
+              if b.checkbox("", treeTableAlternatingRowColors, fillXInVertical = false): discard
+            optionRow("Custom alternating colors"):
+              if b.checkbox("", treeTableCustomAlternatingColors, fillXInVertical = false): discard
+            optionRow("Even row color"):
+              if b.colorPicker(treeTableAlternatingColorEven): discard
+            optionRow("Odd row color"):
+              if b.colorPicker(treeTableAlternatingColorOdd): discard
+            optionRow("Highlight hovered row"):
+              if b.checkbox("", treeTableHighlightHoveredRow, fillXInVertical = false): discard
+            optionRow("Custom hover color"):
+              if b.checkbox("", treeTableCustomHoverColor, fillXInVertical = false): discard
+            optionRow("Hover color"):
+              if b.colorPicker(treeTableHoverColor): discard
+            optionRow("Alternating row heights"):
+              if b.checkbox("", treeTableAlternatingRowHeights, fillXInVertical = false): discard
       if b.button("Reset tree"):
         resetDemoTree()
 
@@ -1741,9 +1804,24 @@ proc buildTreeTableExample(b: var UiBuilder) =
 
           var opts = defaultTreeTableOptions()
           opts.columns = @[tableColumnFill(), tableColumnFill(), tableColumnFit(), tableColumnFit(), tableColumnFit()]
+          opts.hideRoot = treeTableHideRoot
+          opts.columnGap = treeTableColumnGap
           opts.showColumnLines = treeTableShowColumnLines
+          opts.columnLineThickness = treeTableColumnLineThickness
+          opts.columnLineColor = treeTableColumnLineColor
+          opts.hasCustomLineColor = treeTableCustomColumnLineColor
           opts.showIndentationLines = treeTableShowIndentationLines
+          opts.indentationLineThickness = treeTableIndentationLineThickness
+          opts.indentationLineColor = treeTableIndentationLineColor
+          opts.hasCustomIndentationLineColor = treeTableCustomIndentationLineColor
+          opts.indentationStep = treeTableIndentationStep
           opts.alternatingRowBackground = treeTableAlternatingRowColors
+          opts.alternatingColorEven = treeTableAlternatingColorEven
+          opts.alternatingColorOdd = treeTableAlternatingColorOdd
+          opts.hasCustomAlternatingColors = treeTableCustomAlternatingColors
+          opts.highlightHoveredRow = treeTableHighlightHoveredRow
+          opts.hoverColor = treeTableHoverColor
+          opts.hasCustomHoverColor = treeTableCustomHoverColor
           let testCursor = demoTreeCursor(demoTreeRoot)
           b.treeTable(testCursor, opts, renderRow)
 

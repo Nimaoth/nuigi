@@ -265,5 +265,6 @@ proc buildFaqTreeTableExample*(b: var UiBuilder) =
       var options = defaultTreeTableOptions()
       options.columns = @[tableColumnFill()]
       options.columnGap = 6.0'f32
+      options.hideRoot = true
       options.highlightHoveredRow = false
       b.treeTable(faqCursor(faqRoot), options, renderFaqRow)
