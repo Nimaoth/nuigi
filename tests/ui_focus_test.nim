@@ -30,7 +30,7 @@ proc hasAccentFocusHighlight(b: UiBuilder): bool =
 
 proc hasTerminalFocusHighlight(b: UiBuilder): bool =
   let accent = accentVariation(
-    b.themeStyle(UiStyleIndexAccent)[].borderColor, 0.0'f32, 0.8'f32)
+    b.themeStyle(UiStyleIndexAccent)[].borderColor, 0.0'f32, 0.5'f32)
   for index in 0 ..< b.frame.nodes.len:
     let style = b.nodeStyle(index)
     if style.fillColor == accent and FillBackground in b.frame.nodes[index].flags and
