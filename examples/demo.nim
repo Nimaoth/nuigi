@@ -263,6 +263,7 @@ type SdlInputAccum = object
   wheel: Vec2
   mouseDown: UiMouseButtons
   mousePressed: UiMouseButtons
+  mouseClickCount: uint8
   mouseReleased: UiMouseButtons
   keysDown: UiKeys
   keysPressed: UiKeys
@@ -302,6 +303,8 @@ proc accumulateSdlInput(ev: var Event) =
     let mb = toUiMouseButton(ev.button.button)
     gInputAccum.mouseDown.incl mb
     gInputAccum.mousePressed.incl mb
+    if mb == MouseLeft:
+      gInputAccum.mouseClickCount = ev.button.clicks
     gInputAccum.mouse = vec2(ev.button.x, ev.button.y)
   of EVENT_MOUSE_BUTTON_UP:
     let mb = toUiMouseButton(ev.button.button)
@@ -375,6 +378,7 @@ when defined(wasm):
 proc beginInputFrame() =
   gInputAccum.frameIndex += 1
   gInputAccum.mousePressed = {}
+  gInputAccum.mouseClickCount = 0
   gInputAccum.mouseReleased = {}
   gInputAccum.mouseDelta = vec2(0, 0)
   gInputAccum.wheel = vec2(0, 0)
@@ -393,6 +397,7 @@ proc makeInputSnapshot(): UiInputSnapshot =
     wheel: gInputAccum.wheel,
     mouseDown: gInputAccum.mouseDown,
     mousePressed: gInputAccum.mousePressed,
+    mouseClickCount: gInputAccum.mouseClickCount,
     mouseReleased: gInputAccum.mouseReleased,
     keysDown: gInputAccum.keysDown,
     keysPressed: gInputAccum.keysPressed,

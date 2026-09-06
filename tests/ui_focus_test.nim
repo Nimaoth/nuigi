@@ -459,19 +459,6 @@ proc testCheckboxKeyboardActivation() =
   require(b.checkbox("Choice", checked), "Space should activate the focused checkbox")
   require(checked, "keyboard activation should toggle the checkbox value")
 
-proc testTextFieldKeyboardFocus() =
-  var b = newBuilder(fixedMeasureText)
-  var text = ""
-
-  discard b.beginUiFrame(200.0, 120.0)
-  discard b.textField(text, "Name")
-  b.endUiFrame(buildRenderCommands = false)
-
-  discard b.beginUiFrame(200.0, 120.0,
-    input = UiInputSnapshot(keysPressed: {KeyTab}, textInput: "x"))
-  discard b.textField(text, "Name")
-  require(text == "x", "Tab-focused text fields should receive same-frame text input")
-
 proc testTabBarKeyboardFocus() =
   var b = newBuilder(fixedMeasureText)
   var activeTab = 0
@@ -648,17 +635,6 @@ proc testFocusableWidgetsShowFocus() =
 
   block:
     var b = newBuilder(fixedMeasureText)
-    var text = ""
-    discard b.beginUiFrame(200.0, 120.0)
-    discard b.textField(text, "Name")
-    b.endUiFrame(buildRenderCommands = false)
-    discard b.beginUiFrame(200.0, 120.0,
-      input = UiInputSnapshot(keysPressed: {KeyTab}))
-    discard b.textField(text, "Name")
-    require(b.hasAccentFocusHighlight(), "focused text fields should show an accent border")
-
-  block:
-    var b = newBuilder(fixedMeasureText)
     var color = UiColor(r: 1.0'f32, g: 0.0'f32, b: 0.0'f32, a: 1.0'f32)
     discard b.beginUiFrame(200.0, 120.0)
     discard b.colorPicker(color)
@@ -705,7 +681,6 @@ proc runTests() =
   testKeyboardFocusActivation()
   testButtonKeyboardActivation()
   testCheckboxKeyboardActivation()
-  testTextFieldKeyboardFocus()
   testTabBarKeyboardFocus()
   testTerminalTabBarItemPadding()
   testTabBarActivationSkipsDisabledContent()

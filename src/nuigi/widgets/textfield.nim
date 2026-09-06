@@ -1,7 +1,7 @@
 
 ## Single-line text input with persistent cursor state.
 
-import std/unicode
+import std/[math, unicode]
 import nuigi
 import nuigi/debug/profiler
 import nuigi/text/graphemes
@@ -52,6 +52,46 @@ proc nextWordBoundary(text: string, position: int): int =
     result = text.nextGraphemeBoundary(result)
   while result < text.len and text.isWhitespaceAt(result):
     result = text.nextGraphemeBoundary(result)
+
+type TextFieldCharacterClass = enum
+  CharacterWhitespace
+  CharacterWord
+  CharacterOther
+
+proc characterClassAt(text: string, position: int): TextFieldCharacterClass =
+  let rune = text.runeAt(position)
+  if rune.isWhiteSpace:
+    CharacterWhitespace
+  elif rune.isAlpha or (rune.int >= ord('0') and rune.int <= ord('9')) or
+      rune.int == ord('_'):
+    CharacterWord
+  else:
+    CharacterOther
+
+proc selectWordAt(text: string, storage: TextFieldStorage, position: int) =
+  if text.len == 0:
+    storage.cursorPos = 0
+    storage.selectionActive = false
+    return
+
+  var first = text.graphemeBoundaryAtOrBefore(position)
+  if first == text.len:
+    first = text.previousGraphemeBoundary(first)
+  let characterClass = text.characterClassAt(first)
+  var last = text.nextGraphemeBoundary(first)
+
+  if characterClass != CharacterOther:
+    while first > 0:
+      let previous = text.previousGraphemeBoundary(first)
+      if text.characterClassAt(previous) != characterClass:
+        break
+      first = previous
+    while last < text.len and text.characterClassAt(last) == characterClass:
+      last = text.nextGraphemeBoundary(last)
+
+  storage.selectionAnchor = first
+  storage.cursorPos = last
+  storage.selectionActive = first != last
 
 proc hasSelection(storage: TextFieldStorage): bool {.inline.} =
   storage.selectionActive and storage.selectionAnchor != storage.cursorPos
@@ -136,14 +176,17 @@ proc textFieldDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall.}
   let node = b.frame.nodes[nodeIdx].addr
   let style = b.nodeStyle(nodeIdx)
   let contentWidth = max(0.0'f32, node.size.x - style.paddingX * 2.0'f32)
-  let cursorWidth = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 1.5'f32
+  let cursorWidth = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 2.0'f32
+  let cursorAllowance =
+    if storage.textWidth > contentWidth: cursorWidth
+    else: 0.0'f32
 
   if storage.cursorX < storage.scrollOffsetX:
     storage.scrollOffsetX = storage.cursorX
-  elif storage.cursorX + cursorWidth > storage.scrollOffsetX + contentWidth:
-    storage.scrollOffsetX = storage.cursorX + cursorWidth - contentWidth
+  elif storage.cursorX + cursorAllowance > storage.scrollOffsetX + contentWidth:
+    storage.scrollOffsetX = storage.cursorX + cursorAllowance - contentWidth
   storage.scrollOffsetX = clamp(storage.scrollOffsetX,
-    0.0'f32, max(0.0'f32, storage.textWidth + cursorWidth - contentWidth))
+    0.0'f32, max(0.0'f32, storage.textWidth + cursorAllowance - contentWidth))
 
   if storage.textNodeIndex >= 0:
     b.frame.nodes[storage.textNodeIndex].pos.x = -storage.scrollOffsetX
@@ -152,7 +195,7 @@ proc textFieldDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall.}
       storage.selectionX - storage.scrollOffsetX
   if storage.cursorNodeIndex >= 0:
     b.frame.nodes[storage.cursorNodeIndex].pos.x =
-      storage.cursorX - storage.scrollOffsetX
+      (storage.cursorX - storage.scrollOffsetX).round()
 
   if b.focusedNode == node.id:
     let absolutePos = b.absoluteNodePos(nodeIdx)
@@ -190,9 +233,19 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
       let pointerX = b.frameCtx.input.mouse.x - previousPos.x - style.paddingX +
         storage.scrollOffsetX
       storage.cursorPos = b.cursorPositionAtX(text, pointerX, textStyle)
-      storage.selectionActive = false
-      storage.dragAnchor = storage.cursorPos
-      storage.draggingSelection = true
+      case b.frameCtx.input.mouseClickCount
+      of 2:
+        text.selectWordAt(storage, storage.cursorPos)
+        storage.draggingSelection = false
+      of 3..uint8.high:
+        storage.selectionAnchor = 0
+        storage.cursorPos = text.len
+        storage.selectionActive = text.len > 0
+        storage.draggingSelection = false
+      else:
+        storage.selectionActive = false
+        storage.dragAnchor = storage.cursorPos
+        storage.draggingSelection = true
     elif b.isFocused() and MouseLeft in b.frameCtx.input.mouseDown and
         storage.draggingSelection and
         b.wasHeld(nodeId, includeChildren = true, indexHint = nodeIndex):
@@ -213,11 +266,6 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
     discard b.styleIndex(if isFocused: UiStyleIndexTextFieldFocused else: UiStyleIndexTextField)
     discard b.focusHighlight()
     discard b.fitX().fitY()
-    if minWidth > 0.0'f32:
-      discard b.minWidth(minWidth)
-    if maxWidth > 0.0'f32:
-      discard b.maxWidth(maxWidth)
-    discard b.maskChildren()
     discard b.fillBackground()
 
     let input = b.frameCtx.input
@@ -299,31 +347,47 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
     storage.selectionNodeIndex = -1
     storage.cursorNodeIndex = -1
 
-    if isFocused and storage.hasSelection:
-      let selected = storage.selectionRange
-      storage.selectionX = b.measuredPrefixWidth(text, selected.first, textStyle)
-      let selectionEndX = b.measuredPrefixWidth(text, selected.last, textStyle)
-      storage.selectionWidth = selectionEndX - storage.selectionX
-      b.node("textfield-selection"):
-        storage.selectionNodeIndex = b.currentNodeIndex
-        discard b.styleIndex(UiStyleIndexAccent)
-        discard b.position(storage.selectionX, 0.0'f32)
-        discard b.width(storage.selectionWidth).fillY()
-        discard b.fillBackground().ignoreInContentExtent().noHover()
+    b.node:
+      b.debugName("textfield-text-container")
+      discard b.maskChildren()
+      discard b.fitX().fitY()
+      if minWidth > 0.0'f32:
+        discard b.minWidth(minWidth)
+      if maxWidth > 0.0'f32:
+        discard b.maxWidth(maxWidth)
 
-    b.node("textfield-text"):
-      storage.textNodeIndex = b.currentNodeIndex
-      discard b.styleIndex(if text.len > 0: UiStyleIndexDefault else: UiStyleIndexTextFieldHint)
-      discard b.copyTextStyleIndex(if text.len > 0: UiStyleIndexTextFieldText else: UiStyleIndexTextFieldHintText)
-      discard b.position(0, 0).fitX().fitY().anchorsY(0.5, 0.5).pivotY(0.5).finishAnchors().noHover()
-      discard b.text(if text.len > 0: text else: hint)
+      if isFocused and storage.hasSelection:
+        let selected = storage.selectionRange
+        storage.selectionX = b.measuredPrefixWidth(text, selected.first, textStyle)
+        let selectionEndX = b.measuredPrefixWidth(text, selected.last, textStyle)
+        storage.selectionWidth = selectionEndX - storage.selectionX
+        b.node("textfield-selection"):
+          storage.selectionNodeIndex = b.currentNodeIndex
+          discard b.styleIndex(UiStyleIndexAccent)
+          discard b.position(storage.selectionX, 0.0'f32)
+          discard b.width(storage.selectionWidth).fillY()
+          discard b.fillBackground().ignoreInContentExtent().noHover()
+
+      b.node:
+        b.debugName("textfield-text")
+        storage.textNodeIndex = b.currentNodeIndex
+        discard b.styleIndex(if text.len > 0: UiStyleIndexDefault else: UiStyleIndexTextFieldHint)
+        discard b.copyTextStyleIndex(if text.len > 0: UiStyleIndexTextFieldText else: UiStyleIndexTextFieldHintText)
+        discard b.position(0, 0).fitX().fitY().anchorsY(0.5, 0.5).pivotY(0.5).finishAnchors().noHover()
+        discard b.text(if text.len > 0: text else: hint)
+
+    let fieldStyle = b.nodeStyle(b.currentNode)
+    let cursorWidth = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 2.0'f32
+    let naturalWidth = b.currentNode.contentExtent.x + fieldStyle.paddingX * 2.0'f32 + cursorWidth
+    b.currentNode.contentExtent.x =
+      ceil(naturalWidth - fieldStyle.paddingX * 2.0'f32)
 
     if isFocused and not storage.hasSelection:
       b.node("textfield-cursor"):
         storage.cursorNodeIndex = b.currentNodeIndex
         discard b.styleIndex(UiStyleIndexTextCursor)
         discard b.position(storage.cursorX, 0.0'f32)
-        discard b.width(if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 1.5'f32).fillY()
+        discard b.width(if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 2.0'f32).fillY()
         discard b.fillBackground().ignoreInContentExtent().noHover()
 
     discard b.deferBuild(textFieldDeferred, cast[int](storage))

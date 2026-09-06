@@ -348,6 +348,8 @@ type
       ## Buttons currently held down.
     mousePressed*: UiMouseButtons
       ## Buttons that went down this frame.
+    mouseClickCount*: uint8
+      ## Consecutive click count for the left-button press; zero when unavailable.
     mouseReleased*: UiMouseButtons
       ## Buttons that went up this frame.
     keysDown*: UiKeys

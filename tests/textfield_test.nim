@@ -1,3 +1,4 @@
+import std/math
 import nuigi, nuigi/core/vecmath
 import nuigi/widgets/textfield
 
@@ -19,6 +20,12 @@ proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
   result = UiTextArrangement()
   result.fontSize = fontSize
   result.size = vec2(text.len.float32 * 10.0'f32, 20.0'f32)
+
+proc fractionalMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
+    maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+  result = fixedMeasureText(text, fontId, fontSize, maxWidth)
+  if text.len > 0:
+    result.size.x += 0.17'f32
 
 proc fixedTerminalMeasureText(text: openArray[char], fontId: int16,
     fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
@@ -48,6 +55,24 @@ proc hasTextCursor(b: UiBuilder): bool =
     if b.frame.nodes[index].styleIndex == UiStyleIndexTextCursor.uint16:
       return true
   false
+
+proc textCursorIndex(b: UiBuilder): int =
+  for index in 0 ..< b.frame.nodes.len:
+    if b.frame.nodes[index].styleIndex == UiStyleIndexTextCursor.uint16:
+      return index
+  -1
+
+proc textContainerIndex(b: UiBuilder): int =
+  for index in 0 ..< b.frame.nodes.len:
+    if MaskChildren in b.frame.nodes[index].flags:
+      return index
+  -1
+
+proc textFieldIndex(b: UiBuilder): int =
+  let containerIndex = b.textContainerIndex()
+  if containerIndex >= 0:
+    return b.frame.nodes[containerIndex].parent.int
+  return -1
 
 var testClipboard = ""
 
@@ -201,6 +226,37 @@ proc testMouseSelection() =
   require(state.selectionActive and state.selectionAnchor == 3 and state.cursorPos == 1,
     "mouse drag should select text from the press position")
 
+proc testMultipleClickSelection() =
+  var b = newBuilder(fixedMeasureText)
+  var text = "one two!"
+  let state = TextFieldStorage()
+
+  discard b.beginUiFrame(200.0, 120.0)
+  discard b.textField(text, "Name", state)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(
+      mouse: vec2(51.0'f32, 10.0'f32),
+      mouseDown: {MouseLeft},
+      mousePressed: {MouseLeft},
+      mouseClickCount: 2))
+  discard b.textField(text, "Name", state)
+  require(state.selectionActive and state.selectionAnchor == 4 and state.cursorPos == 7,
+    "double-click should select the word under the pointer")
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(
+      mouse: vec2(51.0'f32, 10.0'f32),
+      mouseDown: {MouseLeft},
+      mousePressed: {MouseLeft},
+      mouseClickCount: 3))
+  discard b.textField(text, "Name", state)
+  require(state.selectionActive and state.selectionAnchor == 0 and
+      state.cursorPos == text.len,
+    "triple-click should select all text")
+
 proc testHorizontalScrollAndTextInputRequest() =
   var b = newBuilder(fixedMeasureText)
   var text = "abcdefghij"
@@ -215,14 +271,23 @@ proc testHorizontalScrollAndTextInputRequest() =
   discard b.textField(text, "Name", state, maxWidth = 35.0'f32)
   b.endUiFrame(buildRenderCommands = false)
 
-  require(b.frame.nodes[1].size.x == 35.0'f32,
-    "text field should respect its maximum width")
+  let containerIndex = b.textContainerIndex()
+  require(containerIndex >= 0 and b.frame.nodes[containerIndex].size.x == 35.0'f32,
+    "text container should respect the text field maximum width")
   require(state.scrollOffsetX > 0.0'f32,
     "focused text extending past the content width should scroll horizontally")
+  let cursorIndex = b.textCursorIndex()
+  let fieldIndex = b.textFieldIndex()
+  let fieldStyle = b.nodeStyle(fieldIndex)
+  let contentWidth = b.frame.nodes[fieldIndex].size.x - fieldStyle.paddingX * 2.0'f32
+  require(cursorIndex >= 0 and
+      b.frame.nodes[cursorIndex].pos.x + b.frame.nodes[cursorIndex].size.x <= contentWidth,
+    "cursor at the end of overflowing text should remain within the outer field")
   require(b.textInputRequest.active,
     "focused text field should request platform text input")
-  require(b.textInputRequest.rectSize.x == 35.0'f32,
-    "text input request should contain the final text field width")
+  require(fieldIndex >= 0 and
+      b.textInputRequest.rectSize.x == b.frame.nodes[fieldIndex].size.x,
+    "text input request should contain the final outer text field width")
   require(b.textInputRequest.cursorOffset >= 0.0'f32 and
       b.textInputRequest.cursorOffset <= b.textInputRequest.rectSize.x,
     "IME cursor offset should stay within the text field rectangle")
@@ -242,8 +307,30 @@ proc testMinimumWidth() =
   discard b.textField(text, "Name", minWidth = 80.0'f32)
   b.endUiFrame(buildRenderCommands = false)
 
-  require(b.frame.nodes[1].size.x == 80.0'f32,
-    "text field should respect its minimum width")
+  let containerIndex = b.textContainerIndex()
+  require(containerIndex >= 0 and b.frame.nodes[containerIndex].size.x == 80.0'f32,
+    "text container should respect the text field minimum width")
+
+proc testFractionalWidthDoesNotScroll() =
+  var b = newBuilder(fractionalMeasureText)
+  var text = "abcdef"
+  let state = TextFieldStorage(cursorPos: text.len)
+
+  discard b.beginUiFrame(200.0, 120.0)
+  discard b.textField(text, "Name", state)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(keysPressed: {KeyTab}))
+  discard b.textField(text, "Name", state)
+  b.endUiFrame(buildRenderCommands = false)
+
+  let fieldIndex = b.textFieldIndex()
+  require(fieldIndex >= 0 and
+      b.frame.nodes[fieldIndex].size.x == ceil(b.frame.nodes[fieldIndex].size.x),
+    "naturally fitted text field width should round up to a whole number")
+  require(state.scrollOffsetX == 0.0'f32,
+    "text that fits the field exactly should not scroll to reserve cursor width")
 
 proc runTests() =
   testTerminalTextFieldIsOneRowHigh()
@@ -252,8 +339,10 @@ proc runTests() =
   testUnicodeSelectionAndReplacement()
   testClipboardShortcuts()
   testMouseSelection()
+  testMultipleClickSelection()
   testHorizontalScrollAndTextInputRequest()
   testMinimumWidth()
+  testFractionalWidthDoesNotScroll()
 
 when isMainModule:
   runTests()

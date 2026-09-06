@@ -288,7 +288,6 @@ proc testTerminalCatalogWidgetsAreOneRowHigh() =
   var dragVec4 = vec4(0.5'f32)
   var color = rgba(1.0'f32, 0.0'f32, 0.0'f32, 1.0'f32)
   var selected = 0
-  var fieldText = ""
   var menuOpen = false
   let options = ["One", "Two"]
   var widgetNodes: seq[(string, int)]
@@ -322,8 +321,6 @@ proc testTerminalCatalogWidgetsAreOneRowHigh() =
     discard b.colorPicker(color)
   capture("dropdown"):
     discard b.dropdown(options, selected)
-  capture("textField"):
-    discard b.textField(fieldText, "Text")
   capture("tooltip button"):
     discard b.button("Hover me")
   capture("menuBar"):

@@ -256,6 +256,7 @@ proc beginInputFrame(backend: var TerminalBackend) =
   backend.input.mouseDelta = vec2(0.0'f32)
   backend.input.wheel = vec2(0.0'f32)
   backend.input.mousePressed = {}
+  backend.input.mouseClickCount = 0
   backend.input.mouseReleased = {}
   backend.input.keysPressed = {}
   backend.input.keysReleased = {}
@@ -290,6 +291,8 @@ proc applyInputEvent(backend: var TerminalBackend, event: TerminalInputEvent) =
     of InputPress:
       backend.input.mouseDown.incl event.button
       backend.input.mousePressed.incl event.button
+      if event.button == MouseLeft:
+        backend.input.mouseClickCount = 1
     of InputRelease:
       backend.input.mouseDown.excl event.button
       backend.input.mouseReleased.incl event.button
