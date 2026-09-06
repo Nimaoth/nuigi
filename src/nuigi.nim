@@ -782,6 +782,17 @@ type
     ## Callback that rasterizes `arrangement` into renderer-owned `UiVertex` data (runs during render-command build).
   UiOpenUrlFn* = proc(url: string): bool {.nimcall, raises: [].}
     ## Optional callback that asks the host application to open a URL.
+  UiReadClipboardFn* = proc(): string {.nimcall, raises: [].}
+    ## Optional callback that returns the platform clipboard text.
+  UiWriteClipboardFn* = proc(text: string): bool {.nimcall, raises: [].}
+    ## Optional callback that writes text to the platform clipboard.
+
+  UiTextInputRequest* = object
+    ## Frame-local request for platform text input and IME candidate placement.
+    active*: bool
+    rectPos*: Vec2
+    rectSize*: Vec2
+    cursorOffset*: float32
 
   DragData* = object
     ## Data for the current drag operation, owned by `UiBuilder`.
@@ -907,6 +918,12 @@ type
       ## Optional callback that builds text meshes (set at `newBuilder`).
     openUrlFn*: nil UiOpenUrlFn
       ## Optional callback supplied by the host application for opening URLs.
+    readClipboardFn*: nil UiReadClipboardFn
+      ## Optional platform clipboard reader used by text-editing widgets.
+    writeClipboardFn*: nil UiWriteClipboardFn
+      ## Optional platform clipboard writer used by text-editing widgets.
+    textInputRequest*: UiTextInputRequest
+      ## Text-input activation and IME location requested by the focused widget this frame.
     fonts*: Table[string, UiFontId]
       ## Maps font names to loaded font IDs.
     fontScale*: float32
@@ -2241,7 +2258,7 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     paddingY: 6.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: grayBg,
+    fillColor: graySurface,
     borderColor: grayBorder,
   )
   result[int(UiStyleIndexTextFieldFocused) - 1] = UiStyle(
@@ -2249,7 +2266,7 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     paddingY: 6.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
-    fillColor: graySurface,
+    fillColor: graySurfaceHi,
     borderColor: accent,
   )
   result[int(UiStyleIndexTextFieldHint) - 1] = UiStyle(
@@ -3162,6 +3179,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   b.computeFrameInteraction(ctx.input)
   b.focusNavigationHandled = false
   b.focusChangedByKeyboard = false
+  b.textInputRequest = default(UiTextInputRequest)
   b.processKeyboardFocus(ctx.input)
   b.dragData.canDrop = false
 

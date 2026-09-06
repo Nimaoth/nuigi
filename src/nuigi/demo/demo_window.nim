@@ -922,7 +922,7 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
       widgetCell:
         b.node("textfield-host"):
           discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
-          if b.textField(awText, "Type here..."): discard
+          if b.textField(awText, "Type here...", minWidth = 7 * b.defaultText.fontSize, maxWidth = 20 * b.defaultText.fontSize): discard
       labelCell("tooltip")
       widgetCell:
         b.node("tooltip-host"):

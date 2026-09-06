@@ -215,9 +215,22 @@ proc ensureUiExampleInitialized() =
     var urlCopy = url
     openURL(toCString(urlCopy))
 
+  proc readClipboard(): string {.nimcall, raises: [].} =
+    result = ""
+    let clipboardText = sdl3.getClipboardText()
+    if clipboardText != nil:
+      result = $clipboardText
+      sdl3.sdlFree(clipboardText)
+
+  proc writeClipboard(text: string): bool {.nimcall, raises: [].} =
+    var textCopy = text
+    sdl3.setClipboardText(toCString(textCopy))
+
   b = newBuilder(uiSdlArrangeText, uiSdlBuildTextMesh,
     antialiasMeshWidth = defaultAntialiasMeshWidth)
   b.openUrlFn = openUrl
+  b.readClipboardFn = readClipboard
+  b.writeClipboardFn = writeClipboard
   discard b.addThemeTextStyle UiNodeText(
     text: "hello world".uiString,
     fontId: testFont,
@@ -227,6 +240,21 @@ proc ensureUiExampleInitialized() =
 
   themeEditorState.listFonts = themeEditorListFonts
   themeEditorState.resolveFont = themeEditorResolveFont
+
+proc syncSdlTextInput() =
+  if b.textInputRequest.active:
+    if not gWindow.textInputActive():
+      discard gWindow.startTextInput()
+    var rect = Rect(
+      x: floor(b.textInputRequest.rectPos.x).cint,
+      y: floor(b.textInputRequest.rectPos.y).cint,
+      w: max(1.0'f32, ceil(b.textInputRequest.rectSize.x)).cint,
+      h: max(1.0'f32, ceil(b.textInputRequest.rectSize.y)).cint,
+    )
+    discard gWindow.setTextInputArea(rect.addr,
+      max(0.0'f32, round(b.textInputRequest.cursorOffset)).cint)
+  elif gWindow.textInputActive():
+    discard gWindow.stopTextInput()
 
 type SdlInputAccum = object
   frameIndex: uint64
@@ -969,12 +997,14 @@ proc mainLoop() {.cdecl.} =
       block:
         when defined(wasm):
           b.endUiFrame(buildMeshRenderCommands = true)
+          syncSdlTextInput()
           syncFontAtlas(renderer)
           discard renderer.setRenderDrawColorFloat(0, 0, 0, 1)
           discard renderer.renderClear()
           b.renderNewUiRenderer(b.frameOutput, renderer)
         else:
           b.endUiFrame(buildMeshRenderCommands = true)
+          syncSdlTextInput()
           if gRender2D.beginRender(nil, outputWidth.uint32, outputHeight.uint32, render2DTargetFormat, gSampleCount):
             gRender2D.clear()
             b.renderNewUi()
@@ -1030,7 +1060,6 @@ proc main(quitImmediately: bool) =
   if gWindow == nil:
     echo "no window"
     return
-  discard gWindow.startTextInput()
 
   const debug = defined(sdlDebug)
   when debug:
