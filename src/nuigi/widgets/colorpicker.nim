@@ -223,7 +223,9 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
   b.node:
     b.debugName("color-picker")
     pickerIdx = b.stack[^1]
-    discard b.size(38, 18)
+    discard b.size(
+      if b.backendType == UiBackendType.Terminal: 2.0'f32 else: 38.0'f32,
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 18.0'f32)
 
     swatchIdx = b.stack[^1]
     swatchId = b.currentNode.id

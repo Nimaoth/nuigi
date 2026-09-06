@@ -28,6 +28,22 @@ proc hasAccentFocusHighlight(b: UiBuilder): bool =
       return true
   false
 
+proc hasTerminalFocusHighlight(b: UiBuilder): bool =
+  let accent = accentVariation(
+    b.themeStyle(UiStyleIndexAccent)[].borderColor, 0.0'f32, 0.8'f32)
+  for index in 0 ..< b.frame.nodes.len:
+    let style = b.nodeStyle(index)
+    if style.fillColor == accent and FillBackground in b.frame.nodes[index].flags and
+        not (style.borderWidth >= 2.0'f32 and style.borderColor == accent):
+      return true
+  false
+
+proc hasFrameText(b: UiBuilder, expected: string): bool =
+  for text in b.frame.texts:
+    if text.text.value == expected:
+      return true
+  false
+
 type FocusTreeCursor = ref object of TreeCursor
   maxDepth: int
   childrenPerNode: int
@@ -486,6 +502,52 @@ proc testTabBarKeyboardFocus() =
   require(b.focusedNode == firstContentId,
     "activating a tab should focus its first content item")
 
+proc testTerminalTabBarItemPadding() =
+  var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  b.themeStyle(UiStyleIndexTabBarHeader).paddingX = 3.0'f32
+  b.themeStyle(UiStyleIndexTabBarHeader).paddingY = 3.0'f32
+  b.themeStyle(UiStyleIndexTabBarContent).paddingX = 3.0'f32
+  b.themeStyle(UiStyleIndexTabBarContent).paddingY = 3.0'f32
+  var activeTab = 0
+  var contentIndex = -1
+
+  discard b.beginUiFrame(80.0'f32, 24.0'f32)
+  b.tabBar(["First", "Second"], activeTab):
+    contentIndex = b.stack[^1]
+
+  require(contentIndex >= 0, "terminal tab bar should contain a content node")
+  let tabBarIndex = b.nodes[contentIndex].parent.int
+  var headerIndex = -1
+  for childIndex in b.children(tabBarIndex):
+    if childIndex != contentIndex:
+      headerIndex = childIndex
+      break
+  require(headerIndex >= 0, "terminal tab bar should contain a header")
+  if headerIndex >= 0:
+    let headerStyle = b.nodeStyle(headerIndex)
+    require(headerStyle.paddingX == 0.0'f32 and headerStyle.paddingY == 0.0'f32,
+      "terminal tab bar header should not have padding")
+  if contentIndex >= 0:
+    let contentStyle = b.nodeStyle(contentIndex)
+    require(contentStyle.paddingX == 0.0'f32 and contentStyle.paddingY == 0.0'f32,
+      "terminal tab bar content should not have padding")
+
+  var itemCount = 0
+  for index in 0 ..< b.nodes.len:
+    let textIndex = b.nodes[index].textIndex.int - 1
+    if textIndex >= 0 and textIndex < b.frame.texts.len and
+        (b.frame.texts[textIndex].text.value == "First" or
+          b.frame.texts[textIndex].text.value == "Second"):
+      inc itemCount
+      let style = b.nodeStyle(index)
+      require(style.paddingX == 0.0'f32 and style.paddingY == 0.0'f32,
+        "terminal tab bar buttons should not have padding")
+      require(style.borderWidth == 0.0'f32 and
+          style.borderWidths == default(UiBorderWidths),
+        "terminal tab bar buttons should not have borders")
+  require(itemCount == 2, "terminal tab bar should contain both buttons")
+
 proc testTabBarActivationSkipsDisabledContent() =
   var b = newBuilder(fixedMeasureText)
   var activeTab = 0
@@ -606,6 +668,35 @@ proc testFocusableWidgetsShowFocus() =
     discard b.colorPicker(color)
     require(b.hasAccentFocusHighlight(), "focused color pickers should show an accent border")
 
+  block:
+    var b = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
+    require(b.backendType == UiBackendType.Terminal, "builder should retain its backend type")
+    discard b.beginUiFrame(200.0, 120.0)
+    discard b.button("Terminal action")
+    b.endUiFrame(buildRenderCommands = false)
+    discard b.beginUiFrame(200.0, 120.0,
+      input = UiInputSnapshot(keysPressed: {KeyTab}))
+    discard b.button("Terminal action")
+    require(b.hasTerminalFocusHighlight(),
+      "focused terminal widgets should show an accent background without a focus border")
+
+proc testTerminalCheckboxAppearance() =
+  var b = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
+  var checked = false
+
+  discard b.beginUiFrame(200.0, 120.0)
+  discard b.checkbox("Choice", checked)
+  require(b.hasFrameText("[ ]"), "unchecked terminal checkbox should render [ ]")
+  b.endUiFrame(buildRenderCommands = false)
+
+  checked = true
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(keysPressed: {KeyTab}))
+  discard b.checkbox("Choice", checked)
+  require(b.hasFrameText("[x]"), "checked terminal checkbox should render [x]")
+  require(b.hasTerminalFocusHighlight(),
+    "focused terminal checkbox should use an accent background")
+
 proc runTests() =
   testKeyboardFocusTraversal()
   testExplicitTabOrder()
@@ -616,11 +707,13 @@ proc runTests() =
   testCheckboxKeyboardActivation()
   testTextFieldKeyboardFocus()
   testTabBarKeyboardFocus()
+  testTerminalTabBarItemPadding()
   testTabBarActivationSkipsDisabledContent()
   testSliderKeyboardFocus()
   testDragFloatKeyboardFocus()
   testMultiDragFloatFocusStops()
   testFocusableWidgetsShowFocus()
+  testTerminalCheckboxAppearance()
   testTreeTableFocusNavigation()
 
 when isMainModule:

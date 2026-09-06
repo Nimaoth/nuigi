@@ -337,6 +337,38 @@ proc buildNuiDemo(compiler: NimCompiler) =
     createDir("build")
     copyFile("assets/nuigi-demo.html", "build/nuigi-demo.html")
 
+proc buildTerminalDemo(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  createDir("bin")
+  echo "buildTerminalDemo"
+  case compiler
+  of Nim2:
+    shell &"nim c -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim"
+  of Nim2Ic:
+    shell &"nim ic -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim"
+  of Nimony:
+    shell &"nimony c -o:bin/terminal-demo-nimony.exe --cc:gcc --path:src {passthroughArgs} examples/terminal_demo.nim"
+  of NimonyLlvm:
+    shell &"nimony l -d:llvm -o:bin/terminal-demo-nimony.exe --path:src {passthroughArgs} examples/terminal_demo.nim"
+  of Nlvm:
+    shell &"nlvm c --debuginfo:on --debugger:native -o:bin/terminal-demo.exe --path:src {passthroughArgs} examples/terminal_demo.nim"
+
+proc buildTerminalTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/terminal-backend-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_backend_test.nim",
+      "terminal-backend-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/terminal-backend-test-nimony.exe --path:src {passthroughArgs} tests/terminal_backend_test.nim",
+      "terminal-backend-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
 proc buildUiTestNim2() =
   echo "buildUiTestNim2"
   let passthroughArgs = passthroughArgs.join(" ")
@@ -573,9 +605,16 @@ proc main() =
         buildShader()
     buildNuiDemo(compiler)
 
+  of "terminal-demo":
+    buildTerminalDemo(compiler)
+
+  of "terminal-test":
+    buildTerminalTest(compiler)
+
   of "test":
     buildUiTest(compiler)
     buildFocusTest(compiler)
+    buildTerminalTest(compiler)
     if compiler == Nim2:
       buildFontWrappingTest()
     buildTreeTableRefreshTest(compiler)

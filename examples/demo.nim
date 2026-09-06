@@ -34,7 +34,6 @@ var gFrame = 0.0
 var gTick = 0.0
 var gRenderOnDemand = true
 var gHadInputThisFrame = false
-var gNumFramesWithoutInput = 0
 
 when defined(emscripten):
   const defaultAntialiasMeshWidth = 1.0'f32
@@ -942,24 +941,9 @@ proc mainLoop() {.cdecl.} =
             emscripten_cancel_main_loop()
           return
 
-      if b.anythingAnimating or b.virtualNodes.len > 0 or b.middleDragScroll != vec2(0.0'f32, 0.0'f32):
-        gHadInputThisFrame = true
-      if gRenderOnDemand:
-        for a in b.animations:
-          var active = false
-          if a.unchangedFrames == 0:
-            for f in a.fields:
-              if f.currentValue != f.targetValue:
-                active = true
-                break
-          if active:
-            gHadInputThisFrame = true
-      if not gHadInputThisFrame:
-        inc gNumFramesWithoutInput
-      else:
-        gNumFramesWithoutInput = 0
-      if gRenderOnDemand and gNumFramesWithoutInput > 1:
-        # On-demand mode: skip rebuilding and rendering when no input arrived.
+      let shouldRender = b.shouldRender(gHadInputThisFrame)
+      if gRenderOnDemand and not shouldRender:
+        # On-demand mode: skip rebuilding and rendering after the grace frame.
         when not defined(wasm):
           when not defined(nimony):
             sleep(10)

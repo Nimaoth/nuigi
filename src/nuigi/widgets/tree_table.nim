@@ -143,6 +143,7 @@ type
     hoverColor*: UiColor
     hasCustomHoverColor*: bool
 
+const treeTableBaseFontSize = 18.0'f32
 const TreeTableExpandAllBudgetNanoseconds* = 4_000_000'i64
   ## Default time spent expanding tree-table items per frame.
 
@@ -980,7 +981,12 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   # current node is table row, each node created here is one column
 
   b.debugName("tree-table-row")
-  discard b.fitY().gap(4).paddingY(2)
+  discard b.fitY()
+  if b.backendType == UiBackendType.Terminal:
+    discard b.gap(1).padding(1)
+  else:
+    discard b.gapRelative(4.0'f32 / treeTableBaseFontSize)
+      .paddingYRelative(2.0'f32 / treeTableBaseFontSize)
 
   let rowFocusId = e.treeFocusId(e.walkCursor)
   e.focusCursors[rowFocusId.nodeIdValue()] = e.walkCursor.clone()
@@ -1020,15 +1026,22 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
     discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
 
   b.layoutHorizontal:
-    discard b.fit().gap(2)
+    discard b.fit()
+    if b.backendType == UiBackendType.Terminal:
+      discard b.gap(1)
+    else:
+      discard b.gapRelative(2.0'f32 / treeTableBaseFontSize)
     b.node:
       let rootDepth = if e.hideRoot: 1 else: 0
-      discard b.size(
-        max(0, e.walkCursor.depth - rootDepth).float32 * e.indentationStep,
-        1)
+      discard b.sizeRelative(
+        max(0, e.walkCursor.depth - rootDepth).float32 *
+          e.indentationStep / treeTableBaseFontSize,
+        1.0'f32 / treeTableBaseFontSize)
     b.node:
       b.debugName("symbol")
-      discard b.size(14, 14).alignCenter()
+      discard b.sizeRelative(
+        14.0'f32 / treeTableBaseFontSize,
+        14.0'f32 / treeTableBaseFontSize).alignCenter()
       if hasChildren:
         if b.wasClicked(includeChildren = true):
           e.pendingToggleCursor = e.walkCursor.clone()
@@ -1488,7 +1501,11 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
     return
 
   b.layoutHorizontal:
-    discard b.fit().gap(2)
+    discard b.fit()
+    if b.backendType == UiBackendType.Terminal:
+      discard b.gap(1)
+    else:
+      discard b.gapRelative(2.0'f32 / treeTableBaseFontSize)
     if b.button("Expand all"):
       startExpandAll(ctx)
     if b.button("Collapse all"):
@@ -1526,7 +1543,13 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       colCount = options.columns.len
     var layoutArr = b.frame.arena[].allocArray(1, TreeTableLayout)
     layoutArr[0] = TreeTableLayout(
-      columnGap: if options.columnGap > 0.001'f32: options.columnGap else: 4.0'f32,
+      columnGap:
+        if b.backendType == UiBackendType.Terminal:
+          1.0'f32
+        elif options.columnGap > 0.001'f32:
+          options.columnGap
+        else:
+          4.0'f32,
       columnCount: colCount,
       columns: colPtr,
       showColumnLines: hasColumnLines,

@@ -245,9 +245,9 @@ proc updateWindowSpaceActivity(b: var UiBuilder, windowNodeIndex: int) =
 template window*(b: var UiBuilder, title: string, inX, inY, width, height: float32, body: untyped): untyped =
   b.withParent(b.windows):
     prof("window")
-    let minWindowW = 120.0'f32
-    let minWindowH = 80.0'f32
-    let resizeEdgeDistance = 4.0'f32
+    let minWindowW = if b.backendType == UiBackendType.Terminal: 20.0'f32 else: 120.0'f32
+    let minWindowH = if b.backendType == UiBackendType.Terminal: 5.0'f32 else: 80.0'f32
+    let resizeEdgeDistance = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 4.0'f32
 
     b.nodeWithId(title.hashChars.UiNodeId):
       b.nodeStorageParent()
@@ -275,6 +275,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
           titleBarId = b.currentNode.id
           discard b.copyStyleIndex(UiStyleIndexWindowTitleBar)
           discard b.copyTextStyleIndex(UiStyleIndexWindowTitleBarText)
+          if b.backendType == UiBackendType.Terminal:
+            discard b.padding(1)
           let titleBarStyle = b.currentNodeStyle()
           titleBarStyle.cornerRadius = 0.0'f32
           titleBarStyle.cornerRadii = UiCornerRadii(
@@ -313,6 +315,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
         if not windowStorage.collapsed:
           b.node("window-content"):
             discard b.styleIndex(UiStyleIndexWindowContent)
+            if b.backendType == UiBackendType.Terminal:
+              discard b.padding(1)
             discard b.fillX().fillY().maskChildren()
             body
 

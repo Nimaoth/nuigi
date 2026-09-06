@@ -83,6 +83,40 @@ proc testPressedWindowMovesToFront() =
     require(storage.windows[0].lastActive > storage.windows[1].lastActive,
       "pressed window should have the newest activation value")
 
+proc testTerminalWindowFitsViewport() =
+  var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  b.themeStyle(UiStyleIndexWindowContent).paddingX = 3.0'f32
+  b.themeStyle(UiStyleIndexWindowContent).paddingY = 3.0'f32
+  discard b.beginUiFrame(80.0'f32, 24.0'f32)
+  b.windowSpace()
+  var contentIndex = -1
+  b.window("Terminal", 0.0'f32, 0.0'f32, 80.0'f32, 24.0'f32):
+    contentIndex = b.stack[^1]
+
+  let storage = b.windowStorage("Terminal".hashChars.UiNodeId)
+  require(storage != nil, "terminal window should have persistent storage")
+  if storage != nil:
+    require(storage.size == vec2(80.0'f32, 24.0'f32),
+      "terminal window should retain viewport-sized dimensions")
+
+  var foundTitleBar = false
+  for index in 0 ..< b.nodes.len:
+    let textIndex = b.nodes[index].textIndex.int - 1
+    if textIndex >= 0 and textIndex < b.frame.texts.len and
+        b.frame.texts[textIndex].text.value == "Terminal":
+      let titleBarIndex = b.nodes[index].parent.int
+      foundTitleBar = true
+      let style = b.nodeStyle(titleBarIndex)
+      require(style.paddingX == 0.0'f32 and style.paddingY == 0.0'f32,
+        "terminal window title bars should not have padding")
+  require(foundTitleBar, "terminal window should contain a title bar")
+  require(contentIndex >= 0, "terminal window should contain a content node")
+  if contentIndex >= 0:
+    let style = b.nodeStyle(contentIndex)
+    require(style.paddingX == 0.0'f32 and style.paddingY == 0.0'f32,
+      "terminal window content should not have padding")
+
 proc testTitleBarMatchesWindowTopCornerRadii() =
   var b = newBuilder(fixedMeasureText)
   b.buildWindowFrame()
@@ -141,5 +175,6 @@ proc testWindowResizesFromBottomRightCorner() =
 
 when isMainModule:
   testPressedWindowMovesToFront()
+  testTerminalWindowFitsViewport()
   # testTitleBarMatchesWindowTopCornerRadii()
   # testWindowResizesFromBottomRightCorner()

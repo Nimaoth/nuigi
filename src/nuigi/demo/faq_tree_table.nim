@@ -9,6 +9,8 @@ include nuigi/util/compat2
 
 import nuigi, nuigi/widgets, nuigi/layout/flex, nuigi/widgets/tree_table
 
+const faqBaseFontSize = 18.0'f32
+
 type
   FaqPostKind = enum
     FaqTopic
@@ -192,7 +194,12 @@ proc renderFaqRow(
   let post = faq.post
   b.node:
     b.debugName("faq-comment-card")
-    discard b.fitY().styleIndex(UiStyleIndexCard).padding(10).gap(7)
+    discard b.fitY().styleIndex(UiStyleIndexCard)
+      .gapRelative(7.0'f32 / faqBaseFontSize)
+    if b.backendType == UiBackendType.Terminal:
+      discard b.padding(1)
+    else:
+      discard b.paddingRelative(10.0'f32 / faqBaseFontSize)
     discard b.layout(LayoutVertical).forwardLayout()
     discard b.fillBackground().cornerRadius(6)
     discard b.borderWidth(1).borderColor(
@@ -201,7 +208,11 @@ proc renderFaqRow(
     b.node:
       b.debugName("faq-comment-meta")
       discard b.fillX().fitY()
-      discard b.flexLayout().flexDirection(FlexDirectionRow).columnGap(6)
+      if b.backendType == UiBackendType.Terminal:
+        discard b.gap(1)
+      else:
+        discard b.gapRelative(6.0'f32 / faqBaseFontSize)
+      discard b.flexLayout().flexDirection(FlexDirectionRow)
       b.label(faqKindLabel(post.kind)):
         discard b.fitX().fitY().fontSize(12)
           .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
@@ -218,7 +229,11 @@ proc renderFaqRow(
 
     b.layoutHorizontal:
       b.debugName("faq-comment-actions")
-      discard b.fillX().fitY().gap(5)
+      discard b.fillX().fitY()
+      if b.backendType == UiBackendType.Terminal:
+        discard b.gap(1)
+      else:
+        discard b.gapRelative(5.0'f32 / faqBaseFontSize)
       if b.button("Upvote"):
         inc post.score
       if b.button("Downvote"):
@@ -231,7 +246,9 @@ proc buildFaqTreeTableExample*(b: var UiBuilder) =
 
   b.layoutVertical:
     b.debugName("faq-tree-table-demo")
-    discard b.fillX().padding(8).gap(8)
+    discard b.fillX()
+      .paddingRelative(8.0'f32 / faqBaseFontSize)
+      .gapRelative(8.0'f32 / faqBaseFontSize)
     if FitY in parent.flags:
       discard b.height(600)
     else:
@@ -249,7 +266,11 @@ proc buildFaqTreeTableExample*(b: var UiBuilder) =
       discard b.fillX().sizeToParentY()
       var options = defaultTreeTableOptions()
       options.columns = @[tableColumnFill()]
-      options.columnGap = 6.0'f32
+      options.columnGap =
+        if b.backendType == UiBackendType.Terminal:
+          1.0'f32
+        else:
+          6.0'f32 / faqBaseFontSize * b.defaultText.fontSize * b.fontScale
       options.hideRoot = true
       options.highlightHoveredRow = false
       b.treeTable(faqCursor(faqRoot), options, renderFaqRow)

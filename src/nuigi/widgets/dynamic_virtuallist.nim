@@ -155,7 +155,8 @@ proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: in
     storage.scrollVelocityY = 0.0'f32
   storage.scrollOffsetY = (storage.scrollOffsetY + 0.5).int64.float32
 
-  let thumbMinHeight = 20.0'f32
+  let thumbMinHeight =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 20.0'f32
   if storage.scrollbarThumbIndex >= 0 and storage.scrollbarTrackIndex >= 0 and
       storage.scrollbarThumbIndex < b.frame.nodes.len and
       storage.scrollbarTrackIndex < b.frame.nodes.len and
@@ -236,8 +237,12 @@ proc dynamicVirtualList*(b: var UiBuilder,
   let scrollSpeed = 20.0'f32
   let scrollDamping = 10.0'f32
   let maxScrollVelocity = 4000.0'f32
-  let scrollbarWidth = 10.0'f32
-  let thumbMinHeight = 20.0'f32
+  let scrollbarWidth =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
+  let thumbMinHeight =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 20.0'f32
+  let thumbInset =
+    if b.backendType == UiBackendType.Terminal: 0.0'f32 else: 1.0'f32
   let itemCount = max(0, inItemCount)
   let heightHint = max(1.0'f32, inItemHeightHint)
 
@@ -323,8 +328,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
             storage.scrollbarThumbIndex = thumbIndex
             discard b.styleIndex(if b.wasHovered(thumbIndex, includeChildren = true):
               UiStyleIndexScrollBarHandleHover else: UiStyleIndexScrollBarHandle)
-            discard b.position(1.0'f32, 0.0'f32)
-            discard b.size(scrollbarWidth - 2.0'f32, thumbHeight)
+            discard b.position(thumbInset, 0.0'f32)
+            discard b.size(scrollbarWidth - thumbInset * 2.0'f32, thumbHeight)
             discard b.fillBackground()
 
       let input = b.frameCtx.input

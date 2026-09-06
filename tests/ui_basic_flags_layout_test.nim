@@ -52,6 +52,18 @@ proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, m
   result.fontSize = fontSize
   result.size = vec2(if maxWidth >= 0.0'f32: min(naturalWidth, maxWidth) else: naturalWidth, lineCount.float32 * 20.0'f32)
 
+proc fixedTerminalMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+  let _ = fontId
+  let naturalWidth = text.len.float32
+  let lineCount =
+    if maxWidth > 0.0'f32 and naturalWidth > maxWidth:
+      int((naturalWidth + maxWidth - 1.0'f32) / maxWidth)
+    else:
+      1
+  result = UiTextArrangement()
+  result.fontSize = fontSize
+  result.size = vec2(if maxWidth >= 0.0'f32: min(naturalWidth, maxWidth) else: naturalWidth, lineCount.float32)
+
 proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
   var b = newBuilder(fixedMeasureText)
   discard b.beginUiFrame(viewW, viewH)
@@ -197,6 +209,138 @@ proc testPositionAndSizeScalars() =
   require(approxEq(n.pos.y, 34.0), "position.y mismatch")
   require(approxEq(n.size.x, 56.0), "size.x mismatch")
   require(approxEq(n.size.y, 78.0), "size.y mismatch")
+
+proc testBaseFontRelativePadding() =
+  var graphical = newBuilder(fixedMeasureText)
+  graphical.fontScale = 1.5'f32
+  discard graphical.beginUiFrame(200.0'f32, 120.0'f32)
+  graphical.defaultText.fontSize = 10.0'f32
+
+  let uniformIndex = graphical.nodes.len
+  graphical.node:
+    discard graphical.paddingRelative(1.0'f32)
+  let uniformStyle = graphical.nodeStyle(uniformIndex)
+  require(approxEq(uniformStyle.paddingX, 15.0'f32) and
+      approxEq(uniformStyle.paddingY, 15.0'f32),
+    "relative padding of one should equal the effective base font size")
+
+  let axisIndex = graphical.nodes.len
+  graphical.node:
+    discard graphical.padding(2.0'f32)
+    discard graphical.paddingXRelative(0.5'f32)
+    discard graphical.paddingYRelative(0.25'f32)
+    discard graphical.gapRelative(0.5'f32)
+  let axisStyle = graphical.nodeStyle(axisIndex)
+  require(approxEq(axisStyle.paddingX, 7.5'f32),
+    "relative horizontal padding should preserve graphical fractions")
+  require(approxEq(axisStyle.paddingY, 3.75'f32),
+    "relative vertical padding should preserve graphical fractions")
+  require(approxEq(graphical.nodeGap(axisIndex), 7.5'f32),
+    "relative gap should preserve graphical fractions")
+
+  var terminal = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
+  terminal.fontScale = 1.5'f32
+  discard terminal.beginUiFrame(80.0'f32, 24.0'f32)
+  terminal.defaultText.fontSize = 3.0'f32
+  let terminalIndex = terminal.nodes.len
+  terminal.node:
+    discard terminal.paddingRelative(0.75'f32)
+    discard terminal.gapRelative(0.75'f32)
+  let terminalStyle = terminal.nodeStyle(terminalIndex)
+  require(terminalStyle.paddingX == 3.0'f32 and terminalStyle.paddingY == 3.0'f32,
+    "terminal relative padding should round down to whole cells")
+  require(terminal.nodeGap(terminalIndex) == 3.0'f32,
+    "terminal relative gap should round down to whole cells")
+
+proc testBaseFontRelativeSize() =
+  var b = newBuilder(fixedMeasureText)
+  b.fontScale = 1.5'f32
+  discard b.beginUiFrame(200.0'f32, 120.0'f32)
+  b.defaultText.fontSize = 10.0'f32
+
+  let sizeIndex = b.nodes.len
+  b.node:
+    discard b.sizeRelative(0.5'f32, 0.25'f32)
+  require(b.nodes[sizeIndex].size == vec2(8.0'f32, 4.0'f32),
+    "relative size should scale by the effective base font and round")
+
+  let axisIndex = b.nodes.len
+  b.node:
+    discard b.widthRelative(1.1'f32)
+    discard b.heightRelative(0.6'f32)
+  require(b.nodes[axisIndex].size == vec2(17.0'f32, 9.0'f32),
+    "relative width and height should round to whole layout units")
+
+proc testTerminalCatalogWidgetsAreOneRowHigh() =
+  var b = newBuilder(fixedTerminalMeasureText, backendType = UiBackendType.Terminal)
+  for styleIndex in low(UiStyleIndex) .. high(UiStyleIndex):
+    b.themeStyle(styleIndex).paddingY = 0.0'f32
+  for styleIndex in low(UiTextStyleIndex) .. high(UiTextStyleIndex):
+    b.themeTextStyle(styleIndex).fontSize = 1.0'f32
+  discard b.beginUiFrame(200.0'f32, 120.0'f32)
+  b.defaultText.fontSize = 1.0'f32
+
+  var checked = false
+  var sliderValue = 0.5'f32
+  var dragValue = 0.5'f32
+  var dragVec2 = vec2(0.5'f32)
+  var dragVec3 = vec3(0.5'f32)
+  var dragVec4 = vec4(0.5'f32)
+  var color = rgba(1.0'f32, 0.0'f32, 0.0'f32, 1.0'f32)
+  var selected = 0
+  var fieldText = ""
+  var menuOpen = false
+  let options = ["One", "Two"]
+  var widgetNodes: seq[(string, int)]
+
+  template capture(name: string, body: untyped) =
+    block:
+      let nodeIndex = b.nodes.len
+      body
+      widgetNodes.add((name, nodeIndex))
+
+  capture("label"):
+    b.label("Label")
+  capture("labelWrapped"):
+    b.labelWrapped("Wrapped"):
+      discard b.width(20.0'f32)
+  capture("button"):
+    discard b.button("Button")
+  capture("checkbox"):
+    discard b.checkbox("Checkbox", checked)
+  capture("slider"):
+    discard b.slider(sliderValue)
+  capture("dragFloat"):
+    discard b.dragFloat(dragValue, 0.5'f32)
+  capture("dragFloat2"):
+    discard b.dragFloat2(dragVec2, 0.5'f32)
+  capture("dragFloat3"):
+    discard b.dragFloat3(dragVec3, 0.5'f32)
+  capture("dragFloat4"):
+    discard b.dragFloat4(dragVec4, 0.5'f32)
+  capture("colorPicker"):
+    discard b.colorPicker(color)
+  capture("dropdown"):
+    discard b.dropdown(options, selected)
+  capture("textField"):
+    discard b.textField(fieldText, "Text")
+  capture("tooltip button"):
+    discard b.button("Hover me")
+  capture("menuBar"):
+    b.menuBar:
+      b.menuBarItem(menuOpen):
+        b.label("Menu")
+      do:
+        discard
+      do:
+        discard
+      do:
+        discard
+
+  discard b.postProcessChildren(0)
+  for widget in widgetNodes:
+    require(approxEq(b.nodes[widget[1]].size.y, 1.0'f32),
+      widget[0] & " should be exactly one terminal row high, got " & $b.nodes[widget[1]].size.y)
 
 proc testVerticalLayoutTextSizing() =
   var b = newTestBuilder(200.0, 120.0)
@@ -753,6 +897,118 @@ proc testButtonHoverAndPressed() =
   require(secondPressed, "button should report pressed when previous frame clicked id matches")
   require(secondFill.r > firstFill.r, "button hover fill should animate toward hover color when previously hovered")
   require(secondFill.r < 0.96'f32 + 0.0001'f32, "button hover fill should remain below click highlight color")
+
+proc testHitBoundsExcludeBottomEdge() =
+  var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+
+  discard b.beginUiFrame(20.0'f32, 10.0'f32)
+  let nodeIndex = b.nodes.len
+  b.node("one-row-target"):
+    discard b.size(10.0'f32, 1.0'f32)
+  let nodeId = b.nodes[nodeIndex].id
+
+  discard b.beginUiFrame(20.0'f32, 10.0'f32,
+    input = UiInputSnapshot(mouse: vec2(5.0'f32, 1.0'f32)))
+  b.node("one-row-target"):
+    discard b.size(10.0'f32, 1.0'f32)
+
+  require(b.previousOutput.hoveredId != nodeId,
+    "the terminal row immediately below a node must not hover it")
+
+proc testTerminalScrollBoxContentHasNoPadding() =
+  var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  b.defaultStyle.paddingX = 3.0'f32
+  b.defaultStyle.paddingY = 3.0'f32
+  discard b.beginUiFrame(40.0'f32, 12.0'f32)
+
+  let scrollBoxIndex = b.nodes.len
+  var contentIndex = -1
+  b.scrollBox:
+    contentIndex = b.stack[^1]
+
+  require(scrollBoxIndex >= 0 and contentIndex >= 0,
+    "terminal scroll box should contain a content node")
+  let scrollBoxStyle = b.nodeStyle(scrollBoxIndex)
+  let contentStyle = b.nodeStyle(contentIndex)
+  require(scrollBoxStyle.paddingX == 0.0'f32 and scrollBoxStyle.paddingY == 0.0'f32,
+    "terminal scroll box should not have padding")
+  require(contentStyle.paddingX == 0.0'f32 and contentStyle.paddingY == 0.0'f32,
+    "terminal scroll box content should not have padding")
+
+proc testTerminalScrollBoxUsesCellScrollbar() =
+  var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  discard b.beginUiFrame(40.0'f32, 12.0'f32)
+
+  let scrollBoxIndex = b.nodes.len
+  b.scrollBox:
+    discard b.fillX().height(40.0'f32)
+  b.endUiFrame(buildRenderCommands = false)
+
+  let contentIndex = b.firstChildIndex(scrollBoxIndex)
+  var trackIndex = -1
+  for childIndex in b.children(scrollBoxIndex):
+    if childIndex != contentIndex:
+      trackIndex = childIndex
+      break
+  let thumbIndex = b.firstChildIndex(trackIndex)
+
+  require(trackIndex >= 0 and thumbIndex >= 0,
+    "overflowing terminal scroll box should build a scrollbar")
+  require(b.nodes[trackIndex].size.x == 1.0'f32,
+    "terminal scroll box track should be one cell wide")
+  require(b.nodes[thumbIndex].pos.x == 0.0'f32 and
+      b.nodes[thumbIndex].size.x == 1.0'f32,
+    "terminal scroll box thumb should fill its one-cell track")
+  require(b.nodes[thumbIndex].size.y >= 1.0'f32,
+    "terminal scroll box thumb should be at least one row high")
+
+proc buildHoverInspectorFrame(b: var UiBuilder) =
+  b.node("hover-target"):
+    discard b.position(4.0'f32, 3.0'f32).size(20.0'f32, 10.0'f32)
+    discard b.padding(2.0'f32).fillBackground().text("inspect me")
+  b.node("overlays"):
+    discard b.fill().noHover()
+    b.overlays = b.currentNode.id
+
+proc frameContainsText(b: UiBuilder, needle: string): bool =
+  for nodeText in b.frame.texts:
+    if needle in nodeText.text.value:
+      return true
+  return false
+
+proc testHoveredNodeIndexAndDebugTooltip() =
+  var b = newBuilder(fixedMeasureText)
+  discard b.beginUiFrame(200.0'f32, 120.0'f32)
+  let targetIndex = b.nodes.len
+  b.buildHoverInspectorFrame()
+  let targetId = b.nodes[targetIndex].id
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0'f32, 120.0'f32,
+    input = UiInputSnapshot(mouse: vec2(6.0'f32, 5.0'f32), modsDown: {ModAlt}))
+  require(b.hoveredNodeIndex() == targetIndex,
+    "hoveredNodeIndex should identify the directly hovered previous-frame node")
+  require(b.previousFrame.nodes[b.hoveredNodeIndex()].id == targetId,
+    "hoveredNodeIndex should reference the matching previous-frame node")
+  b.buildHoverInspectorFrame()
+  b.endUiFrame(buildRenderCommands = false)
+
+  when defined(nuiDebug):
+    require(b.frameContainsText("index=" & $targetIndex),
+      "Alt-hover should build a tooltip containing the hovered node index")
+    require(b.frameContainsText("inspect me"),
+      "Alt-hover tooltip should include node text details")
+
+    b.showDebugPanel = true
+    discard b.beginUiFrame(200.0'f32, 120.0'f32,
+      input = UiInputSnapshot(mouse: vec2(6.0'f32, 5.0'f32), modsDown: {ModAlt}))
+    b.buildHoverInspectorFrame()
+    b.endUiFrame(buildRenderCommands = false)
+    require(not b.frameContainsText("index=" & $targetIndex),
+      "the hover tooltip should be hidden while the debug panel is visible")
 
 proc testSliderClickUpdatesValue() =
   var b = newBuilder(fixedMeasureText)
@@ -1749,6 +2005,9 @@ proc runTests() =
   testFlagsAndMutators()
   testTextWrappingUsesNodeWidthOnlyWhenEnabled()
   testPositionAndSizeScalars()
+  testBaseFontRelativePadding()
+  testBaseFontRelativeSize()
+  testTerminalCatalogWidgetsAreOneRowHigh()
   testVerticalLayoutTextSizing()
   testHorizontalLayoutTextSizing()
   testAlignCenterVerticalCrossAxis()
@@ -1772,6 +2031,10 @@ proc runTests() =
   testStableExplicitIdsAcrossFrames()
   testPushPopIdScopes()
   # testButtonHoverAndPressed()
+  testHitBoundsExcludeBottomEdge()
+  testTerminalScrollBoxContentHasNoPadding()
+  testTerminalScrollBoxUsesCellScrollbar()
+  testHoveredNodeIndexAndDebugTooltip()
   # testSliderClickUpdatesValue()
   testPreviousNodesAndIndicesDoubleBuffered()
   testDragUiCallbackAndDropState()

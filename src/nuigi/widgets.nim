@@ -80,7 +80,12 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
 
       b.node("tab-bar-header"):
         discard b.styleIndex(UiStyleIndexTabBarHeader)
-        discard b.fillX().fitY().gap(4)
+        if b.backendType == UiBackendType.Terminal:
+          discard b.padding(0)
+          discard b.gap(1)
+        else:
+          discard b.gapRelative(4.0'f32 / 18.0'f32)
+        discard b.fillX().fitY()
         discard b.flexLayout(true).flexFlow(FlexDirectionRow, FlexWrap)
         discard b.animateHeight().animateDelayed()
         discard b.fillBackground()
@@ -96,6 +101,8 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
               firstTabId = tabId
             discard b.styleIndex(if isActive: UiStyleIndexTabBarItemActive else: UiStyleIndexTabBarItem)
             discard b.copyTextStyleIndex(if isActive: UiStyleIndexTabBarItemActiveText else: UiStyleIndexTabBarItemText)
+            if b.backendType == UiBackendType.Terminal:
+              discard b.padding(0).borderWidth(0)
             discard b.fitX().fitY()
             discard b.fillBackground()
             discard b.text(tabs[i])
@@ -120,6 +127,8 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
 
       b.node("tab-bar-content"):
         discard b.styleIndex(UiStyleIndexTabBarContent)
+        if b.backendType == UiBackendType.Terminal:
+          discard b.padding(0)
         discard b.sizeToParentX().sizeToParentY()
         discard b.fillBackground()
         let firstContentFocusItem = b.frame.focusItems.len
@@ -147,7 +156,6 @@ proc button*(b: var UiBuilder, text: string): bool =
     if b.previousOutput.clickedId == nodeId:
       b.requestFocus()
     focusActivated = b.wasFocusActivated()
-    discard b.focusHighlight()
     let wasHovered = b.previousOutput.hoveredId == nodeId
     discard b.fillBackground()
     b.animate(b.previousOutput.clickedId == nodeId or
@@ -159,6 +167,7 @@ proc button*(b: var UiBuilder, text: string): bool =
         b.themeStyle(UiStyleIndexButton)[].fillColor)
       if b.previousOutput.clickedId == nodeId:
         b.ensureNodeStyle(b.currentNode).fillColor = b.themeTextStyle(UiStyleIndexButtonText)[].textColor
+    discard b.focusHighlight()
 
   let id = b.nodes[nodeIndex].id
   b.previousOutput.clickedId == id or focusActivated
@@ -197,7 +206,7 @@ template menuBarItem*(b: var UiBuilder, inOpen: var bool, inBody: untyped, inHov
     prof("menuBarItem")
     b.node:
       discard b.copyStyleIndex(UiStyleIndexMenuItem)
-      discard b.fitX().fitY().padding(4)
+      discard b.fitX().fitY().paddingRelative(4.0'f32 / 18.0'f32)
       inBody
       let wasHovered = b.wasHovered(b.stack[^1], includeChildren = true)
       discard b.fillBackground()
@@ -223,7 +232,12 @@ template menuBar*(b: var UiBuilder, inBody: untyped): untyped =
   block:
     prof("menuBar")
     b.node("menu-bar"):
-      discard b.fillX().fitY().padding(4).gap(4)
+      discard b.fillX().fitY()
+        .paddingRelative(4.0'f32 / 18.0'f32)
+      if b.backendType == UiBackendType.Terminal:
+        discard b.gap(1)
+      else:
+        discard b.gapRelative(4.0'f32 / 18.0'f32)
       discard b.flexLayout(true).flexFlow(FlexDirectionRow, FlexWrap)
       discard b.fillBackground().styleIndex(UiStyleIndexMenuBar)
       inBody
@@ -296,7 +310,10 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
   b.layoutHorizontal:
     b.debugName("checkbox")
     discard b.fitX().fitY()
-    discard b.gap(6)
+    if b.backendType == UiBackendType.Terminal:
+      discard b.gap(1)
+    else:
+      discard b.gapRelative(6.0'f32 / 18.0'f32)
     discard b.focusable({FocusTabStop, FocusActivatable})
     isFocused = b.isFocused()
 
@@ -304,40 +321,55 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     if fillXInVertical and parent != nil and LayoutVertical in parent.flags:
       discard b.fillX()
 
-    if label != "":
-      b.node("checkbox-label"):
-        discard b.copyTextStyleIndex(UiStyleIndexLabelText)
-        discard b.fitX().fitY().alignCenter()
-        discard b.text(label)
-
-    b.node():
-      discard b.padding(2).fit()
-      b.node:
+    if b.backendType == UiBackendType.Terminal:
+      b.node("checkbox-box"):
         b.debugName("checkbox-box")
-        discard b.styleIndex(UiStyleIndexCheckbox)
-        let defaultTextSize = b.themeTextStyle(UiStyleIndexDefaultText)[].fontSize
-        discard b.size(defaultTextSize, defaultTextSize)
-        discard b.fillBackground()
-        if isFocused:
-          discard b.copyStyleIndex(UiStyleIndexCheckbox)
-          discard b.borderWidth(2.0'f32)
-          discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
-        discard b.alignCenter()
+        discard b.copyTextStyleIndex(UiStyleIndexCheckboxMarkText)
+        discard b.fitX().fitY()
+        discard b.text(if value: "[x]" else: "[ ]")
         boxNodeIdx = b.nodes.high
         boxNodeId = b.currentNode.id
+      if label != "":
+        b.node("checkbox-label"):
+          discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+          discard b.fitX().fitY().alignCenter()
+          discard b.text(label)
+      discard b.focusHighlight()
+    else:
+      if label != "":
+        b.node("checkbox-label"):
+          discard b.copyTextStyleIndex(UiStyleIndexLabelText)
+          discard b.fitX().fitY().alignCenter()
+          discard b.text(label)
 
-        b.node("checkbox-mark"):
-          discard b.styleIndex(UiStyleIndexCheckboxMark)
-          discard b.alignCenter()
-          b.animate(b.wasClicked(boxNodeIdx, includeChildren = true)):
-            if value:
-              discard b.sizeAnim(defaultTextSize - 6, defaultTextSize - 6)
-            else:
-              discard b.sizeAnim(0, 0)
+      b.node():
+        discard b.paddingRelative(2.0'f32 / 18.0'f32).fit()
+        b.node:
+          b.debugName("checkbox-box")
+          discard b.styleIndex(UiStyleIndexCheckbox)
+          let defaultTextSize = b.themeTextStyle(UiStyleIndexDefaultText)[].fontSize
+          discard b.size(defaultTextSize, defaultTextSize)
           discard b.fillBackground()
+          if isFocused:
+            discard b.copyStyleIndex(UiStyleIndexCheckbox)
+            discard b.borderWidth(2.0'f32)
+            discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
+          discard b.alignCenter()
+          boxNodeIdx = b.nodes.high
+          boxNodeId = b.currentNode.id
 
-        if b.wasHovered(boxNodeIdx, includeChildren = true):
-          discard b.styleIndex(UiStyleIndexCheckboxHover)
+          b.node("checkbox-mark"):
+            discard b.styleIndex(UiStyleIndexCheckboxMark)
+            discard b.alignCenter()
+            b.animate(b.wasClicked(boxNodeIdx, includeChildren = true)):
+              if value:
+                discard b.sizeAnim(defaultTextSize - 6, defaultTextSize - 6)
+              else:
+                discard b.sizeAnim(0, 0)
+            discard b.fillBackground()
+
+          if b.wasHovered(boxNodeIdx, includeChildren = true):
+            discard b.styleIndex(UiStyleIndexCheckboxHover)
     if b.wasClicked(boxNodeIdx, includeChildren = true):
       b.requestFocus()
     focusActivated = b.wasFocusActivated()
@@ -357,9 +389,9 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
 proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue = 1.0'f32, defaultValue = 0.5'f32): bool =
   prof("slider")
   let trackWidth = 160.0'f32
-  let trackHeight = 18.0'f32
-  let lineThickness = 4.0'f32
-  let handleDiameter = 14.0'f32
+  let trackHeight = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 18.0'f32
+  let lineThickness = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 4.0'f32
+  let handleDiameter = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 14.0'f32
   let low = min(minValue, maxValue)
   let high = max(minValue, maxValue)
   let span = max(0.0001'f32, high - low)
@@ -380,7 +412,7 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
 
   discard b.pushId(cast[uint64](value.addr))
   b.layoutHorizontal("slider"):
-    discard b.fitX().fitY().gap(6)
+    discard b.fitX().fitY().gapRelative(6.0'f32 / 18.0'f32)
 
     b.node("slider-track"):
       discard b.styleIndex(UiStyleIndexSliderTrack)
@@ -491,7 +523,7 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
     maxValue: float32 = dragFloatInf.float32,
     trackWidth: float32 = dragFloatDefaultWidth.float32): bool =
   prof("dragFloat")
-  let trackHeight = dragFloatHeight
+  let trackHeight = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: dragFloatHeight
 
   let hasMin = minValue != dragFloatNegInf
   let hasMax = maxValue != dragFloatInf
@@ -631,8 +663,9 @@ proc dragFloatComponent(b: var UiBuilder, value: var float32,
     labelText: string): bool =
   prof("dragFloatComponent")
   if labelText.len > 0:
+    let componentHeight = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: dragFloatHeight
     b.node:
-      discard b.size(dragFloatHeight * labelText.len.float32, dragFloatHeight)
+      discard b.size(dragFloatHeight * labelText.len.float32, componentHeight)
       b.node:
         discard b.fitX().fitY().alignCenter().noHover()
         discard b.copyTextStyleIndex(UiStyleIndexSliderText)
@@ -787,12 +820,14 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
     b.node("dropdown-button"):
       btnIdx = b.stack[^1]
       btnId = b.currentNode.id
-      discard b.fitX().fitY().padding(4).gap(6)
+      discard b.fitX().fitY()
+        .paddingRelative(4.0'f32 / 18.0'f32)
+        .gapRelative(6.0'f32 / 18.0'f32)
       discard b.copyStyleIndex(UiStyleIndexButton)
       discard b.fillBackground().noChildHover()
 
       b.layoutHorizontal("dropdown-button-row"):
-        discard b.fit().gap(6)
+        discard b.fit().gapRelative(6.0'f32 / 18.0'f32)
         b.node("dropdown-button-label"):
           discard b.fit()
           discard b.copyTextStyleIndex(UiStyleIndexButtonText)
@@ -876,8 +911,12 @@ proc scrollBoxDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) =
   let scrollOffset = cast[ptr float](rawData)
 
   let scrollSpeed = 28.0'f32
-  let scrollbarWidth = 10.0'f32
-  let thumbMinHeight = 24.0'f32
+  let scrollbarWidth =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
+  let thumbMinHeight =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 24.0'f32
+  let thumbInset =
+    if b.backendType == UiBackendType.Terminal: 0.0'f32 else: 1.0'f32
   var viewportIdx = -1
   var contentIdx = -1
   var trackIdx = -1
@@ -921,8 +960,8 @@ proc scrollBoxDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) =
         b.node("scrollbar-thumb"):
           thumbIdx = b.stack[^1]
           discard b.styleIndex(if b.wasHovered(thumbIdx, includeChildren = true): UiStyleIndexScrollBarHandleHover else: UiStyleIndexScrollBarHandle)
-          discard b.position(1, thumbY)
-          discard b.size(max(2.0'f32, scrollbarWidth - 2.0'f32), thumbHeight)
+          discard b.position(thumbInset, thumbY)
+          discard b.size(scrollbarWidth - thumbInset * 2.0'f32, thumbHeight)
           discard b.fillBackground()
 
       let draggingThumb =
@@ -963,6 +1002,8 @@ template scrollBox*(b: var UiBuilder, body: untyped): untyped =
 
     b.node("scroll-box"):
       viewportIdx = b.previousNodeIndex(b.currentNode.id)
+      if b.backendType == UiBackendType.Terminal:
+        discard b.padding(0)
       discard b.sizeToParent()
       discard b.maskChildren()
       b.currentNode.flags.incl Scrollable
@@ -970,6 +1011,8 @@ template scrollBox*(b: var UiBuilder, body: untyped): untyped =
 
       b.node("scroll-content"):
         contentIdx = b.stack[^1]
+        if b.backendType == UiBackendType.Terminal:
+          discard b.padding(0)
         discard b.position(0, storage.scrollOffset.float32)
         body
 

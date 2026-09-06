@@ -26,6 +26,18 @@ when not defined(nimony):
 var demoTabIndex = 0
 var demoMenuOpen = false
 
+const demoBaseFontSize = 18.0'f32
+
+template demoHorizontalGap(b: var UiBuilder, graphicalGap: float32) =
+  if b.backendType == UiBackendType.Terminal:
+    discard b.gap(1)
+  else:
+    discard b.gapRelative(graphicalGap / demoBaseFontSize)
+
+template demoTerminalBorderPadding(b: var UiBuilder) =
+  if b.backendType == UiBackendType.Terminal:
+    discard b.padding(1)
+
 # ---------------------------------------------------------------------------
 # Type 1 #1 — Fill
 # ---------------------------------------------------------------------------
@@ -36,32 +48,39 @@ var fillDemoBoth = false
 
 proc buildFillExamples*(b: var UiBuilder) =
   b.layoutVertical("fill-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("fillX / fillY / fill — claim space from the parent along one or both axes"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("fill-controls"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       if b.checkbox("fillX", fillDemoX): discard
       if b.checkbox("fillY", fillDemoY): discard
       if b.checkbox("fill (both)", fillDemoBoth): discard
 
     b.node("fill-stage"):
-      discard b.size(360, 150).padding(6)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        150.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       b.node("fill-child"):
-        discard b.size(80, 36)
+        discard b.sizeRelative(80.0'f32 / demoBaseFontSize,
+          36.0'f32 / demoBaseFontSize)
         if fillDemoBoth:
           discard b.fill()
         if fillDemoX:
           discard b.fillX()
         if fillDemoY:
           discard b.fillY()
-        discard b.padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
+        discard b.paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.text("child")
 
 # ---------------------------------------------------------------------------
@@ -73,29 +92,36 @@ var stcDemoY = false
 
 proc buildFitExamples*(b: var UiBuilder) =
   b.layoutVertical("stc-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("fitX / fitY / fit — size to text and children"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("stc-controls"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       if b.checkbox("fitX", stcDemoX): discard
       if b.checkbox("fitY", stcDemoY): discard
 
     b.node("stc-stage"):
-      discard b.size(360, 150).padding(6)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        150.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       b.node("stc-child"):
-        discard b.size(200, 50)
+        discard b.sizeRelative(200.0'f32 / demoBaseFontSize,
+          50.0'f32 / demoBaseFontSize)
         if stcDemoX:
           discard b.fitX()
         if stcDemoY:
           discard b.fitY()
-        discard b.padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
+        discard b.paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         discard b.text("sizes to content")
 
 # ---------------------------------------------------------------------------
@@ -108,7 +134,9 @@ var anchorDemoParentHeight = 220.0'f32
 
 proc buildAnchorExamples*(b: var UiBuilder) =
   b.layoutVertical("anchor-demos"):
-    discard b.fillX().fitY().padding(6).gap(6)
+    discard b.fillX().fitY()
+      .paddingRelative(6.0'f32 / demoBaseFontSize)
+      .gapRelative(6.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Anchors — position a child relative to its parent using normalized 0..1 coordinates"):
@@ -119,7 +147,8 @@ proc buildAnchorExamples*(b: var UiBuilder) =
 
     b.layoutHorizontal("anchor-controls"):
       const anchorModeLabels = ["Center", "TopLeft", "Bottom", "Right"]
-      discard b.fillX().fitY().gap(4)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(4.0'f32)
       if b.button("Mode: " & anchorModeLabels[anchorDemoMode]):
         anchorDemoMode = (anchorDemoMode + 1) mod anchorModeLabels.len
       b.withLast:
@@ -131,16 +160,20 @@ proc buildAnchorExamples*(b: var UiBuilder) =
 
     b.node("anchor-stage"):
       b.animate:
-        discard b.sizeAnim(anchorDemoParentWidth, anchorDemoParentHeight)
+        discard b.sizeAnimRelative(
+          anchorDemoParentWidth / demoBaseFontSize,
+          anchorDemoParentHeight / demoBaseFontSize)
       discard b.maxWidth(440).alignCenter()
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       template place(name: string, ax, ay, bx, by, off, px, py: float32, col: UiColor) =
         b.node(name):
           discard b.fit()
           discard b.anchors(ax, ay, bx, by).offsets(off, off, off, off).pivot(px, py).finishAnchors()
-          discard b.padding(4).fillBackground().backgroundColor(col)
+          discard b.paddingRelative(4.0'f32 / demoBaseFontSize)
+            .fillBackground().backgroundColor(col)
           discard b.text(name)
 
       place("TL", 0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32, 8.0'f32, 0.0'f32, 0.0'f32, accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
@@ -159,7 +192,8 @@ proc buildAnchorExamples*(b: var UiBuilder) =
         b.animate:
           discard b.anchorsAnim(ax, ay, bx, by).offsetsAnim(0, 0, 0, 0).pivotAnim(px, py)
           discard b.finishAnchors()
-        discard b.fit().padding(4).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
+        discard b.fit().paddingRelative(4.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         discard b.text("blend child")
 
 # ---------------------------------------------------------------------------
@@ -170,22 +204,31 @@ var layoutDirMode = 0
 
 proc buildLayoutDirectionExamples*(b: var UiBuilder) =
   b.layoutVertical("layout-dir-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("layoutVertical / layoutHorizontal + DirectionReverse (column / column-reverse / row / row-reverse)"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("layout-dir-controls"):
-      discard b.fillX().fitY().gap(6)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(6.0'f32)
       const dirLabels = ["Column", "Column reverse", "Row", "Row reverse"]
       if b.button("Direction: " & dirLabels[layoutDirMode]):
         layoutDirMode = (layoutDirMode + 1) mod dirLabels.len
 
     b.node("layout-dir-stage"):
-      discard b.fit().padding(6).gap(6)
+      discard b.fit()
+        .paddingRelative(6.0'f32 / demoBaseFontSize)
+      if b.backendType == UiBackendType.Terminal and layoutDirMode >= 2:
+        discard b.gap(1)
+      else:
+        discard b.gapRelative(6.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       case layoutDirMode
       of 0: discard b.layout(LayoutVertical).forwardLayout()
       of 1: discard b.layout(LayoutVertical).reverseLayout()
@@ -195,7 +238,7 @@ proc buildLayoutDirectionExamples*(b: var UiBuilder) =
 
       for i in 0 .. 3:
         b.node:
-          discard b.fit().padding(6).fillBackground()
+          discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize).fillBackground()
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0 - i.float32 * 0.05'f32))
           discard b.text("item " & $i)
           discard b.animatePos(DefaultAnimationSpeed * 0.3'f32).animateDelayed()
@@ -208,25 +251,31 @@ var alignDemoMode = 0
 
 proc buildAlignExamples*(b: var UiBuilder) =
   b.layoutVertical("align-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("alignCenter and vertical alignment via anchors (anchorsY / pivotY)"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("align-controls"):
-      discard b.fillX().fitY().gap(6)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(6.0'f32)
       const alignLabels = ["alignCenter", "Top", "Center", "Bottom"]
       if b.button("Mode: " & alignLabels[alignDemoMode]):
         alignDemoMode = (alignDemoMode + 1) mod alignLabels.len
 
     b.node("align-stage"):
-      discard b.size(360, 150).padding(6)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        150.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       b.node("align-child"):
-        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0))
+        discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0))
         case alignDemoMode
         of 0: discard b.alignCenter()
         of 1: discard b.anchorsY(0.0'f32, 0.0'f32).offsetsY(0.0'f32, 0.0'f32).pivotY(0.0'f32).finishAnchors()
@@ -243,28 +292,34 @@ var gapDemoPadding = 10.0'f32
 
 proc buildGapPaddingExamples*(b: var UiBuilder) =
   b.layoutVertical("gap-pad-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("gap (spacing between children, needs a layout) and padding (inset around a node's content box)"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("gap-pad-controls"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       var gapPad = vec2(gapDemoGap, gapDemoPadding)
       discard b.dragFloat2(gapPad, 0, 0.0'f32, 48.0'f32, dfCustom, @["G", "P"])
       gapDemoGap = gapPad.x
       gapDemoPadding = gapPad.y
 
     b.node("gap-pad-stage"):
-      discard b.width(360).fitY().padding(gapDemoPadding).gap(gapDemoGap)
+      discard b.widthRelative(360.0'f32 / demoBaseFontSize).fitY()
+        .paddingRelative(gapDemoPadding / demoBaseFontSize)
+        .gapRelative(gapDemoGap / demoBaseFontSize)
       discard b.layout(LayoutVertical).forwardLayout()
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       for i in 0 .. 3:
         b.node:
-          discard b.fit().padding(6).fillBackground()
+          discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize).fillBackground()
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0 - i.float32 * 0.05'f32))
           discard b.text("item " & $i)
 
@@ -288,32 +343,37 @@ var styleDemoRadiusBL = 12.0'f32
 
 proc buildStyleExamples*(b: var UiBuilder) =
   b.layoutVertical("style-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("backgroundColor, borderWidths (per side), cornerRadii (per corner), borderColors (per side)"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.node("style-child"):
-      discard b.fit().padding(30)
+      discard b.fit().paddingRelative(30.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(styleDemoBg)
       discard b.borderWidths(styleDemoBorderWL, styleDemoBorderWT, styleDemoBorderWR, styleDemoBorderWB)
+      b.demoTerminalBorderPadding()
       discard b.cornerRadii(styleDemoRadiusTL, styleDemoRadiusTR, styleDemoRadiusBR, styleDemoRadiusBL)
       discard b.borderColors(styleDemoBorderL, styleDemoBorderT, styleDemoBorderR, styleDemoBorderB)
       discard b.text("styled box")
 
     b.layoutHorizontal("style-bg"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       b.node("bg-pick"):
-        discard b.fit().gap(4)
+        discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
         b.label("backgroundColor"): discard b.fontSize(13)
         if b.colorPicker(styleDemoBg): discard
 
     b.layoutVertical("style-widths"):
-      discard b.fillX().fitY().gap(4)
+      discard b.fillX().fitY().gapRelative(4.0'f32 / demoBaseFontSize)
       b.label("borderWidths (left / top / right / bottom)"): discard b.fontSize(13)
       b.layoutHorizontal:
-        discard b.fillX().fitY().gap(8)
+        discard b.fillX().fitY()
+        b.demoHorizontalGap(8.0'f32)
       var borderTmp = vec4(styleDemoBorderWL, styleDemoBorderWT, styleDemoBorderWR, styleDemoBorderWB)
       discard b.dragFloat4(borderTmp, 4, 0.0'f32, 20.0'f32, dfNoLabel)
       styleDemoBorderWL = borderTmp.x
@@ -322,10 +382,11 @@ proc buildStyleExamples*(b: var UiBuilder) =
       styleDemoBorderWB = borderTmp.w
 
     b.layoutVertical("style-radii"):
-      discard b.fillX().fitY().gap(4)
+      discard b.fillX().fitY().gapRelative(4.0'f32 / demoBaseFontSize)
       b.label("cornerRadii (topLeft / topRight / bottomRight / bottomLeft)"): discard b.fontSize(13)
       b.layoutHorizontal:
-        discard b.fillX().fitY().gap(8)
+        discard b.fillX().fitY()
+        b.demoHorizontalGap(8.0'f32)
       var radiusTmp = vec4(styleDemoRadiusTL, styleDemoRadiusTR, styleDemoRadiusBR, styleDemoRadiusBL)
       discard b.dragFloat4(radiusTmp, 12, 0.0'f32, 60.0'f32, dfNoLabel)
       styleDemoRadiusTL = radiusTmp.x
@@ -334,13 +395,14 @@ proc buildStyleExamples*(b: var UiBuilder) =
       styleDemoRadiusBL = radiusTmp.w
 
     b.layoutVertical("style-colors"):
-      discard b.fillX().fitY().gap(4)
+      discard b.fillX().fitY().gapRelative(4.0'f32 / demoBaseFontSize)
       b.label("borderColors (left / top / right / bottom)"): discard b.fontSize(13)
       b.layoutHorizontal:
-        discard b.fillX().fitY().gap(8)
+        discard b.fillX().fitY()
+        b.demoHorizontalGap(8.0'f32)
         template pick(name: string, col: var UiColor) =
           b.node(name):
-            discard b.fit().gap(4)
+            discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
             b.label(name): discard b.fontSize(13)
             if b.colorPicker(col): discard
         pick("L", styleDemoBorderL)
@@ -353,14 +415,19 @@ proc buildStyleExamples*(b: var UiBuilder) =
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
 
     b.node("border-style-gallery"):
-      discard b.fillX().fitY().gap(12)
-      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap).flexGaps(12, 12)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(12.0'f32)
+      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap)
 
       b.layoutVertical("asymmetric-corners"):
-        discard b.size(260, 150).padding(14).gap(8)
+        discard b.sizeRelative(260.0'f32 / demoBaseFontSize,
+          150.0'f32 / demoBaseFontSize)
+          .paddingRelative(14.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(30, 4, 24, 0)
         discard b.borderWidth(3)
+        b.demoTerminalBorderPadding()
         discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
         discard b.animatePos().animateDelayed()
         b.labelWrapped("Asymmetric corners"):
@@ -371,10 +438,14 @@ proc buildStyleExamples*(b: var UiBuilder) =
           discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("asymmetric-widths"):
-        discard b.size(260, 150).padding(14).gap(8)
+        discard b.sizeRelative(260.0'f32 / demoBaseFontSize,
+          150.0'f32 / demoBaseFontSize)
+          .paddingRelative(14.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadius(12)
         discard b.borderWidths(2, 8, 14, 4)
+        b.demoTerminalBorderPadding()
         discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         discard b.animatePos().animateDelayed()
         b.labelWrapped("Per-side widths"):
@@ -385,10 +456,14 @@ proc buildStyleExamples*(b: var UiBuilder) =
           discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("combined-border-style"):
-        discard b.size(260, 150).padding(14).gap(8)
+        discard b.sizeRelative(260.0'f32 / demoBaseFontSize,
+          150.0'f32 / demoBaseFontSize)
+          .paddingRelative(14.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(28, 12, 28, 12)
         discard b.borderWidths(5, 9, 5, 9)
+        b.demoTerminalBorderPadding()
         discard b.animatePos().animateDelayed()
         discard b.borderColors(
           rgba(0.96, 0.34, 0.40, 1.0),
@@ -403,10 +478,14 @@ proc buildStyleExamples*(b: var UiBuilder) =
           discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
       b.layoutVertical("all"):
-        discard b.size(260, 150).padding(14).gap(8)
+        discard b.sizeRelative(260.0'f32 / demoBaseFontSize,
+          150.0'f32 / demoBaseFontSize)
+          .paddingRelative(14.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.cornerRadii(30, 4, 60, 0)
         discard b.borderWidths(2, 8, 15, 1)
+        b.demoTerminalBorderPadding()
         discard b.animatePos().animateDelayed()
         discard b.borderColors(
           rgba(0.96, 0.34, 0.40, 1.0),
@@ -427,34 +506,39 @@ var textDemoFontIdx = 0
 
 proc buildTextStyleExamples*(b: var UiBuilder) =
   b.layoutVertical("text-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("text, fontSize, textColor, wrapText"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutVertical("text-controls"):
-      discard b.fillX().fitY().gap(6)
+      discard b.fillX().fitY().gapRelative(6.0'f32 / demoBaseFontSize)
       b.label("text"): discard b.fontSize(13)
       if b.textField(textDemoText, "Type text..."): discard
 
       b.layoutHorizontal:
-        discard b.fillX().fitY().gap(8)
+        discard b.fillX().fitY()
+        b.demoHorizontalGap(8.0'f32)
         b.node("text-color"):
-          discard b.fit().gap(4)
+          discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
           b.label("textColor"): discard b.fontSize(13)
           if b.colorPicker(textDemoColor): discard
         if b.checkbox("wrapText", textDemoWrap): discard
 
       b.layoutHorizontal:
-        discard b.fillX().fitY().gap(8)
+        discard b.fillX().fitY()
+        b.demoHorizontalGap(8.0'f32)
         b.layoutHorizontal:
-          discard b.fitX().fitY().gap(2)
+          discard b.fitX().fitY()
+          b.demoHorizontalGap(2.0'f32)
           b.label("fontSize")
           discard b.dragFloat(textDemoSize, 18, 8.0'f32, 64.0'f32)
 
       b.node("text-font"):
-        discard b.fit().gap(4)
+        discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
         b.label("font (b.fonts)"): discard b.fontSize(13)
         var fontNames: seq[string] = newSeq[string]()
         for name, id in b.fonts.pairs:
@@ -465,9 +549,13 @@ proc buildTextStyleExamples*(b: var UiBuilder) =
           if b.dropdown(fontNames, textDemoFontIdx): discard
 
     b.node("text-stage"):
-      discard b.size(360, 150).fitY().padding(8).gap(8)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        150.0'f32 / demoBaseFontSize).fitY()
+        .paddingRelative(8.0'f32 / demoBaseFontSize)
+        .gapRelative(8.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       var fontNames2: seq[string] = newSeq[string]()
       for name, id in b.fonts.pairs:
         fontNames2.add(name)
@@ -487,20 +575,24 @@ var maskDemoNoChildHover = false
 
 proc buildMaskChildrenExamples*(b: var UiBuilder) =
   b.layoutVertical("mask-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("maskChildren (clip overflow), noHover, noChildHover"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("mask-controls"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       if b.checkbox("maskChildren", maskDemoMask): discard
       if b.checkbox("noHover", maskDemoNoHover): discard
       if b.checkbox("noChildHover", maskDemoNoChildHover): discard
 
     b.node("mask-stage"):
-      discard b.size(320, 170).padding(8)
+      discard b.sizeRelative(320.0'f32 / demoBaseFontSize,
+        170.0'f32 / demoBaseFontSize).paddingRelative(8.0'f32 / demoBaseFontSize)
       let h = b.wasHovered()
       discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 0.9'f32))
       if maskDemoMask:
@@ -511,7 +603,7 @@ proc buildMaskChildrenExamples*(b: var UiBuilder) =
         discard b.noChildHover()
 
       b.node("mask-hover"):
-        discard b.fit().padding(8).fillBackground()
+        discard b.fit().paddingRelative(8.0'f32 / demoBaseFontSize).fillBackground()
         discard b.anchors(1.0'f32, 0.5'f32, 1.0'f32, 0.5'f32).offsets(-8, -8, -8, -8).pivot(0.5'f32, 0.5'f32).finishAnchors()
         let h = b.wasHovered()
         discard b.backgroundColor(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
@@ -526,7 +618,9 @@ var animDemoShow = false
 
 proc buildAnimationExamples*(b: var UiBuilder) =
   b.layoutVertical("anim-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("animate (immediate, triggered on hover/click): sizeAnim, backgroundColorAnim, transformScaleAnim, positionAnim, widthAnim, heightAnim"):
@@ -535,22 +629,27 @@ proc buildAnimationExamples*(b: var UiBuilder) =
       discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).fontSize(13)
 
     b.layoutHorizontal("anim-controls"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       if b.button("Toggle expand"):
         animDemoExpanded = not animDemoExpanded
       if b.button("Toggle show"):
         animDemoShow = not animDemoShow
       var animationSpeed = b.animationSpeed
       b.layoutHorizontal:
-        discard b.fitX().fitY().gap(2)
+        discard b.fitX().fitY()
+        b.demoHorizontalGap(2.0'f32)
         b.label("Animation speed")
         discard b.dragFloat(animationSpeed, 1.0'f32, 0.0'f32, 4.0'f32)
       b.animationSpeed = animationSpeed
 
     b.layoutHorizontal:
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       b.node("anim-hover-transform"):
-        discard b.size(140, 90).padding(8).fillBackground().cornerRadius(8)
+        discard b.sizeRelative(140.0'f32 / demoBaseFontSize,
+          90.0'f32 / demoBaseFontSize).paddingRelative(8.0'f32 / demoBaseFontSize)
+          .fillBackground().cornerRadius(8)
         if b.wasHovered():
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         else:
@@ -563,38 +662,46 @@ proc buildAnimationExamples*(b: var UiBuilder) =
         discard b.text("animate transform")
 
       b.node("anim-hover-size"):
-        discard b.size(140, 90).padding(8).fillBackground().cornerRadius(8)
+        discard b.sizeRelative(140.0'f32 / demoBaseFontSize,
+          90.0'f32 / demoBaseFontSize).paddingRelative(8.0'f32 / demoBaseFontSize)
+          .fillBackground().cornerRadius(8)
         if b.wasHovered():
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0))
         else:
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         let h = b.wasHovered()
         b.animate:
-          discard b.sizeAnim(if h: 200.0'f32 else: 140.0'f32, if h: 130.0'f32 else: 90.0'f32)
+          discard b.sizeAnimRelative(
+            (if h: 200.0'f32 else: 140.0'f32) / demoBaseFontSize,
+            (if h: 130.0'f32 else: 90.0'f32) / demoBaseFontSize)
           discard b.backgroundColorAnim(if h: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0) else: accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.alignCenter()
         discard b.text("animate size")
 
     b.node("anim-click"):
-      discard b.size(360, 130).padding(8).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor).cornerRadius(8)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        130.0'f32 / demoBaseFontSize).paddingRelative(8.0'f32 / demoBaseFontSize)
+        .fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor).cornerRadius(8)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       b.node("anim-click-box"):
-        discard b.alignCenter().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0)).cornerRadius(6)
+        discard b.alignCenter().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HYellow, 1.0)).cornerRadius(6)
         let s = if animDemoExpanded: 110.0'f32 else: 60.0'f32
         let w = if animDemoExpanded: 220.0'f32 else: 120.0'f32
         b.animate:
-          discard b.sizeAnim(w, s)
+          discard b.sizeAnimRelative(w / demoBaseFontSize, s / demoBaseFontSize)
           discard b.transformScaleAnim(if animDemoExpanded: 1.1'f32 else: 1.0'f32)
         discard b.alignCenter()
         discard b.text(if animDemoExpanded: "expanded" else: "click Toggle expand")
 
     if animDemoShow:
       b.node("anim-delayed"):
-        discard b.padding(12).fillBackground().cornerRadius(8)
+        discard b.paddingRelative(12.0'f32 / demoBaseFontSize).fillBackground().cornerRadius(8)
         discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HPurple, 1.0))
         let firstAppearance = b.previousNodeIndex(b.currentNode.id, b.currentNodeIndex) < 0
         if firstAppearance:
-          discard b.size(0, 0)
+          discard b.sizeRelative(0.0'f32, 0.0'f32)
         else:
           discard b.fit()
         discard b.animatePos()
@@ -618,7 +725,9 @@ var transformDemoAnimate = true
 proc buildTransformExamples*(b: var UiBuilder) =
   b.anythingAnimating = true
   b.layoutVertical("transform-demos"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("transformOffset, transformRotation, transformScale, transformPivot — render-space transform around a pivot"):
@@ -627,17 +736,20 @@ proc buildTransformExamples*(b: var UiBuilder) =
       discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor).fontSize(13)
 
     b.node("transform-controls"):
-      discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap).flexGaps(8, 8)
+      discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap)
+      b.demoHorizontalGap(8.0'f32)
       var transformPos = vec2(transformDemoX, transformDemoY)
       discard b.dragFloat2(transformPos, 0, -60.0'f32, 60.0'f32, dfXYZW)
       transformDemoX = transformPos.x
       transformDemoY = transformPos.y
       b.layoutHorizontal:
-        discard b.fitX().fitY().gap(2)
+        discard b.fitX().fitY()
+        b.demoHorizontalGap(2.0'f32)
         b.label("rotation")
         discard b.dragFloat(transformDemoRot, 0, -3.14159'f32, 3.14159'f32)
       b.layoutHorizontal:
-        discard b.fitX().fitY().gap(2)
+        discard b.fitX().fitY()
+        b.demoHorizontalGap(2.0'f32)
         b.label("scale")
         discard b.dragFloat(transformDemoScale, 1, 0.25'f32, 2.5'f32)
       var transformPivot = vec2(transformDemoPivotX, transformDemoPivotY)
@@ -661,12 +773,15 @@ proc buildTransformExamples*(b: var UiBuilder) =
         transformDemoPivotY = 0.5'f32
 
     b.node("transform-stage"):
-      discard b.size(360, 200).padding(10)
+      discard b.sizeRelative(360.0'f32 / demoBaseFontSize,
+        200.0'f32 / demoBaseFontSize).paddingRelative(10.0'f32 / demoBaseFontSize)
       discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
       discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
 
       b.node("transform-child"):
-        discard b.fit().padding(10).alignCenter().fillBackground()
+        discard b.fit().paddingRelative(10.0'f32 / demoBaseFontSize)
+          .alignCenter().fillBackground()
         if b.wasHovered():
           discard b.backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         else:
@@ -686,15 +801,19 @@ proc buildTransformExamples*(b: var UiBuilder) =
         discard b.text("transformed")
 
     b.layoutHorizontal("transform-corner-pivot-row"):
-      discard b.fillX().fitY().gap(6)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(6.0'f32)
 
       template cornerPivot(name: string, px, py: float32, col: UiColor) =
         b.node(name):
-          discard b.size(110, 90).padding(4)
+          discard b.sizeRelative(110.0'f32 / demoBaseFontSize,
+            90.0'f32 / demoBaseFontSize).paddingRelative(4.0'f32 / demoBaseFontSize)
           discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
           discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+          b.demoTerminalBorderPadding()
           b.node("cp-child"):
-            discard b.fit().padding(6).alignCenter().fillBackground().backgroundColor(col).cornerRadius(4)
+            discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+              .alignCenter().fillBackground().backgroundColor(col).cornerRadius(4)
             let spin = b.frameCtx.input.frameIndex.float32 * 0.03'f32 * b.animationSpeed
             discard b.transformPivot(px, py)
             discard b.transformRotation(spin)
@@ -725,29 +844,32 @@ var awMenuOpen = false
 
 proc buildAllWidgetsExample*(b: var UiBuilder) =
   b.layoutVertical("all-widgets"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Builtin widgets"):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.tableLayout([tableColumnFit(), tableColumnFill()], 8.0, 4.0):
-      discard b.fillX().fitY().padding(6)
+      discard b.fillX().fitY().paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
       template headerCell(cap: string) =
         b.node:
-          discard b.fitY().padding(4).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
+          discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
+            .fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
           discard b.text(cap).fit()
           discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
       template labelCell(cap: string) =
         b.node:
-          discard b.fitY().padding(4).fillBackground()
+          discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize).fillBackground()
           discard b.text(cap).fit()
           discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
       template widgetCell(body: untyped) =
         b.node:
-          discard b.fillX().fitY().padding(4)
+          discard b.fillX().fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
           body
 
       headerCell("Widget")
@@ -788,28 +910,29 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
       labelCell("colorPicker")
       widgetCell:
         b.node("color-host"):
-          discard b.fit().gap(4)
+          discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
           if b.colorPicker(awColor): discard
       labelCell("dropdown")
       widgetCell:
         b.node("dropdown-host"):
-          discard b.fit().gap(4)
+          discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
           if b.dropdown(awDropdownOptions, awDropdown): discard
       labelCell("textField")
       widgetCell:
         b.node("textfield-host"):
-          discard b.fit().gap(4)
+          discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
           if b.textField(awText, "Type here..."): discard
       labelCell("tooltip")
       widgetCell:
         b.node("tooltip-host"):
-          discard b.fit().gap(4)
+          discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
           if b.button("Hover me"):
             discard
           if b.wasHovered(b.nodes.high):
             b.tooltip:
-              discard b.fit().padding(4)
+              discard b.fit().paddingRelative(4.0'f32 / demoBaseFontSize)
               discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+              b.demoTerminalBorderPadding()
               b.label("This is a tooltip"): discard
       labelCell("menu")
       widgetCell:
@@ -853,13 +976,14 @@ var cvScroll = 0.0
 var cvItemCount = 200
 
 proc cvFixedItem(b: var UiBuilder, itemIndex: int, userData: int) =
-  discard b.fillX().fitY().padding(6)
+  discard b.fillX().fitY().paddingRelative(6.0'f32 / demoBaseFontSize)
   discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
   discard b.text("Item " & $itemIndex).fit()
   discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
 
 proc cvDynItem(b: var UiBuilder, itemIndex: int, userData: int) =
-  discard b.fillX().fitY().padding(6).layout(LayoutVertical)
+  discard b.fillX().fitY().paddingRelative(6.0'f32 / demoBaseFontSize)
+    .layout(LayoutVertical)
   discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
   b.label("Dynamic item " & $itemIndex):
     discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
@@ -869,7 +993,9 @@ proc cvDynItem(b: var UiBuilder, itemIndex: int, userData: int) =
 
 proc buildComplexWidgetsExample*(b: var UiBuilder) =
   b.layoutVertical("complex-widgets"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Complex widgets: virtualList (fixed-height rows) and dynamicVirtualList (variable-height rows)"):
@@ -877,24 +1003,29 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
 
     var count = cvItemCount.float32
     b.layoutHorizontal:
-      discard b.fitX().fitY().gap(2)
+      discard b.fitX().fitY()
+      b.demoHorizontalGap(2.0'f32)
       b.label("Virtual list item count")
       discard b.dragFloat(count, 200, 1.0'f32, 1_000_000.0'f32)
     cvItemCount = count.int
 
     b.tableLayout([tableColumnProportional(1), tableColumnProportional(2)], 8.0, 4.0):
-      discard b.fillX().fitY().padding(6)
+      discard b.fillX().fitY().paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
       template headerCell(cap: string) =
         b.node:
-          discard b.fitY().padding(4).fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
+          discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
+            .fillBackground().backgroundColor(b.themeStyle(UiStyleIndexHeader)[].fillColor)
           discard b.text(cap).fit()
           discard b.textColor(b.themeTextStyle(UiStyleIndexHeaderText)[].textColor)
 
       template nameCell(name, desc: string) =
         b.layoutVertical:
-          discard b.fitY().padding(4).gap(2).fillBackground()
+          discard b.fitY()
+            .paddingRelative(4.0'f32 / demoBaseFontSize)
+            .gapRelative(2.0'f32 / demoBaseFontSize)
+            .fillBackground()
           b.label(name):
             discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
           b.labelWrapped(desc):
@@ -905,25 +1036,29 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
 
       nameCell("scrollBox", "Simple scrollable container for any content. No recycling, so great for a few items but heavy for thousands.")
       b.node:
-        discard b.fillX().height(220).padding(4)
+        discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
+          .paddingRelative(4.0'f32 / demoBaseFontSize)
         b.scrollBox:
           b.layoutVertical:
-            discard b.fillX().fitY().gap(4)
+            discard b.fillX().fitY().gapRelative(4.0'f32 / demoBaseFontSize)
             for i in 0 .. 15:
               b.node:
-                discard b.fillX().fitY().padding(6).fillBackground()
+                discard b.fillX().fitY()
+                  .paddingRelative(6.0'f32 / demoBaseFontSize).fillBackground()
                 discard b.backgroundColor(if i mod 2 == 0: b.themeStyle(UiStyleIndexRow)[].fillColor else: b.themeStyle(UiStyleIndexRowAlt)[].fillColor)
                 discard b.text("Scrollable row " & $i).fit()
                 discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
 
       nameCell("virtualList", "Fixed row height; only renders visible rows. Very fast for huge lists, but every row must be the same height.")
       b.node:
-        discard b.fillX().height(220).padding(4)
+        discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
+          .paddingRelative(4.0'f32 / demoBaseFontSize)
         b.virtualList(cvScroll, cvItemCount, 28.0'f32, cvFixedItem)
 
       nameCell("dynamicVirtualList", "Variable row heights; only renders visible rows. Very fast for huge lists, and handles mixed item height, caches rendered item heights for the scroll bar.")
       b.node:
-        discard b.fillX().height(220).padding(4)
+        discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
+          .paddingRelative(4.0'f32 / demoBaseFontSize)
         discard b.dynamicVirtualList(cvItemCount, 40.0'f32, cvDynItem)
 
 # ---------------------------------------------------------------------------
@@ -939,7 +1074,9 @@ var layoutDemoFormRemember = true
 
 proc buildLayoutExamples*(b: var UiBuilder) =
   b.layoutVertical("layout-examples"):
-    discard b.fillX().fitY().padding(8).gap(12)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(12.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Combined common layouts — Top bar, Sidebar, Card grid, Settings panel, Toolbar, Form"):
@@ -949,33 +1086,43 @@ proc buildLayoutExamples*(b: var UiBuilder) =
     b.label("Top bar — fixed blocks on the left/right, fills the middle"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("topbar"):
-      discard b.fillX().fitY().padding(6).gap(6)
-      discard b.flexLayout().flexDirection(FlexDirectionRow).flexGaps(6, 6)
+      discard b.fillX().fitY()
+        .paddingRelative(6.0'f32 / demoBaseFontSize)
+      b.demoHorizontalGap(6.0'f32)
+      discard b.flexLayout().flexDirection(FlexDirectionRow)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
+        discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HRed, 1.0))
         discard b.text("Logo")
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
+        discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0))
         discard b.text("File")
       b.node:
         discard b.fitY().flex(1, 1)
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
+        discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 1.0))
         discard b.text("Search")
       b.node:
-        discard b.fit().padding(6).fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HOrange, 1.0))
+        discard b.fit().paddingRelative(6.0'f32 / demoBaseFontSize)
+          .fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HOrange, 1.0))
         discard b.text("Profile")
 
     # 2. Sidebar -----------------------------------------------------------
     b.label("Sidebar — fixed-width sidebar next to a filling content area"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("sidebar"):
-      discard b.fillX().height(150).padding(6).gap(6)
-      discard b.flexLayout().flexDirection(FlexDirectionRow).flexGaps(6, 6)
+      discard b.fillX().heightRelative(150.0'f32 / demoBaseFontSize)
+        .paddingRelative(6.0'f32 / demoBaseFontSize)
+      b.demoHorizontalGap(6.0'f32)
+      discard b.flexLayout().flexDirection(FlexDirectionRow)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.node:
-        discard b.size(90, 0).fitY().padding(6).gap(4)
+        discard b.sizeRelative(90.0'f32 / demoBaseFontSize, 0.0'f32).fitY()
+          .paddingRelative(6.0'f32 / demoBaseFontSize)
+          .gapRelative(4.0'f32 / demoBaseFontSize)
         discard b.layout(LayoutVertical).forwardLayout()
         discard b.flex(0.0, 0.0, 90.0)
         discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -983,7 +1130,9 @@ proc buildLayoutExamples*(b: var UiBuilder) =
         b.label("Projects"): discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
         b.label("Settings"): discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
       b.node:
-        discard b.fillX().fitY().padding(8).gap(6)
+        discard b.fillX().fitY()
+          .paddingRelative(8.0'f32 / demoBaseFontSize)
+          .gapRelative(6.0'f32 / demoBaseFontSize)
         discard b.layout(LayoutVertical).forwardLayout()
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         b.label("Content area"): discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
@@ -994,12 +1143,17 @@ proc buildLayoutExamples*(b: var UiBuilder) =
     b.label("Card grid — cards laid out from a loop in a wrapping flex"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("card-grid"):
-      discard b.fillX().fitY().padding(8).gap(8)
-      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap).flexGaps(8, 8)
+      discard b.fillX().fitY()
+        .paddingRelative(8.0'f32 / demoBaseFontSize)
+      b.demoHorizontalGap(8.0'f32)
+      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       for i in 0 .. 7:
         b.node:
-          discard b.size(96, 64).padding(6).gap(4)
+          discard b.sizeRelative(96.0'f32 / demoBaseFontSize,
+            64.0'f32 / demoBaseFontSize)
+            .paddingRelative(6.0'f32 / demoBaseFontSize)
+            .gapRelative(4.0'f32 / demoBaseFontSize)
           discard b.layout(LayoutVertical).forwardLayout()
           discard b.flex(0.0, 1.0, 96.0)
           discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HTeal, 0.9'f32 - i.float32 * 0.04'f32)).cornerRadius(4)
@@ -1011,17 +1165,17 @@ proc buildLayoutExamples*(b: var UiBuilder) =
     b.label("Settings panel — label + control rows"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("settings-panel"):
-      discard b.fillX().fitY().padding(8)
+      discard b.fillX().fitY().paddingRelative(8.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.tableLayout([tableColumnFit(), tableColumnFill()], 8.0, 4.0):
         discard b.fillX().fitY()
         template settingRow(rowLabel: string, body: untyped) =
           b.node:
-            discard b.fitY().padding(4).fillBackground()
+            discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize).fillBackground()
             discard b.text(rowLabel).fit()
             discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
           b.node:
-            discard b.fillX().fitY().padding(4)
+            discard b.fillX().fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
             body
         settingRow("Music"):
           if b.checkbox("", layoutDemoMusic): discard
@@ -1036,8 +1190,10 @@ proc buildLayoutExamples*(b: var UiBuilder) =
     b.label("Toolbar — wrapping row of buttons"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("toolbar"):
-      discard b.fillX().fitY().padding(6).gap(6)
-      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap).flexGaps(6, 6)
+      discard b.fillX().fitY()
+        .paddingRelative(6.0'f32 / demoBaseFontSize)
+      b.demoHorizontalGap(6.0'f32)
+      discard b.flexLayout().flexDirection(FlexDirectionRow).flexWrap(FlexWrap)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       for name in ["New", "Open", "Save", "Cut", "Copy", "Paste", "Undo", "Redo", "Find", "Run"]:
         if b.button(name): discard
@@ -1046,12 +1202,14 @@ proc buildLayoutExamples*(b: var UiBuilder) =
     b.label("Form — text field, checkbox and button stacked"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("form"):
-      discard b.fillX().fitY().padding(8).gap(8)
+      discard b.fillX().fitY()
+        .paddingRelative(8.0'f32 / demoBaseFontSize)
+        .gapRelative(8.0'f32 / demoBaseFontSize)
       discard b.layout(LayoutVertical).forwardLayout()
       discard b.backgroundColor(b.themeStyle(UiStyleIndexCard)[].fillColor).cornerRadius(4)
       b.label("Name"): discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
       b.node("form-name"):
-        discard b.fit().gap(4)
+        discard b.fit().gapRelative(4.0'f32 / demoBaseFontSize)
         if b.textField(layoutDemoFormName, "Enter name..."): discard
       if b.checkbox("Remember me", layoutDemoFormRemember, fillXInVertical = false): discard
       if b.button("Submit"): discard
@@ -1103,18 +1261,20 @@ proc buildFontAtlasCommands*(frameArena: ptr Arena, fontAtlasImageId: UiImageId,
 
 proc buildUnicodeExamples*(b: var UiBuilder) =
   b.layoutVertical("unicode-root"):
-    discard b.sizeToParentX().fitY().padding(8).gap(6)
+    discard b.sizeToParentX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(6.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
-    b.label("Unicode stress test (one label per line)"):
-      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    # b.label("Unicode stress test (one label per line)"):
+    #   discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
-    for i, lineText in unicodeStressLines:
-      b.label($i & ": " & lineText):
-        discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    # for i, lineText in unicodeStressLines:
+    #   b.label($i & ": " & lineText):
+    #     discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
-    b.label("Raw text pass (fillX nodes, no labels)"):
-      discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    # b.label("Raw text pass (fillX nodes, no labels)"):
+    #   discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     for i, lineText in unicodeStressLines:
       b.node:
@@ -1124,11 +1284,13 @@ proc buildUnicodeExamples*(b: var UiBuilder) =
 
 proc buildFontAtlasExamples*(b: var UiBuilder) =
   b.node("font-atlas"):
-    discard b.size(1024, 1024)
-    discard b.padding(6)
+    discard b.sizeRelative(1024.0'f32 / demoBaseFontSize,
+      1024.0'f32 / demoBaseFontSize)
+    discard b.paddingRelative(6.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
     discard b.borderWidth(1)
     discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+    b.demoTerminalBorderPadding()
     let atlasNode = b.currentNode
     let atlasContentSize = vec2(
       max(0.0'f32, atlasNode.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1138,7 +1300,9 @@ proc buildFontAtlasExamples*(b: var UiBuilder) =
 
 proc buildSubpixelExamples*(b: var UiBuilder) =
   b.layoutVertical("unicode-root"):
-    discard b.sizeToParentX().fitY().padding(8).gap(6)
+    discard b.sizeToParentX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(6.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     var parentId = b.generateId()
@@ -1151,7 +1315,8 @@ proc buildSubpixelExamples*(b: var UiBuilder) =
       offset = b.previousFrame.nodes[previousIndex].pos.x
       absolutePosition = b.absoluteNodePosPrev(parentId)
     b.layoutHorizontal:
-      discard b.fitX().fitY().gap(2)
+      discard b.fitX().fitY()
+      b.demoHorizontalGap(2.0'f32)
       b.label("Offset")
       discard b.dragFloat(offset, 0.5, 0.0'f32, 1.0'f32)
 
@@ -1165,10 +1330,11 @@ proc buildSubpixelExamples*(b: var UiBuilder) =
         absoluteSize = b.currentNode.size + vec2(5, 5)
 
     b.node("font-atlas"):
-      discard b.size(absoluteSize * 10)
+      discard b.sizeRelative(absoluteSize * (10.0'f32 / demoBaseFontSize))
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
       discard b.borderWidth(1)
       discard b.borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       var commands = b.frame.arena[].allocEmptyArray(2, UiRenderCommand)
       commands.add UiRenderCommand(
         kind: CmdImage,
@@ -1275,7 +1441,9 @@ proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
 proc buildCustomRenderExamples*(b: var UiBuilder) =
   b.anythingAnimating = true
   b.layoutVertical("custom-render-root"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Custom render commands — sine wave, circle and star drawn with customRenderCommands"):
@@ -1284,10 +1452,13 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     b.layoutHorizontal("cr-shapes"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(8.0'f32)
       b.node("cr-circle"):
-        discard b.size(200, 180).padding(6)
+        discard b.sizeRelative(200.0'f32 / demoBaseFontSize,
+          180.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
         discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+        b.demoTerminalBorderPadding()
         let n = b.currentNode
         let cs = vec2(
           max(0.0'f32, n.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1295,8 +1466,10 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
         )
         discard b.customRenderCommands(buildCircleCommands(b.frame.arena, cs))
       b.node("cr-star"):
-        discard b.size(200, 180).padding(6)
+        discard b.sizeRelative(200.0'f32 / demoBaseFontSize,
+          180.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
         discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+        b.demoTerminalBorderPadding()
         let n = b.currentNode
         let cs = vec2(
           max(0.0'f32, n.size.x - b.currentNodeStyle().paddingX * 2.0'f32),
@@ -1307,8 +1480,10 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
     b.label("Two plots (sine + cosine) drawn on top of each other via plot.nim (CmdRawVertices):"):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("cr-plot"):
-      discard b.size(520, 240).padding(8)
+      discard b.sizeRelative(520.0'f32 / demoBaseFontSize,
+        240.0'f32 / demoBaseFontSize).paddingRelative(8.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       discard b.deferBuild(buildPlotDeferred)
 
 # ---------------------------------------------------------------------------
@@ -1373,17 +1548,20 @@ proc buildCustomMaterialExample*(b: var UiBuilder) =
   let parent = b.currentNode
   b.layoutVertical("custom-material-root"):
     if FitY in parent.flags:
-      discard b.height(500)
+      discard b.heightRelative(500.0'f32 / demoBaseFontSize)
     else:
       discard b.fillY()
-    discard b.fillX().padding(8).gap(8)
+    discard b.fillX()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     b.label("Custom material — a quad rendered with a registered Render2D material (custom fragment shader)."):
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.label("The quad is drawn via CmdRawVertices with materialId = " & $customMaterialId):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.node("custom-mat-node"):
-      discard b.fill().padding(6)
+      discard b.fill().paddingRelative(6.0'f32 / demoBaseFontSize)
       discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+      b.demoTerminalBorderPadding()
       discard b.deferBuild(buildCustomDeferred)
 
 type
@@ -1568,7 +1746,9 @@ proc buildDemoTreeDragTooltip(
   if userData == nil or not (userData of DemoTreeDragUserData):
     return
   let dragData = DemoTreeDragUserData(userData)
-  discard b.fit().padding(6).gap(4)
+  discard b.fit()
+    .paddingRelative(6.0'f32 / demoBaseFontSize)
+    .gapRelative(4.0'f32 / demoBaseFontSize)
   discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
   discard b.text(dragData.node.name &
     (if canDrop: " - release to move" else: " - cannot move here")).fit()
@@ -1620,7 +1800,9 @@ when not defined(wasm):
     if userData == nil or not (userData of FileDragUserData):
       return
     let dragData = FileDragUserData(userData)
-    discard b.fit().padding(6).gap(4)
+    discard b.fit()
+      .paddingRelative(6.0'f32 / demoBaseFontSize)
+      .gapRelative(4.0'f32 / demoBaseFontSize)
     discard b.fillBackground().styleIndex(UiStyleIndexTooltip)
     discard b.text(dragData.cursor.fieldName & (if canDrop: " - move here" else: " - cannot move here")).fit()
 
@@ -1649,9 +1831,11 @@ proc buildTreeTableExample(b: var UiBuilder) =
     resetDemoTree()
   b.layoutVertical:
     b.debugName("tree-table-demo")
-    discard b.fillX().padding(8).gap(8)
+    discard b.fillX()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     if FitY in parent.flags:
-      discard b.height(500)
+      discard b.heightRelative(500.0'f32 / demoBaseFontSize)
     else:
       discard b.fillY()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -1661,19 +1845,20 @@ proc buildTreeTableExample(b: var UiBuilder) =
       discard b.fillX().fontSize(13)
         .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
     b.layoutVertical("tree-table-options"):
-      discard b.fillX().fitY().gap(8)
+      discard b.fillX().fitY().gapRelative(8.0'f32 / demoBaseFontSize)
       b.node("tree-table-options-scroll"):
-        discard b.fillX().height(220).padding(4)
+        discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
+          .paddingRelative(4.0'f32 / demoBaseFontSize)
         b.scrollBox:
           b.tableLayout([tableColumnFit(), tableColumnFill()], 12.0'f32, 4.0'f32):
             discard b.fillX().fitY()
 
             template optionRow(name: string, body: untyped) =
               b.node:
-                discard b.fitY().padding(4)
+                discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
                 discard b.text(name).fit()
               b.node:
-                discard b.fillX().fitY().padding(4)
+                discard b.fillX().fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
                 body
 
             optionRow("Hide root"):
@@ -1719,7 +1904,7 @@ proc buildTreeTableExample(b: var UiBuilder) =
 
     b.layoutVertical:
       b.debugName("tree-table-hosts")
-      discard b.fillX().sizeToParentY().gap(12)
+      discard b.fillX().sizeToParentY().gapRelative(12.0'f32 / demoBaseFontSize)
 
       block:
         b.layoutVertical:
@@ -1789,21 +1974,23 @@ proc buildTreeTableExample(b: var UiBuilder) =
                   b.themeStyle(UiStyleIndexAccent)[].fillColor)
 
             b.node:
-              discard b.fit().paddingX(10)
+              discard b.fit().paddingXRelative(10.0'f32 / demoBaseFontSize)
               b.label("dummy value"):
                 discard b.fitX().fitY().alignCenter()
 
               if treeTableAlternatingRowHeights:
                 b.node:
-                  discard b.size(2, (index mod 4 + 1).float32 * 15)
+                  discard b.sizeRelative(
+                    2.0'f32 / demoBaseFontSize,
+                    (index mod 4 + 1).float32 * 15.0'f32 / demoBaseFontSize)
 
             b.node:
-              discard b.fit().paddingX(10)
+              discard b.fit().paddingXRelative(10.0'f32 / demoBaseFontSize)
               b.label($cursor.childCount()):
                 discard b.anchorsX(1, 1).pivotX(1)
 
             b.node:
-              discard b.fit().paddingX(10)
+              discard b.fit().paddingXRelative(10.0'f32 / demoBaseFontSize)
               b.label($index):
                 discard b.anchorsX(1, 1).pivotX(1)
 
@@ -1834,9 +2021,11 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
   let parent = b.currentNode
   b.layoutVertical:
     b.debugName("file-system-tree-demo")
-    discard b.fillX().padding(8).gap(8)
+    discard b.fillX()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     if FitY in parent.flags:
-      discard b.height(500)
+      discard b.heightRelative(500.0'f32 / demoBaseFontSize)
     else:
       discard b.fillY()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -1851,7 +2040,7 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
         discard b.fillX().fontSize(13)
           .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
       b.layoutVertical("file-system-tree-options"):
-        discard b.fitX().fitY().gap(12)
+        discard b.fitX().fitY().gapRelative(12.0'f32 / demoBaseFontSize)
         if b.checkbox("Show column lines", treeTableShowColumnLines): discard
         if b.checkbox("Show indentation lines", treeTableShowIndentationLines): discard
 
@@ -1885,12 +2074,12 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
 
 
             b.node:
-              discard b.fit().paddingX(10)
+              discard b.fit().paddingXRelative(10.0'f32 / demoBaseFontSize)
               b.label("bar"):
                 discard b.fitX().fitY()
 
             b.node:
-              discard b.fit().paddingX(10)
+              discard b.fit().paddingXRelative(10.0'f32 / demoBaseFontSize)
               b.label($cursor.childCount()):
                 discard b.anchorsX(1, 1).pivotX(1)
 
@@ -1908,15 +2097,20 @@ var dragDropLocation = 0 # 0 = left container, 1 = right container
 
 proc buildDragDropTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
   let _ = userData
-  discard b.fit().padding(6).gap(4)
+  discard b.fit()
+    .paddingRelative(6.0'f32 / demoBaseFontSize)
+    .gapRelative(4.0'f32 / demoBaseFontSize)
   discard b.fillBackground().backgroundColor(if canDrop: rgba(0.18, 0.52, 0.24, 1.0) else: rgba(0.58, 0.20, 0.20, 1.0)).cornerRadius(4)
   discard b.borderWidth(1).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 0.9'f32))
+  b.demoTerminalBorderPadding()
   discard b.text(if canDrop: "Drop allowed" else: "Cannot drop here").fit()
   discard b.textColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
 
 proc buildDragDropExample*(b: var UiBuilder) =
   b.layoutVertical("drag-drop-demo"):
-    discard b.fillX().fitY().padding(8).gap(8)
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(8.0'f32 / demoBaseFontSize)
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
 
     b.label("Drag & Drop — move a chip between two containers in a horizontal list"):
@@ -1925,14 +2119,19 @@ proc buildDragDropExample*(b: var UiBuilder) =
       discard b.fillX().fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
     b.layoutHorizontal("dnd-containers"):
-      discard b.fillX().fitY().gap(12)
+      discard b.fillX().fitY()
+      b.demoHorizontalGap(12.0'f32)
 
       # Left container
       b.node("dnd-left"):
-        discard b.size(220, 180).padding(8).gap(8)
+        discard b.sizeRelative(220.0'f32 / demoBaseFontSize,
+          180.0'f32 / demoBaseFontSize)
+          .paddingRelative(8.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.layout(LayoutVertical)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor).cornerRadius(6)
+        b.demoTerminalBorderPadding()
 
         let hoverDrop = b.beginDrop()
         let canDrop = dragDropLocation != 0
@@ -1950,7 +2149,9 @@ proc buildDragDropExample*(b: var UiBuilder) =
 
         if dragDropLocation == 0:
           b.node("dnd-chip"):
-            discard b.fit().padding(8).gap(4)
+            discard b.fit()
+              .paddingRelative(8.0'f32 / demoBaseFontSize)
+              .gapRelative(4.0'f32 / demoBaseFontSize)
             discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0)).cornerRadius(6)
             discard b.text("DragMe").fit()
             discard b.textColor(b.themeTextStyle(UiStyleIndexButtonText)[].textColor)
@@ -1959,18 +2160,24 @@ proc buildDragDropExample*(b: var UiBuilder) =
               b.setDragUiCallback(buildDragDropTooltip)
             if dragging:
               discard b.borderWidth(2).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+              b.demoTerminalBorderPadding()
         else:
           b.node("dnd-placeholder-left"):
-            discard b.fit().padding(8)
+            discard b.fit().paddingRelative(8.0'f32 / demoBaseFontSize)
             discard b.text("drop here").fit().textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
             discard b.cornerRadius(6).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+            b.demoTerminalBorderPadding()
 
       # Right container
       b.node("dnd-right"):
-        discard b.size(220, 180).padding(8).gap(8)
+        discard b.sizeRelative(220.0'f32 / demoBaseFontSize,
+          180.0'f32 / demoBaseFontSize)
+          .paddingRelative(8.0'f32 / demoBaseFontSize)
+          .gapRelative(8.0'f32 / demoBaseFontSize)
         discard b.layout(LayoutVertical)
         discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
         discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor).cornerRadius(6)
+        b.demoTerminalBorderPadding()
 
         let hoverDrop = b.beginDrop()
         let canDrop = dragDropLocation != 1
@@ -1988,7 +2195,9 @@ proc buildDragDropExample*(b: var UiBuilder) =
 
         if dragDropLocation == 1:
           b.node("dnd-chip"):
-            discard b.fit().padding(8).gap(4)
+            discard b.fit()
+              .paddingRelative(8.0'f32 / demoBaseFontSize)
+              .gapRelative(4.0'f32 / demoBaseFontSize)
             discard b.fillBackground().backgroundColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HBlue, 1.0)).cornerRadius(6)
             discard b.text("DragMe").fit()
             discard b.textColor(b.themeTextStyle(UiStyleIndexButtonText)[].textColor)
@@ -1997,11 +2206,13 @@ proc buildDragDropExample*(b: var UiBuilder) =
               b.setDragUiCallback(buildDragDropTooltip)
             if dragging:
               discard b.borderWidth(2).borderColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+              b.demoTerminalBorderPadding()
         else:
           b.node("dnd-placeholder-right"):
-            discard b.fit().padding(8)
+            discard b.fit().paddingRelative(8.0'f32 / demoBaseFontSize)
             discard b.text("drop here").fit().textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
             discard b.cornerRadius(6).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
+            b.demoTerminalBorderPadding()
 
     b.label("Current location: " & (if dragDropLocation == 0: "Left" else: "Right")):
       discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
@@ -2076,7 +2287,8 @@ proc buildDemoUi*(b: var UiBuilder) =
           b.menuItem:
             var f = b.fontScale
             b.layoutHorizontalReverse:
-              discard b.fillX().fit().gap(2)
+              discard b.fillX().fit()
+              b.demoHorizontalGap(2.0'f32)
               discard b.dragFloat(f, 1, 0.1'f32, 4.0'f32)
               b.label("Font Size"):
                 discard b.fitX()

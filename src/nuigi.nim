@@ -22,6 +22,11 @@ export mesh, text
 from nuigi/core/hash as nui_hash import Hash, `!&`, `!$`
 
 type
+  UiBackendType* {.pure.} = enum
+    ## Rendering environment used for backend-specific UI behavior.
+    Graphical
+    Terminal
+
   MaterialId* = uint64
     ## Opaque handle identifying a renderer-side material/pipeline used by
     ## `CmdRawVertices` render commands. The UI does not interpret it; it is
@@ -793,6 +798,8 @@ type
     ## The central UI object. Owns the current and previous frames, the node stack,
     ## ID scopes, theme styles, animations, node storage, and frame output. Mutators
     ## return `var UiBuilder` (`.discardable`) so calls chain.
+    backendType*: UiBackendType
+      ## Rendering environment used to select backend-appropriate UI behavior.
     stack*: seq[int]
       ## Index stack of nodes currently being built (innermost last); mirrors the begin/end nesting.
     nodeIdStack*: seq[UiNodeId]
@@ -831,6 +838,8 @@ type
       ## Per-node flag: whether new animation tracks may be created this frame.
     anythingAnimating*: bool
       ## True if any animation is actively stepping this frame.
+    renderedOnDemandLastPoll: bool
+      ## Whether the previous render-on-demand poll had a real activity trigger.
     antialiasMeshWidth*: float32
       ## Width in pixels of alpha fringes around rectangle fill and border meshes; zero disables them.
     windows*: UiNodeId
@@ -1180,6 +1189,8 @@ proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int)
 proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
 proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
 proc buildDragUi(b: var UiBuilder)
+when defined(nuiDebug):
+  proc buildDebugHoverTooltip(b: var UiBuilder)
 proc beginAttach*(b: var UiBuilder, parentIdx: int): bool
 proc endAttach*(b: var UiBuilder)
 proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.}
@@ -2552,7 +2563,8 @@ template traceUiNode*(b: UiBuilder, eventName: string, idx: int): untyped =
       )
 
 proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMeshFn = nil,
-  textHeight = 16.0'f32, antialiasMeshWidth = 0.0'f32): UiBuilder =
+  textHeight = 16.0'f32, antialiasMeshWidth = 0.0'f32,
+  backendType = UiBackendType.Graphical): UiBuilder =
   ## Create a new UiBuilder with default theme styles and the given text metrics.
   let frameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
   let previousFrameArenaPtr = cast[ptr Arena](alloc0(sizeof(Arena)))
@@ -2560,6 +2572,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
   previousFrameArenaPtr[] = initArena(3 * 1024 * 1024)
 
   result = UiBuilder(
+    backendType: backendType,
     frame: UiFrame(
       arena: frameArenaPtr,
       arenaCheckpoint: 0'u64,
@@ -2583,12 +2596,32 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     lastNode: sentinelNode.addr,
     fontScale: 1,
   )
+
   result.measureText = measureText
   result.buildTextMesh = buildTextMesh
   result.previousOutput.clearFrameOutput()
   result.frameOutput.clearFrameOutput()
   if result.themeStyles.len >= int(UiStyleIndexDefault):
     result.defaultStyle = result.themeStyles[int(UiStyleIndexDefault) - 1]
+
+proc shouldRender*(b: var UiBuilder, hadEvents: bool): bool =
+  ## Return whether an on-demand host should render, including one grace frame
+  ## after the last frame with a real activity trigger.
+  var hasActivity = hadEvents or b.anythingAnimating or b.virtualNodes.len > 0 or
+    b.middleDragScroll != vec2(0.0'f32, 0.0'f32)
+
+  if not hasActivity:
+    for animation in b.animations:
+      if animation.unchangedFrames == 0:
+        for field in animation.fields:
+          if field.currentValue != field.targetValue:
+            hasActivity = true
+            break
+      if hasActivity:
+        break
+
+  result = hasActivity or b.renderedOnDemandLastPoll
+  b.renderedOnDemandLastPoll = hasActivity
 
 proc openUrl*(b: var UiBuilder, url: string): bool {.raises: [].} =
   let openUrlFn = b.openUrlFn
@@ -2831,7 +2864,7 @@ proc pickHoveredIndex(b: var UiBuilder, idx: int, ox, oy, mx, my: float32, trans
 
   var best = -1
   let localMouse = inverseStack[^1] * vec2(mx, my)
-  if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x <= absPos.x + n.size.x and localMouse.y <= absPos.y + n.size.y:
+  if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x < absPos.x + n.size.x and localMouse.y < absPos.y + n.size.y:
     best = idx
 
   if best == -1 and MaskChildren in n.flags:
@@ -2885,7 +2918,7 @@ proc pickScrolledIndex(b: var UiBuilder, idx: int, ox, oy, mx, my: float32, tran
   var best = -1
   if Scrollable in n.flags:
     let localMouse = inverseStack[^1] * vec2(mx, my)
-    if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x <= absPos.x + n.size.x and localMouse.y <= absPos.y + n.size.y:
+    if localMouse.x >= absPos.x and localMouse.y >= absPos.y and localMouse.x < absPos.x + n.size.x and localMouse.y < absPos.y + n.size.y:
       best = idx
 
     if best == -1 and MaskChildren in n.flags:
@@ -3753,6 +3786,8 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
   discard b.endNode()
   b.flushDeferredNodes()
   b.buildDragUi()
+  when defined(nuiDebug):
+    b.buildDebugHoverTooltip()
   b.removeStaleAnimations()
   b.updateVirtualTrees()
 
@@ -5444,12 +5479,17 @@ proc borderWidth*(b: var UiBuilder, value: float32): var UiBuilder {.discardable
   b
 
 proc focusHighlight*(b: var UiBuilder, width = 2.0'f32): var UiBuilder {.discardable.} =
-  ## Draw the standard accent border when the current node is keyboard-focused.
+  ## Draw a backend-appropriate accent when the current node is keyboard-focused.
   if b.isFocused():
     if b.currentNode.styleIndex > 0 and b.currentNode.styleIndex.int < b.themeStyles.len:
       discard b.copyStyleIndex(b.currentNode.styleIndex)
-    discard b.borderWidth(width)
-    discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
+    let accentColor = b.themeStyle(UiStyleIndexAccent)[].borderColor
+    case b.backendType
+    of UiBackendType.Graphical:
+      discard b.borderWidth(width)
+      discard b.borderColor(accentColor)
+    of UiBackendType.Terminal:
+      discard b.backgroundColor(accentVariation(accentColor, 0.0'f32, 0.5'f32))
   b
 
 proc borderWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
@@ -6114,6 +6154,62 @@ proc paddingY*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} 
   b.frame.initCursorForLayout(b.currentNode)
   b
 
+func baseFontRelativeValue(b: UiBuilder, value: float32): float32 {.inline.} =
+  result = value * b.defaultText.fontSize * b.fontScale
+  if b.backendType == UiBackendType.Terminal:
+    result = floor(result)
+
+func baseFontRelativeRoundedValue(b: UiBuilder, value: float32): float32 {.inline.} =
+  round(value * b.defaultText.fontSize * b.fontScale)
+
+proc widthRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set width in rounded multiples of the effective base font size.
+  return b.width(b.baseFontRelativeRoundedValue(value))
+
+proc heightRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set height in rounded multiples of the effective base font size.
+  return b.height(b.baseFontRelativeRoundedValue(value))
+
+proc sizeRelative*(b: var UiBuilder, width, height: float32): var UiBuilder {.discardable.} =
+  ## Set size in rounded multiples of the effective base font size.
+  return b.size(
+    b.baseFontRelativeRoundedValue(width),
+    b.baseFontRelativeRoundedValue(height))
+
+proc sizeRelative*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Set size in rounded multiples of the effective base font size.
+  return b.sizeRelative(value.x, value.y)
+
+proc widthAnimRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animate width to a rounded multiple of the effective base font size.
+  return b.widthAnim(b.baseFontRelativeRoundedValue(value))
+
+proc heightAnimRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animate height to a rounded multiple of the effective base font size.
+  return b.heightAnim(b.baseFontRelativeRoundedValue(value))
+
+proc sizeAnimRelative*(b: var UiBuilder, width, height: float32): var UiBuilder {.discardable.} =
+  ## Animate size to rounded multiples of the effective base font size.
+  return b.sizeAnim(
+    b.baseFontRelativeRoundedValue(width),
+    b.baseFontRelativeRoundedValue(height))
+
+proc sizeAnimRelative*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
+  ## Animate size to rounded multiples of the effective base font size.
+  return b.sizeAnimRelative(value.x, value.y)
+
+proc paddingRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set uniform padding in multiples of the effective base font size.
+  return b.padding(b.baseFontRelativeValue(value))
+
+proc paddingXRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set horizontal padding in multiples of the effective base font size.
+  return b.paddingX(b.baseFontRelativeValue(value))
+
+proc paddingYRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set vertical padding in multiples of the effective base font size.
+  return b.paddingY(b.baseFontRelativeValue(value))
+
 proc paddingAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Animated version of padding. Smoothly transitions the padding value.
   let idx = b.stack[^1]
@@ -6124,16 +6220,28 @@ proc paddingAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable
   b.frame.initCursorForLayout(b.currentNode)
   b
 
+proc paddingAnimRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animate uniform padding to a multiple of the effective base font size.
+  return b.paddingAnim(b.baseFontRelativeValue(value))
+
 proc gap*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Set the spacing between child nodes in a layout.
   b.ensureNodeGap(b.currentNode) = value
   b
+
+proc gapRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Set child spacing in multiples of the effective base font size.
+  return b.gap(b.baseFontRelativeValue(value))
 
 proc gapAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Animated version of gap. Smoothly transitions the gap value.
   let idx = b.stack[^1]
   b.ensureNodeGap(b.currentNode) = b.setAnimatedField(idx, UiNodeFieldGap, value)
   b
+
+proc gapAnimRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  ## Animate child spacing to a multiple of the effective base font size.
+  return b.gapAnim(b.baseFontRelativeValue(value))
 
 proc layout*(b: var UiBuilder, value: UiFlag): var UiBuilder {.discardable.} =
   ## Set the layout kind for the current node (LayoutVertical or LayoutHorizontal).
@@ -6234,6 +6342,14 @@ proc isHovered(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool
     if b.isHovered(frame, c, includeChildren):
       return true
   return false
+
+proc hoveredNodeIndex*(b: UiBuilder): int {.inline.} =
+  ## Return the directly hovered node's index in `previousFrame`, or -1.
+  let index = b.previousOutput.hoveredIndex
+  if index >= 0 and index < b.previousFrame.nodes.len and
+      b.previousFrame.nodes[index].id == b.previousOutput.hoveredId:
+    return index
+  return -1
 
 proc isClicked(b: UiBuilder, frame: ptr UiFrame, idx: int, includeChildren: bool = false): bool =
   ## Check if the node at idx (in the given frame) was clicked this frame.
@@ -6475,6 +6591,56 @@ proc buildDragUi(b: var UiBuilder) =
   finally:
     if attached:
       b.endAttach()
+
+when defined(nuiDebug):
+  proc buildDebugHoverTooltip(b: var UiBuilder) =
+    if b.showDebugPanel or ModAlt notin b.frameCtx.input.modsDown:
+      return
+
+    let hoveredIndex = b.hoveredNodeIndex()
+    if hoveredIndex < 0:
+      return
+
+    let hovered = b.previousFrame.nodes[hoveredIndex]
+    let absolutePos = b.absoluteNodePosPrev(hovered.id, hoveredIndex)
+    var details = hovered.nodeDebugName()
+    details.add("\nindex=" & $hoveredIndex & " id=" & $nodeIdValue(hovered.id))
+    details.add("\npos=(" & fmt2(absolutePos.x) & ", " & fmt2(absolutePos.y) & ")" &
+      " size=(" & fmt2(hovered.size.x) & ", " & fmt2(hovered.size.y) & ")")
+    details.add("\nflags=" & $hovered.flags)
+
+    let textIndex = int(hovered.textIndex) - 1
+    if textIndex >= 0 and textIndex < b.previousFrame.texts.len:
+      let nodeText = b.previousFrame.texts[textIndex]
+      details.add("\ntext=\"" & nodeText.text.value & "\"" &
+        " font=" & $nodeText.fontId & " size=" & fmt2(nodeText.fontSize))
+
+    let styleIndex = int(hovered.styleIndex) - 1
+    if styleIndex >= 0 and styleIndex < b.previousFrame.styles.len:
+      let style = b.previousFrame.styles[styleIndex]
+      details.add("\nstyle=" & $styleIndex &
+        " padding=(" & fmt2(style.paddingX) & ", " & fmt2(style.paddingY) & ")" &
+        " border=" & fmt2(style.borderWidth) &
+        " corner=" & fmt2(style.cornerRadius))
+    else:
+      details.add("\nstyle=default")
+
+    let overlayIndex = b.currentNodeIndex(b.overlays)
+    let parentIndex = if overlayIndex >= 0: overlayIndex else: 0
+    let attached = b.beginAttach(parentIndex)
+    try:
+      discard b.beginNodeId("debug-hover-tooltip")
+      discard b.copyStyleIndex(UiStyleIndexTooltip)
+      discard b.copyTextStyleIndex(UiStyleIndexSmallText)
+      discard b.fit().fillBackground().noHover().noChildHover()
+      discard b.text(details)
+      let mouse = b.frameCtx.input.mouse
+      discard b.offsets(mouse.x + 1.0'f32, mouse.y + 1.0'f32, 0, 0)
+      discard b.pivot(0, 0).finishAnchors()
+      discard b.endNode()
+    finally:
+      if attached:
+        b.endAttach()
 
 template node*(b: var UiBuilder, body: untyped): untyped =
   ## Create an anonymous child node, execute body in its context, then close it.
