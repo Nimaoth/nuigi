@@ -27,6 +27,7 @@ var demoTabIndex = 0
 var demoMenuOpen = false
 
 const demoBaseFontSize = 18.0'f32
+const demoBaseFontWidth = 9.0'f32
 
 template demoHorizontalGap(b: var UiBuilder, graphicalGap: float32) =
   if b.backendType == UiBackendType.Terminal:
@@ -1367,7 +1368,7 @@ proc buildCircleCommands*(frameArena: ptr Arena, contentSize: Vec2): ArrayView[U
   let h = max(1.0'f32, contentSize.y)
   var commands = frameArena[].allocEmptyArray(256, UiRenderCommand)
   let center = vec2(w * 0.5'f32, h * 0.5'f32)
-  let radius = max(2.0'f32, min(w, h) * 0.5'f32 - 6.0'f32)
+  let radius = max(2.0'f32, min(w, h) * 0.48'f32 - 1.0'f32)
   let color = rgba(0.40, 0.78, 0.92, 1.0)
   let segments = 64
   for i in 0 .. segments:
@@ -1386,7 +1387,7 @@ proc buildStarCommands*(frameArena: ptr Arena, contentSize: Vec2): ArrayView[UiR
   let h = max(1.0'f32, contentSize.y)
   var commands = frameArena[].allocEmptyArray(256, UiRenderCommand)
   let center = vec2(w * 0.5'f32, h * 0.5'f32)
-  let outer = max(2.0'f32, min(w, h) * 0.5'f32 - 6.0'f32)
+  let outer = max(2.0'f32, min(w, h) * 0.48'f32 - 1.0'f32)
   let inner = outer * 0.45'f32
   let color = rgba(0.92, 0.46, 0.62, 1.0)
   var verts: array[10, Vec2] = default(array[10, Vec2])
@@ -1455,8 +1456,13 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
       discard b.fillX().fitY()
       b.demoHorizontalGap(8.0'f32)
       b.node("cr-circle"):
-        discard b.sizeRelative(200.0'f32 / demoBaseFontSize,
-          180.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
+        if b.backendType == UiBackendType.Terminal:
+          discard b.sizeRelative(600.0'f32 / demoBaseFontWidth,
+            600.0'f32 / demoBaseFontSize)
+        else:
+          discard b.sizeRelative(400.0'f32 / demoBaseFontSize,
+            400.0'f32 / demoBaseFontSize)
+        discard b.paddingRelative(6.0'f32 / demoBaseFontSize)
         discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
         b.demoTerminalBorderPadding()
         let n = b.currentNode
@@ -1466,8 +1472,13 @@ proc buildCustomRenderExamples*(b: var UiBuilder) =
         )
         discard b.customRenderCommands(buildCircleCommands(b.frame.arena, cs))
       b.node("cr-star"):
-        discard b.sizeRelative(200.0'f32 / demoBaseFontSize,
-          180.0'f32 / demoBaseFontSize).paddingRelative(6.0'f32 / demoBaseFontSize)
+        if b.backendType == UiBackendType.Terminal:
+          discard b.sizeRelative(600.0'f32 / demoBaseFontWidth,
+            600.0'f32 / demoBaseFontSize)
+        else:
+          discard b.sizeRelative(400.0'f32 / demoBaseFontSize,
+            400.0'f32 / demoBaseFontSize)
+        discard b.paddingRelative(6.0'f32 / demoBaseFontSize)
         discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor)
         b.demoTerminalBorderPadding()
         let n = b.currentNode

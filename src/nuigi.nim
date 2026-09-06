@@ -5478,6 +5478,19 @@ proc borderWidth*(b: var UiBuilder, value: float32): var UiBuilder {.discardable
   style.borderWidths = default(UiBorderWidths)
   b
 
+proc applyFocusHighlight*(b: var UiBuilder, width = 2.0'f32): var UiBuilder {.discardable.} =
+  ## Draw a backend-appropriate accent when the current node is keyboard-focused.
+  if b.currentNode.styleIndex > 0 and b.currentNode.styleIndex.int < b.themeStyles.len:
+    discard b.copyStyleIndex(b.currentNode.styleIndex)
+  let accentColor = b.themeStyle(UiStyleIndexAccent)[].borderColor
+  case b.backendType
+  of UiBackendType.Graphical:
+    discard b.borderWidth(width)
+    discard b.borderColor(accentColor)
+  of UiBackendType.Terminal:
+    discard b.backgroundColor(accentVariation(accentColor, 0.0'f32, 0.5'f32))
+  b
+
 proc focusHighlight*(b: var UiBuilder, width = 2.0'f32): var UiBuilder {.discardable.} =
   ## Draw a backend-appropriate accent when the current node is keyboard-focused.
   if b.isFocused():

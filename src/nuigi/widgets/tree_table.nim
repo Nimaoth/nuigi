@@ -983,7 +983,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   b.debugName("tree-table-row")
   discard b.fitY()
   if b.backendType == UiBackendType.Terminal:
-    discard b.gap(1).padding(1)
+    discard b.gap(1).padding(0)
   else:
     discard b.gapRelative(4.0'f32 / treeTableBaseFontSize)
       .paddingYRelative(2.0'f32 / treeTableBaseFontSize)
@@ -1022,8 +1022,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   if b.wasClicked(includeChildren = true):
     discard b.requestFocus(rowFocusId)
   if b.focusedNode == rowFocusId:
-    discard b.borderWidth(2.0'f32)
-    discard b.borderColor(b.themeStyle(UiStyleIndexAccent)[].borderColor)
+    discard b.applyFocusHighlight()
 
   b.layoutHorizontal:
     discard b.fit()
@@ -1039,14 +1038,19 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
         1.0'f32 / treeTableBaseFontSize)
     b.node:
       b.debugName("symbol")
-      discard b.sizeRelative(
-        14.0'f32 / treeTableBaseFontSize,
-        14.0'f32 / treeTableBaseFontSize).alignCenter()
+      if b.backendType == UiBackendType.Terminal:
+        discard b.size(1.0'f32, 1.0'f32).alignCenter()
+      else:
+        discard b.size(14.0'f32, 14.0'f32).alignCenter()
       if hasChildren:
         if b.wasClicked(includeChildren = true):
           e.pendingToggleCursor = e.walkCursor.clone()
-        # chevron mesh via custom render command (right when collapsed, down when expanded)
-        discard b.deferBuild(buildChevronDeferred, if isExpanded: 1 else: 0)
+        if b.backendType == UiBackendType.Terminal:
+          discard b.copyTextStyleIndex(UiStyleIndexDefaultText)
+          discard b.text(if isExpanded: "▾" else: "▸")
+        else:
+          # Chevron mesh points right when collapsed and down when expanded.
+          discard b.deferBuild(buildChevronDeferred, if isExpanded: 1 else: 0)
 
   onRaiseQuit(e.rowRenderer(b, e.walkCursor, index))
 

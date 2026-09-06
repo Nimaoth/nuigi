@@ -1,6 +1,7 @@
 import nuigi
 import nuigi/backend/terminal/terminal
 import nuigi/core/vecmath
+import nuigi/widgets
 
 when defined(nimony):
   import std/assertions
@@ -24,6 +25,30 @@ proc testTerminalBuilderType() =
   let builder = newTerminalBuilder()
   require(builder.backendType == UiBackendType.Terminal,
     "terminal builder should select terminal backend behavior")
+
+proc testTerminalTableGaps() =
+  var builder = newTerminalBuilder()
+  discard builder.beginUiFrame(20.0'f32, 10.0'f32)
+  var firstIndex = -1
+  var secondIndex = -1
+  var thirdIndex = -1
+  builder.tableLayout([tableColumnFixed(2), tableColumnFixed(2)], 8.0'f32, 4.0'f32):
+    discard builder.width(20.0'f32).fitY()
+    firstIndex = builder.nodes.len
+    builder.node:
+      discard builder.size(2.0'f32, 1.0'f32)
+    secondIndex = builder.nodes.len
+    builder.node:
+      discard builder.size(2.0'f32, 1.0'f32)
+    thirdIndex = builder.nodes.len
+    builder.node:
+      discard builder.size(2.0'f32, 1.0'f32)
+  builder.endUiFrame(buildRenderCommands = false)
+
+  require(builder.nodes[secondIndex].pos.x - builder.nodes[firstIndex].pos.x == 3.0'f32,
+    "terminal tables should use a one-cell column gap")
+  require(builder.nodes[thirdIndex].pos.y - builder.nodes[firstIndex].pos.y == 1.0'f32,
+    "terminal tables should use a zero-cell row gap")
 
 proc testChunkedUtf8() =
   var parser = default(TerminalInputParser)
@@ -94,6 +119,7 @@ proc testShouldRender() =
 
 proc main() =
   testTerminalBuilderType()
+  testTerminalTableGaps()
   testUnicodeWidths()
   testChunkedUtf8()
   testKeyboardSequences()

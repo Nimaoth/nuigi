@@ -234,7 +234,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
   inCustomRowLayout: nil UiCustomLayoutProc = nil,
   inCustomRowLayoutUserData: int = 0): UiDynamicVirtualListStorage {.discardable.} =
   prof("dynamicVirtualList")
-  let scrollSpeed = 20.0'f32
+  let scrollSpeed =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 20.0'f32
   let scrollDamping = 10.0'f32
   let maxScrollVelocity = 4000.0'f32
   let scrollbarWidth =

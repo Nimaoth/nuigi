@@ -2001,6 +2001,57 @@ proc testTreeTableTreeTexts() =
         for k in 0 ..< xs.len:
           require(approxEq(xs[k], firstRowCols[k], 0.5), "column " & $k & " x must align across rows")
 
+proc testTerminalTreeTableExpandSymbols() =
+  var b = newBuilder(fixedTerminalMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  discard b.beginUiFrame(80.0'f32, 24.0'f32)
+  b.node:
+    discard b.fill()
+    let cursor = newTreeCursor(2, 2)
+    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+      b.label(cursor.fieldName):
+        discard b.fit()
+    b.treeTable(cursor, renderRow)
+  b.flushDeferredNodes()
+
+  var expandedSymbols = 0
+  var collapsedSymbols = 0
+  var symbolNodes = 0
+  for node in b.nodes:
+    let textIndex = node.textIndex.int - 1
+    if textIndex >= 0 and textIndex < b.frame.texts.len and
+        b.frame.texts[textIndex].text.value in ["▸", "▾"]:
+      inc symbolNodes
+      require(node.size == vec2(1.0'f32, 1.0'f32),
+        "terminal tree table symbols should be explicitly one cell by one cell")
+  require(symbolNodes >= 1, "expected a terminal tree table symbol node")
+  for text in b.frame.texts:
+    if text.text.value == "▾":
+      inc expandedSymbols
+    elif text.text.value == "▸":
+      inc collapsedSymbols
+  require(expandedSymbols == 1,
+    "terminal tree table should render the expanded root with a down symbol")
+
+  var hiddenRootBuilder = newBuilder(fixedTerminalMeasureText, textHeight = 1.0'f32,
+    backendType = UiBackendType.Terminal)
+  discard hiddenRootBuilder.beginUiFrame(80.0'f32, 24.0'f32)
+  hiddenRootBuilder.node:
+    discard hiddenRootBuilder.fill()
+    let hiddenCursor = newTreeCursor(2, 2)
+    var options = defaultTreeTableOptions()
+    options.hideRoot = true
+    proc renderHiddenRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+      b.label(cursor.fieldName):
+        discard b.fit()
+    hiddenRootBuilder.treeTable(hiddenCursor, options, renderHiddenRow)
+  hiddenRootBuilder.flushDeferredNodes()
+  for text in hiddenRootBuilder.frame.texts:
+    if text.text.value == "▸":
+      inc collapsedSymbols
+  require(collapsedSymbols >= 1,
+    "terminal tree table should render collapsed children with right symbols")
+
 proc runTests() =
   testFlagsAndMutators()
   testTextWrappingUsesNodeWidthOnlyWhenEnabled()
@@ -2060,6 +2111,7 @@ proc runTests() =
   testRenderTransformAppliesToSubtreeCommands()
   testRenderTransformIsAnimatable()
   testTreeTableTreeTexts()
+  testTerminalTreeTableExpandSymbols()
 
 when isMainModule:
   runTests()

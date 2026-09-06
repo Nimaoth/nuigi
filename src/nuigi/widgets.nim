@@ -910,7 +910,8 @@ proc scrollBoxDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) =
 
   let scrollOffset = cast[ptr float](rawData)
 
-  let scrollSpeed = 28.0'f32
+  let scrollSpeed =
+    if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 28.0'f32
   let scrollbarWidth =
     if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
   let thumbMinHeight =
@@ -1164,8 +1165,8 @@ template tableLayout*(b: var UiBuilder, inColumns: openArray[TableColumn], inCol
       colArr[ci] = inColumns[ci]
     var tableDataArr = b.frame.arena[].allocArray(1, UiTableLayout)
     tableDataArr[0] = UiTableLayout(
-      columnGap: inColumnGap,
-      rowGap: inRowGap,
+      columnGap: (if b.backendType == UiBackendType.Terminal: 1.0'f32 else: inColumnGap),
+      rowGap: (if b.backendType == UiBackendType.Terminal: 0.0'f32 else: inRowGap),
       columnCount: inColumns.len,
       columns: colArr.data())
     b.node:
@@ -1211,7 +1212,8 @@ proc virtualList*(b: var UiBuilder,
     inItemUserData: int = 0) =
   block:
     prof("virtualList")
-    let vListScrollSpeed = 40.0'f32
+    let vListScrollSpeed =
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 40.0'f32
     let vListScrollbarW = 10.0'f32
     let vListThumbMinH = 20.0'f32
     let vListTotalH = inItemCount.float32 * inItemHeight

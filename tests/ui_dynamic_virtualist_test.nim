@@ -159,6 +159,19 @@ proc testWheelScrollContinuesWithMomentum() =
   require(secondMomentumDelta > 0.0 and secondMomentumDelta < firstMomentumDelta,
     "scroll momentum should decay each frame")
 
+proc testTerminalWheelScrollsOneRow() =
+  var b = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
+  var context = TestListContext(changedItemIndex: -1)
+  b.buildFrame(context)
+
+  b.buildFrame(context, UiInputSnapshot(
+    frameIndex: 1,
+    mouse: vec2(10.0'f32, 10.0'f32),
+    wheel: vec2(0.0'f32, -1.0'f32),
+  ))
+  require(b.dynamicListStorage().scrollOffsetY == 1.0'f32,
+    "terminal wheel input should scroll one row")
+
 proc testThumbDragUsesMouseDelta() =
   var b = newBuilder(fixedMeasureText)
   var context = TestListContext(changedItemIndex: -1)
@@ -283,6 +296,7 @@ proc runTests() =
   testUpwardEntryHeightChangeAnchorsFollowingItem()
   testCachedHeightsSurviveAndGuideFollowingFrame()
   testWheelScrollContinuesWithMomentum()
+  testTerminalWheelScrollsOneRow()
   testThumbDragUsesMouseDelta()
   testPartiallyVisibleHeightChangeDoesNotAdjustScrollOffset()
 
