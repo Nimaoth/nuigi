@@ -406,13 +406,38 @@ proc buildUiTestNim2() =
     "ui-bench-nim2"
   )
 
-proc buildFontWrappingTest() =
+proc buildFontWrappingTest(compiler: NimCompiler) =
   echo "buildFontWrappingTest"
   let passthroughArgs = passthroughArgs.join(" ")
-  shellCapture(
-    &"nim c -r -o:bin/font-wrapping-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
-    "font-wrapping-test-nim2"
-  )
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/font-wrapping-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
+      "font-wrapping-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/font-wrapping-test-nimony.exe --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
+      "font-wrapping-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
+proc buildTextFieldTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/textfield-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/textfield_test.nim",
+      "textfield-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/textfield-test-nimony.exe --path:src {passthroughArgs} tests/textfield_test.nim",
+      "textfield-test-nimony"
+    )
+  else:
+    echo "not implemented"
 
 proc buildFocusTest(compiler: NimCompiler) =
   let passthroughArgs = passthroughArgs.join(" ")
@@ -621,10 +646,10 @@ proc main() =
 
   of "test":
     buildUiTest(compiler)
+    buildTextFieldTest(compiler)
     buildFocusTest(compiler)
     buildTerminalTest(compiler)
-    if compiler == Nim2:
-      buildFontWrappingTest()
+    buildFontWrappingTest(compiler)
     buildTreeTableRefreshTest(compiler)
     buildTreeTableRefreshBench(compiler)
     buildFileSystemCursorBench(compiler)
@@ -633,7 +658,10 @@ proc main() =
     buildTreeTableRefreshTest(compiler)
 
   of "font-wrapping-test":
-    buildFontWrappingTest()
+    buildFontWrappingTest(compiler)
+
+  of "textfield-test":
+    buildTextFieldTest(compiler)
 
   of "focus-test":
     buildFocusTest(compiler)
