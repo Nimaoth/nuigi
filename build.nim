@@ -358,10 +358,18 @@ proc buildTerminalTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
+      &"nim c -r -o:bin/terminal-unicode-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_unicode_test.nim",
+      "terminal-unicode-test-nim2"
+    )
+    shellCapture(
       &"nim c -r -o:bin/terminal-backend-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_backend_test.nim",
       "terminal-backend-test-nim2"
     )
   of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/terminal-unicode-test-nimony.exe --path:src {passthroughArgs} tests/terminal_unicode_test.nim",
+      "terminal-unicode-test-nimony"
+    )
     shellCapture(
       &"nimony c -r -o:bin/terminal-backend-test-nimony.exe --path:src {passthroughArgs} tests/terminal_backend_test.nim",
       "terminal-backend-test-nimony"
