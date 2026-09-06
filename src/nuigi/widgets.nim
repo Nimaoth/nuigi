@@ -755,7 +755,6 @@ type DropdownStorage = ref object of UiNodeStorageData
   open: bool
   btnAbsPos: Vec2
   btnHeight: float32
-  overlaySize: Vec2
 
 proc getOrCreateDropdownStorage(b: var UiBuilder, node: ptr UiNode): DropdownStorage =
   let existing = nodeStorageGet(b, node)
@@ -781,15 +780,20 @@ proc dropdownPopupReposition(b: var UiBuilder, nodeIdx: int, rawData: int) {.nim
   let popupW = popup.size.x
   let popupH = popup.size.y
 
+  let overlayIdx = b.currentNodeIndex(b.overlays)
+  let overlaySize = if overlayIdx >= 0 and overlayIdx < b.nodes.len:
+    b.nodes[overlayIdx].size
+  else:
+    vec2(100000.0'f32, 100000.0'f32)
   var popupX = storage.btnAbsPos.x
   var popupY = storage.btnAbsPos.y + storage.btnHeight + 2.0'f32
-  if popupY + popupH > storage.overlaySize.y:
+  if popupY + popupH > overlaySize.y:
     let aboveY = storage.btnAbsPos.y - 2.0'f32 - popupH
-    popupY = if aboveY >= 0: aboveY else: max(0.0'f32, storage.overlaySize.y - popupH)
+    popupY = if aboveY >= 0: aboveY else: max(0.0'f32, overlaySize.y - popupH)
   if popupY < 0.0'f32:
     popupY = 0.0'f32
-  if popupX + popupW > storage.overlaySize.x:
-    popupX = max(0.0'f32, storage.overlaySize.x - popupW)
+  if popupX + popupW > overlaySize.x:
+    popupX = max(0.0'f32, overlaySize.x - popupW)
   if popupX < 0.0'f32:
     popupX = 0.0'f32
 
@@ -803,6 +807,7 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
   b.node("dropdown"):
     discard b.fitX().fitY()
     let dropdownNode = b.currentNode
+    let dropdownId = dropdownNode.id
     let storage = getOrCreateDropdownStorage(b, dropdownNode)
 
     if options.len > 0:
@@ -842,24 +847,24 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
       let input = b.frameCtx.input
       var popupIdx = -1
 
-      let overlayIdx = b.currentNodeIndex(b.overlays)
       storage.btnAbsPos = btnAbsPos
       storage.btnHeight = btnNode.size.y
-      storage.overlaySize = if overlayIdx >= 0 and overlayIdx < b.nodes.len:
-        b.nodes[overlayIdx].size
-      else:
-        vec2(100000.0'f32, 100000.0'f32)
 
       b.withParent(b.overlays):
         b.node("dropdown-popup"):
           popupIdx = b.stack[^1]
           discard b.deferPostProcess()
-          discard b.deferBuild(dropdownPopupReposition, cast[int](dropdownNode.id))
+          discard b.deferBuild(dropdownPopupReposition, cast[int](dropdownId))
           discard b.position(btnAbsPos.x, btnAbsPos.y + btnNode.size.y + 2.0'f32)
           discard b.layout(LayoutVertical)
           discard b.minWidth(btnNode.size.x)
           discard b.fitX().fitY()
           discard b.styleIndex(UiStyleIndexMenu)
+          if b.backendType == UiBackendType.Terminal:
+            let borderWidths = b.currentNodeStyle()[].resolvedBorderWidths
+            if borderWidths.left > 0.0'f32 or borderWidths.top > 0.0'f32 or
+                borderWidths.right > 0.0'f32 or borderWidths.bottom > 0.0'f32:
+              discard b.padding(1)
           discard b.fillBackground()
 
           for i in 0 ..< options.len:
@@ -867,6 +872,8 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
             discard b.pushId(i.uint64)
             b.layoutVertical("dropdown-option"):
               discard b.copyStyleIndex(UiStyleIndexMenuItem)
+              if b.backendType == UiBackendType.Terminal:
+                discard b.padding(0)
               discard b.fitX().fitY().fillX()
               discard b.text(options[i])
               let wasHovered = b.wasHovered(b.stack[^1], includeChildren = true)

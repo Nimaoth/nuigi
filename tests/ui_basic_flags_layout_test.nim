@@ -1033,6 +1033,55 @@ proc testSliderClickUpdatesValue() =
   require(changed, "slider should report changed after click on track")
   require(approxEq(value, 50.0'f32), "slider click should map pointer x to range value")
 
+proc buildOffsetDropdownFrame(b: var UiBuilder, selected: var int) =
+  b.node("dropdown-overlays"):
+    discard b.position(0.0'f32, 0.0'f32).size(80.0'f32, 24.0'f32).noHover()
+    b.overlays = b.currentNode.id
+  b.node("dropdown-host"):
+    discard b.position(20.0'f32, 8.0'f32).fit()
+    discard b.dropdown(["One", "Two", "Three", "Four"], selected)
+
+proc findNodeByDebugName(b: var UiBuilder, name: string): int =
+  for index in 0 ..< b.nodes.len:
+    if b.nodes[index].nodeDebugName() == name:
+      return index
+  return -1
+
+proc testTerminalDropdownPopupAnchorsBelowButton() =
+  var b = newBuilder(fixedTerminalMeasureText, backendType = UiBackendType.Terminal)
+  var selected = 0
+
+  discard b.beginUiFrame(80.0'f32, 24.0'f32)
+  b.buildOffsetDropdownFrame(selected)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(80.0'f32, 24.0'f32, input = UiInputSnapshot(
+    mouse: vec2(21.0'f32, 8.0'f32),
+    mousePressed: {MouseLeft},
+  ))
+  b.buildOffsetDropdownFrame(selected)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(80.0'f32, 24.0'f32, input = UiInputSnapshot(
+    mouse: vec2(21.0'f32, 8.0'f32),
+    mouseReleased: {MouseLeft},
+  ))
+  b.buildOffsetDropdownFrame(selected)
+  b.endUiFrame(buildRenderCommands = false)
+
+  let buttonIndex = b.findNodeByDebugName("dropdown-button")
+  let popupIndex = b.findNodeByDebugName("dropdown-popup")
+  require(buttonIndex >= 0, "open dropdown should contain its button")
+  require(popupIndex >= 0, "clicked dropdown should build its popup")
+  let buttonPos = b.absoluteNodePos(buttonIndex)
+  let popupPos = b.absoluteNodePos(popupIndex)
+  require(approxEq(popupPos.x, buttonPos.x),
+    "dropdown popup should align with the button x position")
+  require(approxEq(popupPos.y, buttonPos.y + b.nodes[buttonIndex].size.y + 2.0'f32),
+    "dropdown popup should be positioned below the button: button=" & $buttonPos &
+      " buttonHeight=" & $b.nodes[buttonIndex].size.y & " popup=" & $popupPos &
+      " popupSize=" & $b.nodes[popupIndex].size)
+
 proc testPreviousNodesAndIndicesDoubleBuffered() =
   var b = newBuilder(fixedMeasureText)
 
@@ -2084,6 +2133,7 @@ proc runTests() =
   testTerminalScrollBoxUsesCellScrollbar()
   testHoveredNodeIndexAndDebugTooltip()
   # testSliderClickUpdatesValue()
+  testTerminalDropdownPopupAnchorsBelowButton()
   testPreviousNodesAndIndicesDoubleBuffered()
   testDragUiCallbackAndDropState()
   testFileSystemCursorDragAndDrop()
