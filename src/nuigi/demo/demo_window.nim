@@ -1054,13 +1054,17 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
       b.node:
         discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
           .paddingRelative(4.0'f32 / demoBaseFontSize)
-        b.virtualList(cvScroll, cvItemCount, 28.0'f32, cvFixedItem)
+        b.virtualList(cvScroll, cvItemCount,
+          if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 28.0'f32,
+          cvFixedItem)
 
       nameCell("dynamicVirtualList", "Variable row heights; only renders visible rows. Very fast for huge lists, and handles mixed item height, caches rendered item heights for the scroll bar.")
       b.node:
         discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
           .paddingRelative(4.0'f32 / demoBaseFontSize)
-        discard b.dynamicVirtualList(cvItemCount, 40.0'f32, cvDynItem)
+        discard b.dynamicVirtualList(cvItemCount,
+          if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 40.0'f32,
+          cvDynItem)
 
 # ---------------------------------------------------------------------------
 # Type 2 — combined common layouts (basic features composed)

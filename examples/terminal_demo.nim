@@ -1,6 +1,7 @@
 import nuigi
 import nuigi/backend/terminal/terminal
 import nuigi/core/[timer, vecmath]
+import nuigi/debug/debug_panel
 import nuigi/demo/demo_window
 import nuigi/widgets/windows
 
@@ -16,6 +17,7 @@ var builder = newTerminalBuilder()
 var running = true
 var lastTicks = getTicksNS()
 var firstFrame = true
+var debugPanelState = DebugPanel()
 
 proc configureTerminalTheme(builder: var UiBuilder) =
   builder.defaultText.fontSize = 1.0'f32
@@ -40,10 +42,20 @@ proc buildDemo(builder: var UiBuilder) =
       builder.frameCtx.viewportSize.x, builder.frameCtx.viewportSize.y):
     builder.buildDemoUi()
 
+  if builder.showDebugPanel:
+    let viewportSize = builder.frameCtx.viewportSize
+    let debugPanelX = viewportSize.x * 0.6'f32
+    builder.window("Debug Panel", debugPanelX, 0.0'f32,
+        viewportSize.x - debugPanelX, viewportSize.y):
+      discard builder.debugPanel(debugPanelState)
+      builder.flushDeferredNodes()
+
 proc main() =
   backend.init()
   defer: backend.deinit()
   builder.configureTerminalTheme()
+  builder.showDebugPanel = true
+  builder.animationSpeed = 100000000
 
   while running:
     let input = backend.pollInput()

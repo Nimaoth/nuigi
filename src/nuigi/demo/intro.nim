@@ -16,7 +16,11 @@ when not defined(nimony):
 
 proc buildIntroPage*(b: var UiBuilder) =
   b.layoutVertical("intro-page"):
-    discard b.fillX().fitY().padding(12).gap(10)
+    discard b.fillX().fitY().padding(
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 12.0'f32
+    ).gap(
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
+    )
 
     b.label("nuigi demo"):
       discard b.copyTextStyleIndex(UiStyleIndexHeadingText).fontSize(28)

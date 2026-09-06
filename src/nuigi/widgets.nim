@@ -248,6 +248,11 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
           discard b.minWidth(inMinWidth)
           discard b.fitX().fitY()
           discard b.styleIndex(UiStyleIndexMenu)
+          if b.backendType == UiBackendType.Terminal:
+            let borderWidths = b.currentNodeStyle()[].resolvedBorderWidths
+            if borderWidths.left > 0.0'f32 or borderWidths.top > 0.0'f32 or
+                borderWidths.right > 0.0'f32 or borderWidths.bottom > 0.0'f32:
+              discard b.padding(1)
           discard b.fillBackground()
           # When the window is removed from the live tree it is promoted to a virtual node;
           # animate its transform scale from 1 down to 0 so it shrinks away, then gets dropped.
@@ -1203,8 +1208,12 @@ proc virtualList*(b: var UiBuilder,
     prof("virtualList")
     let vListScrollSpeed =
       if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 40.0'f32
-    let vListScrollbarW = 10.0'f32
-    let vListThumbMinH = 20.0'f32
+    let vListScrollbarW =
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
+    let vListThumbMinH =
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 20.0'f32
+    let vListThumbInset =
+      if b.backendType == UiBackendType.Terminal: 0.0'f32 else: 1.0'f32
     let vListTotalH = inItemCount.float32 * inItemHeight
 
     var vlDataArr = b.frame.arena[].allocEmptyArray(1, UiVirtualListData)
@@ -1222,7 +1231,7 @@ proc virtualList*(b: var UiBuilder,
 
       b.node("virtual-list-viewport"):
         vlViewportIdx = b.stack[^1]
-        discard b.anchorsX(0, 1).offsetsX(0, -10).finishAnchors().fillY()
+        discard b.anchorsX(0, 1).offsetsX(0, -vListScrollbarW).finishAnchors().fillY()
         discard b.maskChildren()
         b.currentNode.flags.incl Scrollable
 
@@ -1261,8 +1270,8 @@ proc virtualList*(b: var UiBuilder,
             b.node("virtual-list-scrollbar-thumb"):
               vlThumbIdx = b.stack[^1]
               discard b.styleIndex(if b.wasHovered(vlThumbIdx, includeChildren = true): UiStyleIndexScrollBarHandleHover else: UiStyleIndexScrollBarHandle)
-              discard b.position(1.0'f32, max(0.0'f32, thumbY))
-              discard b.size(vListScrollbarW - 2.0'f32, vlSbThumbH)
+              discard b.position(vListThumbInset, max(0.0'f32, thumbY))
+              discard b.size(vListScrollbarW - vListThumbInset * 2.0'f32, vlSbThumbH)
               discard b.fillBackground()
 
         let sbInput = b.frameCtx.input

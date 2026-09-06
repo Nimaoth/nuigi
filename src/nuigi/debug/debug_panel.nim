@@ -83,6 +83,8 @@ proc applyDebugOutlineToNode(b: var UiBuilder, targetId: UiNodeId, cutoff: int) 
   if targetIdx >= 0:
     let target = b.nodes[targetIdx].addr
     let targetPos = b.absoluteNodePos(targetIdx)
+    let outlineOutset = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 0.0'f32
+    let outlineSize = target.size + vec2(outlineOutset * 2.0'f32)
     let overlayIdx = b.currentNodeIndex(b.overlays)
     if overlayIdx < 0:
       return
@@ -95,14 +97,16 @@ proc applyDebugOutlineToNode(b: var UiBuilder, targetId: UiNodeId, cutoff: int) 
       kind: CmdRectStroke,
       nodeIndex: targetIdx.int32,
       color: outlineColor,
-      size: target.size,
+      size: outlineSize,
       radius: b.nodeStyle(target).cornerRadius,
       thickness: 2.0'f32,
     )
     b.withParent(overlayIdx):
       b.node("debug-node-outline"):
-        discard b.position(targetPos.x - overlayContentPos.x, targetPos.y - overlayContentPos.y)
-        discard b.size(target.size.x, target.size.y).padding(0).noHover()
+        discard b.position(
+          targetPos.x - overlayContentPos.x - outlineOutset,
+          targetPos.y - overlayContentPos.y - outlineOutset)
+        discard b.size(outlineSize.x, outlineSize.y).padding(0).noHover()
         discard b.customRenderCommands(commands)
 
 type
@@ -115,6 +119,9 @@ type
 
 proc fmtGridTracks(tracks: ArrayView[UiGridTrack]): string
 proc fmtBytes(value: int): string
+
+func debugPanelSpacing(b: UiBuilder, graphicalValue, terminalValue: float32): float32 {.inline.} =
+  if b.backendType == UiBackendType.Terminal: terminalValue else: graphicalValue
 
 proc appendFlagName(result: var string, flags: UiFlags, flagName: UiFlag, label: string) =
   if flagName in flags:
@@ -175,7 +182,7 @@ proc detailRow(b: var UiBuilder, labelText, valueText: string, valueColor = UiCo
     vc = b.themeTextStyle(UiStyleIndexDefaultText)[].textColor
   discard b.pushId(labelText)
   b.layoutHorizontal("debug-panel-detail-row"):
-    discard b.fillX().fitY().gap(4)
+    discard b.fillX().fitY().gap(b.debugPanelSpacing(4, 1))
     b.node("debug-panel-detail-label"):
       discard b.fitX().fitY()
       discard b.text(labelText & ":")
@@ -195,7 +202,7 @@ proc fmtStyleFloatProps(style: UiStyle, gapValue: float32): string =
 proc detailColorRow(b: var UiBuilder, labelText: string, textColor, backgroundColor: UiColor) =
   discard b.pushId(labelText)
   b.layoutHorizontal("debug-panel-detail-color-row"):
-    discard b.fillX().fitY().gap(4)
+    discard b.fillX().fitY().gap(b.debugPanelSpacing(4, 1))
     b.node("debug-panel-detail-label"):
       discard b.fitX().fitY()
       discard b.text(labelText & ":")
@@ -205,29 +212,29 @@ proc detailColorRow(b: var UiBuilder, labelText: string, textColor, backgroundCo
       discard b.text("text")
       discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor).alignCenter()
     b.node("debug-panel-detail-text-swatch"):
-      discard b.size(14, 12)
+      discard b.size(b.debugPanelSpacing(14, 2), b.debugPanelSpacing(12, 1))
       discard b.fillBackground()
       discard b.backgroundColor(textColor)
-      discard b.borderWidth(1)
+      discard b.borderWidth(b.debugPanelSpacing(1, 0))
       discard b.borderColor(b.themeStyle(UiStyleIndexStage)[].borderColor)
-      discard b.cornerRadius(2).alignCenter()
+      discard b.cornerRadius(b.debugPanelSpacing(2, 0)).alignCenter()
     b.node("debug-panel-detail-background-label"):
       discard b.fitX().fitY()
       discard b.text("background")
       discard b.textColor(b.themeTextStyle(UiStyleIndexDefaultText)[].textColor).alignCenter()
     b.node("debug-panel-detail-background-swatch"):
-      discard b.size(14, 12)
+      discard b.size(b.debugPanelSpacing(14, 2), b.debugPanelSpacing(12, 1))
       discard b.fillBackground()
       discard b.backgroundColor(backgroundColor)
-      discard b.borderWidth(1)
+      discard b.borderWidth(b.debugPanelSpacing(1, 0))
       discard b.borderColor(b.themeStyle(UiStyleIndexStage)[].borderColor)
-      discard b.cornerRadius(2).alignCenter()
+      discard b.cornerRadius(b.debugPanelSpacing(2, 0)).alignCenter()
   discard b.popId()
 
 proc buildDebugPanelDetails(b: var UiBuilder, inspectedId: UiNodeId) =
   b.layoutVertical("debug-panel-details"):
     discard b.fillX().fitY()
-    discard b.padding(6).gap(2)
+    discard b.padding(b.debugPanelSpacing(6, 1)).gap(b.debugPanelSpacing(2, 0))
     discard b.fillBackground()
     # discard b.maskChildren()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -380,7 +387,7 @@ proc buildDebugPanelStats(b: var UiBuilder, inspectedId: UiNodeId, currentNodeSt
 
   b.layoutVertical("debug-panel-stats"):
     discard b.fillX().fitY()
-    discard b.padding(6).gap(2)
+    discard b.padding(b.debugPanelSpacing(6, 1)).gap(b.debugPanelSpacing(2, 0))
     discard b.fillBackground()
     # discard b.maskChildren()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexPanel)[].fillColor)
@@ -394,7 +401,7 @@ proc buildDebugPanelStats(b: var UiBuilder, inspectedId: UiNodeId, currentNodeSt
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
 
     b.layoutHorizontal("debug-panel-debug-toggles"):
-      discard b.fillX().fitY().gap(6)
+      discard b.fillX().fitY().gap(b.debugPanelSpacing(6, 1))
       var drawGridLines = b.debugDrawGridLines
       if b.checkbox("Draw grid lines", drawGridLines):
         discard
@@ -567,7 +574,11 @@ proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimc
     discard b.fillBackground().backgroundColor(if itemIndex mod 2 == 0: evenBg else: oddBg)
 
   if panel.rowHoverTarget == n.id:
-    discard b.borderWidth(2.0).borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0))
+    let targetColor = accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, -0.46'f32, 1.0)
+    if b.backendType == UiBackendType.Terminal:
+      discard b.fillBackground().backgroundColor(targetColor)
+    else:
+      discard b.borderWidth(2.0).borderColor(targetColor)
 
   when not defined(nimony) and defined(nuiDebug):
     let rowNodeIdx = b.stack[^1]
@@ -588,8 +599,8 @@ proc buildDebugListEntry(b: var UiBuilder, itemIndex: int, userData: int) {.nimc
   discard b.text(label)
 
 proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.discardable.} =
-  prof("debugPanel")
   b.flushDeferredNodes()
+  prof("debugPanel")
   # Set rowHoverTarget to hovered node if we're hovering something not part of the debug ui
   let currentHoveredIndex = b.currentNodeIndex(b.previousOutput.hoveredId)
   if currentHoveredIndex != -1 and ModAlt in b.frameCtx.input.modsDown:
@@ -620,7 +631,7 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
     discard b.deferPostProcess()
     discard b.fillX()
     discard b.fillY()
-    discard b.padding(8).gap(4)
+    discard b.padding(b.debugPanelSpacing(8, 0)).gap(b.debugPanelSpacing(4, 0))
     discard b.fillBackground()
     discard b.backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
 
@@ -632,7 +643,7 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
 
     b.layoutVertical("debug-panel-tree"):
       discard b.fillX().fillY()
-      discard b.padding(2).gap(4)
+      discard b.padding(b.debugPanelSpacing(2, 0)).gap(b.debugPanelSpacing(4, 0))
       discard b.maskChildren()
 
       b.node("debug-panel-title"):

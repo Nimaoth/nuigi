@@ -257,6 +257,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
         vec2(inX, inY),
         vec2(max(minWindowW, width), max(minWindowH, height)))
       b.configureWindowNode(windowStorage)
+      if b.backendType == UiBackendType.Terminal:
+        discard b.padding(1)
 
       var titleBarId = noneNodeId()
       let windowCornerRadii = b.currentNodeStyle()[].resolvedCornerRadii
@@ -275,8 +277,6 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
           titleBarId = b.currentNode.id
           discard b.copyStyleIndex(UiStyleIndexWindowTitleBar)
           discard b.copyTextStyleIndex(UiStyleIndexWindowTitleBarText)
-          if b.backendType == UiBackendType.Terminal:
-            discard b.padding(1)
           let titleBarStyle = b.currentNodeStyle()
           titleBarStyle.cornerRadius = 0.0'f32
           titleBarStyle.cornerRadii = UiCornerRadii(
@@ -315,8 +315,6 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
         if not windowStorage.collapsed:
           b.node("window-content"):
             discard b.styleIndex(UiStyleIndexWindowContent)
-            if b.backendType == UiBackendType.Terminal:
-              discard b.padding(1)
             discard b.fillX().fillY().maskChildren()
             body
 
