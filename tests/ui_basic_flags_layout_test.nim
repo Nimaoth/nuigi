@@ -73,12 +73,13 @@ var dragUiCallbackCalls = 0
 var dragUiCallbackUserData: nil UiDragUserData = nil
 var dragUiCallbackCanDrop = false
 
-proc buildTestDragUi(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
-  inc dragUiCallbackCalls
-  dragUiCallbackUserData = userData
-  dragUiCallbackCanDrop = canDrop
-  b.node:
-    discard b.fit().text("drag")
+proc buildTestDragUi(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall, gcsafe.} =
+  gcsafeb:
+    inc dragUiCallbackCalls
+    dragUiCallbackUserData = userData
+    dragUiCallbackCanDrop = canDrop
+    b.node:
+      discard b.fit().text("drag")
 
 # --- property editor test scaffolding ---------------------------------------
 

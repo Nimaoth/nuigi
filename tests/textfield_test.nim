@@ -76,12 +76,14 @@ proc textFieldIndex(b: UiBuilder): int =
 
 var testClipboard = ""
 
-proc readTestClipboard(): string {.nimcall, raises: [].} =
-  testClipboard
+proc readTestClipboard(): string {.nimcall, gcsafe, raises: [].} =
+  gcsafeb:
+    testClipboard
 
-proc writeTestClipboard(text: string): bool {.nimcall, raises: [].} =
-  testClipboard = text
-  true
+proc writeTestClipboard(text: string): bool {.nimcall, gcsafe, raises: [].} =
+  gcsafeb:
+    testClipboard = text
+    true
 
 proc testTerminalTextFieldIsOneRowHigh() =
   var b = newBuilder(fixedTerminalMeasureText, backendType = UiBackendType.Terminal)

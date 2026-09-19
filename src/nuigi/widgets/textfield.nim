@@ -347,6 +347,8 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
     storage.selectionNodeIndex = -1
     storage.cursorNodeIndex = -1
 
+    let fieldStyle = b.nodeStyle(b.currentNode)
+    let cursorWidth = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 2.0'f32
     b.node:
       b.debugName("textfield-text-container")
       discard b.maskChildren()
@@ -376,11 +378,11 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
         discard b.position(0, 0).fitX().fitY().anchorsY(0.5, 0.5).pivotY(0.5).finishAnchors().noHover()
         discard b.text(if text.len > 0: text else: hint)
 
-    let fieldStyle = b.nodeStyle(b.currentNode)
-    let cursorWidth = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 2.0'f32
-    let naturalWidth = b.currentNode.contentExtent.x + fieldStyle.paddingX * 2.0'f32 + cursorWidth
-    b.currentNode.contentExtent.x =
-      ceil(naturalWidth - fieldStyle.paddingX * 2.0'f32)
+      if maxWidth <= 0.0'f32:
+        let naturalWidth = b.currentNode.contentExtent.x +
+          fieldStyle.paddingX * 2.0'f32 + cursorWidth
+        discard b.minWidth(max(minWidth,
+          ceil(naturalWidth) - fieldStyle.paddingX * 2.0'f32))
 
     if isFocused and not storage.hasSelection:
       b.node("textfield-cursor"):

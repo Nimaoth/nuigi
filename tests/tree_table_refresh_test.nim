@@ -31,7 +31,7 @@ proc copyPath(path: seq[int]): seq[int] =
   for index in path:
     result.add(index)
 
-method clone(cursor: MutableCursor): TreeCursor =
+method clone(cursor: MutableCursor): TreeCursor {.gcsafe, raises: [].} =
   let copy = MutableCursor()
   copy.node = cursor.node
   copy.parents = cursor.parents

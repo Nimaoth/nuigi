@@ -17,7 +17,7 @@ proc copyPath(path: seq[int]): seq[int] =
   for index in path:
     result.add(index)
 
-method clone(cursor: BenchCursor): TreeCursor =
+method clone(cursor: BenchCursor): TreeCursor {.gcsafe, raises: [].} =
   BenchCursor(
     node: cursor.node,
     parents: cursor.parents,

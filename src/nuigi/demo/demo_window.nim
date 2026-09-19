@@ -870,7 +870,7 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
           discard b.textColor(b.themeTextStyle(UiStyleIndexLabelText)[].textColor)
       template widgetCell(body: untyped) =
         b.node:
-          discard b.fillX().fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
+          discard b.fitY().paddingRelative(4.0'f32 / demoBaseFontSize)
           body
 
       headerCell("Widget")

@@ -100,6 +100,8 @@ type
       ## Node owns a logical focus scope and remembered descendant path.
     VirtualizeNode
       ## Node should be promoted to a persistent virtual node if it is absent in a future frame.
+    AnimateDelayed
+      ## Node's animation should be delayed until after the current frame's layout and rendering.
 
   UiTraceMode* = enum
     ## Controls which nodes have their events recorded in `UiBuilder.eventTraces`.
@@ -1218,6 +1220,7 @@ when defined(nuiDebug):
   proc buildDebugHoverTooltip(b: var UiBuilder)
 proc beginAttach*(b: var UiBuilder, parentIdx: int): bool
 proc endAttach*(b: var UiBuilder)
+proc deferBuild*(b: var UiBuilder, buildProc: UiDeferredBuildProc, userData: int = 0): var UiBuilder {.discardable.}
 proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.}
 proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId)
   ## Prevent node storage from being garbage-collected this frame.
@@ -4447,6 +4450,8 @@ proc animateDelayed*(b: var UiBuilder, nodeIdx: int): var UiBuilder {.discardabl
   ## Schedule animation application for the node at nodeIdx to run during flushDeferredNodes.
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
     return b
+
+  b.nodes[nodeIdx].flags.incl AnimateDelayed
 
   b.deferredNodes.add UiDeferredNode(
     nodeIdx: nodeIdx,
