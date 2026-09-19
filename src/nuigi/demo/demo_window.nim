@@ -1617,7 +1617,7 @@ proc resetDemoTree() =
 proc demoTreeCursor(root: DemoTreeNode): DemoTreeCursor =
   DemoTreeCursor(node: root, fieldName: root.name, path: @[])
 
-method clone*(c: DemoTreeCursor): TreeCursor =
+method clone*(c: DemoTreeCursor): TreeCursor {.gcsafe, raises: [].} =
   let copy = DemoTreeCursor(node: c.node, fieldName: c.fieldName, index: c.index)
   for parent in c.parents:
     copy.parents.add(parent)
@@ -1931,7 +1931,7 @@ proc buildTreeTableExample(b: var UiBuilder) =
             discard b.fillX().fontSize(13)
               .textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
-          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.nimcall, raises: [].} =
             let treeCursor = DemoTreeCursor(cursor)
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
@@ -2066,7 +2066,7 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
           b.label("fs-demo"):
             discard b.textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
 
-          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+          proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.nimcall, raises: [].} =
             b.label(cursor.fieldName & ":"):
               discard b.fitX().fitY()
 
@@ -2239,42 +2239,51 @@ proc buildDragDropExample*(b: var UiBuilder) =
 
 proc buildAllExamples(b: var UiBuilder)
 
+type P = object
+  fun: proc(b: var UiBuilder)
+  scrollBox: bool
+  title: string
+
 var examples = [
-  (fun: buildIntroPage, scrollBox: true, title: "Intro"),
-  (fun: buildFaqTreeTableExample, scrollBox: false, title: "FAQ"),
-  (fun: buildFillExamples, scrollBox: true, title: "Fill"),
-  (fun: buildFitExamples, scrollBox: true, title: "Fit"),
-  (fun: buildAnchorExamples, scrollBox: true, title: "Anchors"),
-  (fun: buildLayoutDirectionExamples, scrollBox: true, title: "Layout"),
-  (fun: buildAlignExamples, scrollBox: true, title: "Align"),
-  (fun: buildGapPaddingExamples, scrollBox: true, title: "Gap/Padding"),
-  (fun: buildStyleExamples, scrollBox: true, title: "Style"),
-  (fun: buildTextStyleExamples, scrollBox: true, title: "Text"),
-  (fun: buildMaskChildrenExamples, scrollBox: true, title: "Mask/Hover"),
-  (fun: buildAnimationExamples, scrollBox: true, title: "Animation"),
-  (fun: buildTransformExamples, scrollBox: true, title: "Transform"),
-  (fun: buildLayoutExamples, scrollBox: true, title: "Layouts"),
-  (fun: buildAllWidgetsExample, scrollBox: true, title: "Widgets"),
-  (fun: buildComplexWidgetsExample, scrollBox: true, title: "Complex"),
-  (fun: buildFlexLayoutExamples, scrollBox: true, title: "Flex"),
-  (fun: buildGridLayoutExamples, scrollBox: true, title: "Grid"),
-  (fun: buildTableLayoutExamples, scrollBox: true, title: "Table"),
-  (fun: buildTreeTableExample, scrollBox: false, title: "TreeTable"),
-  (fun: buildFileSystemTreeExample, scrollBox: false, title: "FileSystem"),
-  (fun: buildUnicodeExamples, scrollBox: true, title: "Unicode"),
-  (fun: buildSubpixelExamples, scrollBox: true, title: "Subpixel"),
-  (fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),
-  (fun: buildCustomRenderExamples, scrollBox: true, title: "Custom"),
-  (fun: buildCustomMaterialExample, scrollBox: false, title: "CustomMat"),
-  (fun: buildDragDropExample, scrollBox: true, title: "DragDrop"),
-  (fun: buildAllExamples, scrollBox: false, title: "All"),
+  P(fun: buildIntroPage, scrollBox: true, title: "Intro"),
+  P(fun: buildFaqTreeTableExample, scrollBox: false, title: "FAQ"),
+  P(fun: buildFillExamples, scrollBox: true, title: "Fill"),
+  P(fun: buildFitExamples, scrollBox: true, title: "Fit"),
+  P(fun: buildAnchorExamples, scrollBox: true, title: "Anchors"),
+  P(fun: buildLayoutDirectionExamples, scrollBox: true, title: "Layout"),
+  P(fun: buildAlignExamples, scrollBox: true, title: "Align"),
+  P(fun: buildGapPaddingExamples, scrollBox: true, title: "Gap/Padding"),
+  P(fun: buildStyleExamples, scrollBox: true, title: "Style"),
+  P(fun: buildTextStyleExamples, scrollBox: true, title: "Text"),
+  P(fun: buildMaskChildrenExamples, scrollBox: true, title: "Mask/Hover"),
+  P(fun: buildAnimationExamples, scrollBox: true, title: "Animation"),
+  P(fun: buildTransformExamples, scrollBox: true, title: "Transform"),
+  P(fun: buildLayoutExamples, scrollBox: true, title: "Layouts"),
+  P(fun: buildAllWidgetsExample, scrollBox: true, title: "Widgets"),
+  P(fun: buildComplexWidgetsExample, scrollBox: true, title: "Complex"),
+  P(fun: buildFlexLayoutExamples, scrollBox: true, title: "Flex"),
+  P(fun: buildGridLayoutExamples, scrollBox: true, title: "Grid"),
+  P(fun: buildTableLayoutExamples, scrollBox: true, title: "Table"),
+  P(fun: buildTreeTableExample, scrollBox: false, title: "TreeTable"),
+  P(fun: buildFileSystemTreeExample, scrollBox: false, title: "FileSystem"),
+  P(fun: buildUnicodeExamples, scrollBox: true, title: "Unicode"),
+  P(fun: buildSubpixelExamples, scrollBox: true, title: "Subpixel"),
+  P(fun: buildFontAtlasExamples, scrollBox: true, title: "Atlas"),
+  P(fun: buildCustomRenderExamples, scrollBox: true, title: "Custom"),
+  P(fun: buildCustomMaterialExample, scrollBox: false, title: "CustomMat"),
+  P(fun: buildDragDropExample, scrollBox: true, title: "DragDrop"),
+  P(fun: buildAllExamples, scrollBox: false, title: "All"),
 ]
 
-proc buildDemoItem(b: var UiBuilder, itemIndex: int, userData: int) =
+proc buildDemoItem(b: var UiBuilder, itemIndex: int, userData: int) {.gcsafe, raises: [].} =
   if itemIndex >= examples.len:
     return
   discard b.fillX().fitY()
-  examples[itemIndex].fun(b)
+  gcsafeb:
+    try:
+      examples[itemIndex].fun(b)
+    except:
+      discard
 
 proc buildAllExamples(b: var UiBuilder) =
   b.layoutVertical("all-root"):

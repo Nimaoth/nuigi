@@ -34,6 +34,7 @@ var gFrame = 0.0
 var gTick = 0.0
 var gRenderOnDemand = true
 var gHadInputThisFrame = false
+var gRedrawingUi = false
 
 when defined(emscripten):
   const defaultAntialiasMeshWidth = 1.0'f32
@@ -125,13 +126,15 @@ proc textureToGpuTexture*(texture: nil Texture): GPUTexture =
     return cast[GPUTexture](gpuTexPtr)
   return nil
 
-proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, maxWidth: float32): UiTextArrangement =
-  gFontRender.arrangeText(text, fontSize, fontId, maxWidth)
+proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe.} =
+  gcsafeb:
+    gFontRender.arrangeText(text, fontSize, fontId, maxWidth)
 
 proc uiSdlBuildTextMesh(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
-    color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
-  let mesh = gFontRender.buildTextMesh(arrangement, pos, screenOffset, color, transform)
-  return (cast[nil ptr UncheckedArray[UiVertex]](mesh.data), mesh.count)
+    color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.gcsafe.} =
+  gcsafeb:
+    let mesh = gFontRender.buildTextMesh(arrangement, pos, screenOffset, color, transform)
+    return (cast[nil ptr UncheckedArray[UiVertex]](mesh.data), mesh.count)
 
 proc themeEditorListFonts(): seq[(string, UiFontId)] {.raises: [], gcsafe.} =
   gcsafeb:
@@ -924,6 +927,80 @@ when defined(wasm):
       else:
         discard
 
+proc finishFrameMetrics(dt: float64, tickStart: float32) =
+  let tickDt = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32 - tickStart
+  gFps = fps
+  gFrame = dt * 1000
+  gTick = tickDt
+  pushPlotHistory()
+
+proc redrawUiFrame(dt: float64, tickStart: float32) =
+  if gRedrawingUi:
+    return
+  gRedrawingUi = true
+  defer:
+    gRedrawingUi = false
+
+  var outputWidth: cint = 0
+  var outputHeight: cint = 0
+  discard gWindow.getWindowSize(outputWidth, outputHeight)
+
+  ensureUiExampleInitialized()
+  when not defined(wasm):
+    b.fontAtlasImageId = gpuTextureToImageId(gRender2D.fontTexture)
+
+  let fonts = themeEditorListFonts()
+  for (name, id) in fonts:
+    b.fonts[name] = id
+
+  discard b.beginUiFrame(outputWidth.float32, outputHeight.float32, makeInputSnapshot())
+  b.buildUi()
+
+  when defined(wasm):
+    let renderer = gWindow.getRenderer()
+    b.endUiFrame(buildMeshRenderCommands = true)
+    syncSdlTextInput()
+    syncFontAtlas(renderer)
+    discard renderer.setRenderDrawColorFloat(0, 0, 0, 1)
+    discard renderer.renderClear()
+    b.renderNewUiRenderer(b.frameOutput, renderer)
+    finishFrameMetrics(dt, tickStart)
+    prof("present")
+    discard renderer.renderPresent()
+  else:
+    b.endUiFrame(buildMeshRenderCommands = true)
+    syncSdlTextInput()
+    if gRender2D.beginRender(nil, outputWidth.uint32, outputHeight.uint32, render2DTargetFormat, gSampleCount):
+      gRender2D.clear()
+      b.renderNewUi()
+    finishFrameMetrics(dt, tickStart)
+    block:
+      prof("present")
+      gRender2D.endRender()
+    block:
+      prof("vsync")
+      gRender2D.presentToSwapchain(gWindow)
+
+proc redrawOnWindowExposed(userdata: pointer, event: ptr Event): bool {.cdecl.} =
+  result = true
+  if event == nil or event[].`type` != EVENT_WINDOW_EXPOSED:
+    return
+  if getWindowFromEvent(event) != cast[Window](userdata):
+    return
+  if gRedrawingUi:
+    return
+  try:
+    let now = timer.getTicksNS().float64 / NS_PER_SECOND.float64
+    let dt = now - last
+    last = now
+    if dt != 0:
+      fps = mix(fps, 1.0 / dt, 0.5)
+    let tickStart = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32
+    redrawUiFrame(dt, tickStart)
+  except:
+    when not defined(nimony):
+      echo "resize redraw exception: ", getCurrentExceptionMsg()
+
 proc mainLoop() {.cdecl.} =
   try:
     var now = timer.getTicksNS().float64 / NS_PER_SECOND.float64
@@ -933,14 +1010,11 @@ proc mainLoop() {.cdecl.} =
     if dt != 0:
       fps = mix(fps, 1.0 / dt, 0.5)
 
-    when defined(profiler) and not defined(nimony):
+    when defined(nuigiProfiler) and not defined(nimony):
       gprof.frameStart = eventHistoryIndex
     prof("frame")
-    when defined(profiler) and not defined(nimony):
+    when defined(nuigiProfiler) and not defined(nimony):
       profilerBeginFrame(false)
-
-    when defined(wasm):
-      let renderer = gWindow.getRenderer()
 
     let tickStart = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32
 
@@ -982,55 +1056,7 @@ proc mainLoop() {.cdecl.} =
             sleep(10)
         return
 
-      var outputWidth: cint = 0
-      var outputHeight: cint = 0
-      discard gWindow.getWindowSize(outputWidth, outputHeight)
-
-      ensureUiExampleInitialized()
-      when defined(wasm):
-        discard
-      else:
-        b.fontAtlasImageId = gpuTextureToImageId(gRender2D.fontTexture)
-
-      let fonts = themeEditorListFonts()
-      for (name, id) in fonts:
-        b.fonts[name] = id
-
-      discard b.beginUiFrame(outputWidth.float32, outputHeight.float32, makeInputSnapshot())
-      b.buildUi()
-
-      block:
-        when defined(wasm):
-          b.endUiFrame(buildMeshRenderCommands = true)
-          syncSdlTextInput()
-          syncFontAtlas(renderer)
-          discard renderer.setRenderDrawColorFloat(0, 0, 0, 1)
-          discard renderer.renderClear()
-          b.renderNewUiRenderer(b.frameOutput, renderer)
-        else:
-          b.endUiFrame(buildMeshRenderCommands = true)
-          syncSdlTextInput()
-          if gRender2D.beginRender(nil, outputWidth.uint32, outputHeight.uint32, render2DTargetFormat, gSampleCount):
-            gRender2D.clear()
-            b.renderNewUi()
-
-      let tickDt = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32 - tickStart
-      gFps = fps
-      gFrame = dt * 1000
-      gTick = tickDt
-      pushPlotHistory()
-
-
-    when defined(wasm):
-      prof("present")
-      discard renderer.renderPresent()
-    else:
-      block:
-        prof("present")
-        gRender2D.endRender()
-      block:
-        prof("vsync")
-        gRender2D.presentToSwapchain(gWindow)
+      redrawUiFrame(dt, tickStart)
   except:
     when not defined(nimony):
       echo "mainLoop exception ", getCurrentExceptionMsg()
@@ -1122,6 +1148,10 @@ proc main(quitImmediately: bool) =
     discard gFontRender.addFontFace("assets/dontuse/fonts/ProFont For Powerline.ttf")
     discard gFontRender.addFontFace("assets/dontuse/fonts/ProFont Bold For Powerline.ttf")
 
+  let eventWatchAdded = addEventWatch(redrawOnWindowExposed, cast[pointer](gWindow))
+  if not eventWatchAdded:
+    echo "Failed to add window expose event watch: ", $getError()
+
   # Initialize shared loop state and start the loop.
   last = timer.getTicksNS().float64 / NS_PER_SECOND.float64 - 0.016
   fps = 60.0
@@ -1134,6 +1164,8 @@ proc main(quitImmediately: bool) =
       while running:
         mainLoop()
 
+    if eventWatchAdded:
+      removeEventWatch(redrawOnWindowExposed, cast[pointer](gWindow))
     gGamepadInput.shutdown()
     destroyWindow(gWindow)
 

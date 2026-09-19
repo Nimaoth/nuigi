@@ -10,7 +10,7 @@ import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler, nuigi, nuigi/rendering/mesh
 
 type
-  PlotPointFn* = proc (x: float32, userData: int): float32
+  PlotPointFn* = proc (x: float32, userData: int): float32 {.gcsafe, raises: [].}
 
   PlotSeries* = object
     fn*: PlotPointFn
@@ -24,7 +24,7 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     xRange, yRange: Vec2, series: openArray[PlotSeries],
     resolution: int = 256, lineThickness: float32 = 2.0'f32,
     mousePos: Vec2 = vec2(-1.0'f32, -1.0'f32)
-  ): ArrayView[UiRenderCommand] =
+  ): ArrayView[UiRenderCommand] {.gcsafe, raises: [].} =
   if b.frame.arena == nil or series.len == 0 or resolution < 2:
     return default(ArrayView[UiRenderCommand])
   prof("buildPlotVertices")

@@ -8,7 +8,7 @@
 import nuigi
 import nuigi/debug/profiler
 
-type UiDynamicVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall.}
+type UiDynamicVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall, gcsafe, raises: [].}
 
 type UiDynamicVirtualListHeight* = object
   itemIndex*: int
@@ -130,7 +130,7 @@ proc firstVisibleItem(storage: UiDynamicVirtualListStorage, itemCount: int,
       high = middle
   low
 
-proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
+proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) {.gcsafe, raises: [].} =
   prof("dynamicVirtualListDeferredBuild")
   let _ = rawData
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:

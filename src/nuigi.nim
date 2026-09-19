@@ -21,6 +21,8 @@ export mesh, text
 
 from nuigi/core/hash as nui_hash import Hash, `!&`, `!$`
 
+{.push gcsafe, raises: [].}
+
 type
   UiBackendType* {.pure.} = enum
     ## Rendering environment used for backend-specific UI behavior.
@@ -434,14 +436,14 @@ type
     userData*: int
       ## Opaque value passed back to `layoutProc`.
 
-  UiDeferredBuildProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
+  UiDeferredBuildProc* = proc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, raises: [].}
     ## Callback whose body builds a node's children; executed during `flushDeferredNodes`
     ## at `endUiFrame` (after the whole tree has been described).
 
   UiDragUserData* = ref object of RootObj
     ## Base type for application-defined drag payloads.
 
-  UiDragUiCallback* = proc(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.}
+  UiDragUiCallback* = proc(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall, raises: [].}
     ## Callback that builds the contents of the tooltip shown during a drag.
 
   UiDeferredNode* = object
@@ -888,6 +890,8 @@ type
     lastNodeIndex: int
       ## Index of `lastNode`.
 
+    sentinelNode: ref UiNode
+
     defaultText*: UiNodeText
       ## Default text style applied to new nodes.
     defaultStyle*: UiStyle
@@ -1108,10 +1112,12 @@ type
       ## De-emphasized (muted) text.
     UiStyleIndexHeaderText
       ## Header/section-title text (last slot; `UiTextStyleCount`).
+    UiStyleIndexDefaultMono
+      ## Default monospace text style.
 
 const
   UiThemeStyleSlotCount* = int(UiStyleIndexAccent)
-  UiTextStyleCount* = int(UiStyleIndexHeaderText)
+  UiTextStyleCount* = int(UiStyleIndexDefaultMono)
 
 proc accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
   ## Derive a color from `base` by rotating hue (`hueShift` in turns, 0..1)
@@ -1286,7 +1292,6 @@ proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float
   b.textArrangementLookup[key] = newIdx
   b.textArrangementEntries[newIdx].arrangement.addr
 
-var sentinelNode = UiNode()
 
 func noneNodeId*(): UiNodeId {.inline.} =
   ## Returns the sentinel "no node" ID (value 0).
@@ -1402,6 +1407,11 @@ iterator nodeStorageParents*(b: var UiBuilder): UiNodeStorageData =
 
 proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's text data.
+  if b.currentNode.textIndex.int <= b.themeTextStyles.len:
+    let currentStyle = b.frame.texts[b.currentNode.textIndex]
+    b.frame.texts.add(currentStyle)
+    node.textIndex = b.frame.texts.len.uint16
+    return b.frame.texts[^1]
   if node.textIndex == 0:
     node.textIndex = (b.frame.texts.len + 1).uint16
     b.frame.texts.add(UiNodeText(measuredTextDirty: true, fontSize: b.defaultText.fontSize, fontId: b.defaultText.fontId, textColor: b.defaultText.textColor))
@@ -2511,6 +2521,11 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
     text: "Header".uiString,
     textColor: UiColor(r: 0.95'f32, g: 0.55'f32, b: 0.15'f32, a: 1.0'f32),
   )
+  result[int(UiStyleIndexDefaultMono) - 1] = UiNodeText(
+    fontSize: 14,
+    text: "Mono".uiString,
+    textColor: defaultText,
+  )
 
 func rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =
   ## Construct a UiColor from numeric values (0-1 range for float, 0-255 for int).
@@ -2590,6 +2605,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
   frameArenaPtr[] = initArena(3 * 1024 * 1024)
   previousFrameArenaPtr[] = initArena(3 * 1024 * 1024)
 
+  var sentinelNode: ref UiNode = (ref UiNode)()
   result = UiBuilder(
     backendType: backendType,
     frame: UiFrame(
@@ -2611,8 +2627,9 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     defaultStyle: UiStyle(),
     defaultAnchor: UiNodeAnchor(),
     defaultTransform: UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32)),
-    currentNode: sentinelNode.addr,
-    lastNode: sentinelNode.addr,
+    sentinelNode: sentinelNode,
+    currentNode: cast[ptr UiNode](sentinelNode),
+    lastNode: cast[ptr UiNode](sentinelNode),
     fontScale: 1,
   )
 
@@ -3231,7 +3248,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   # Root is always created at frame start so layout can rely on viewport size immediately.
   b.frame.nodes.add UiNode(
     id: rootId,
-    flags: {},
+    flags: {SizeXKnown, SizeYKnown},
     pos: vec2(0.0'f32, 0.0'f32),
     size: vec2(max(0.0'f32, ctx.viewportSize.x), max(0.0'f32, ctx.viewportSize.y)),
     minSize: vec2(0.0'f32, 0.0'f32),
@@ -3374,7 +3391,7 @@ proc endNode*(b: var UiBuilder): var UiBuilder {.discardable.} =
       else:
         b.currentParent = nil
     else:
-      b.currentNode = sentinelNode.addr
+      b.currentNode = cast[ptr UiNode](b.sentinelNode)
       b.currentParent = nil
 
     discard b.nodeIdStack.pop()
@@ -3418,7 +3435,7 @@ proc flushDeferredNodes*(b: var UiBuilder) =
     else:
       b.currentParent = nil
   else:
-    b.currentNode = sentinelNode.addr
+    b.currentNode = cast[ptr UiNode](b.sentinelNode)
     b.currentParent = nil
 
   b.storageParentStack = storageParentStack
@@ -5514,16 +5531,16 @@ proc applyFocusHighlight*(b: var UiBuilder, width = 2.0'f32): var UiBuilder {.di
 proc focusHighlight*(b: var UiBuilder, width = 2.0'f32): var UiBuilder {.discardable.} =
   ## Draw a backend-appropriate accent when the current node is keyboard-focused.
   if b.isFocused():
-    if b.currentNode.styleIndex > 0 and b.currentNode.styleIndex.int < b.themeStyles.len:
-      discard b.copyStyleIndex(b.currentNode.styleIndex)
-    let accentColor = b.themeStyle(UiStyleIndexAccent)[].borderColor
-    case b.backendType
-    of UiBackendType.Graphical:
-      discard b.borderWidth(width)
-      discard b.borderColor(accentColor)
-    of UiBackendType.Terminal:
-      discard b.backgroundColor(accentVariation(accentColor, 0.0'f32, 0.5'f32))
+    discard b.applyFocusHighlight(width)
   b
+
+proc deferredFocusHighlightProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, gcsafe, raises: [].} =
+  if b.focusedNode == userData.UiNodeId:
+    discard b.applyFocusHighlight()
+
+proc focusHighlightDelayed*(b: var UiBuilder, node: UiNodeId, width = 2.0'f32): var UiBuilder {.discardable.} =
+  ## Draw a backend-appropriate accent when the current node is keyboard-focused.
+  b.deferBuild(deferredFocusHighlightProc, node.int)
 
 proc borderWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Animated version of borderWidth. Smoothly transitions the border width.
@@ -6708,7 +6725,7 @@ proc endAttach*(b: var UiBuilder) =
   if b.stack.len > 0:
     b.currentNode = b.frame.nodes[b.stack[^1]].addr
   else:
-    b.currentNode = sentinelNode.addr
+    b.currentNode = cast[ptr UiNode](b.sentinelNode)
   if b.currentNode.parent >= 0:
     b.currentParent = b.frame.nodes[b.currentNode.parent].addr
   else:

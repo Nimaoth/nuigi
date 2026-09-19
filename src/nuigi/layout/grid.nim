@@ -47,7 +47,7 @@ type
     colSpan: int32
     rowSpan: int32
 
-proc applyGridLayoutToChildren(b: var UiBuilder, parentIdx: int, parentGrid: ptr UiNodeGridParent)
+proc applyGridLayoutToChildren(b: var UiBuilder, parentIdx: int, parentGrid: ptr UiNodeGridParent) {.gcsafe, raises: [].}
 proc pushGridDebugRenderCommands*(b: var UiBuilder, idx: int, contentOrigin, contentSize: Vec2, layoutIndex: int32, clipStack: seq[UiClipRect])
 proc resolveGridLayoutScratch(b: var UiBuilder, parentIdx: int, parentGrid: ptr UiNodeGridParent, layoutContentSize: Vec2,
   rowGapOut, columnGapOut: var float32,
@@ -160,7 +160,7 @@ proc setCurrentNodeGridParent*(b: var UiBuilder, value: UiNodeGridParent) {.inli
 proc setCurrentNodeGridChild*(b: var UiBuilder, value: UiNodeGridChild) {.inline.} =
   b.ensureNodeGridChild(b.currentNode)[] = value
 
-proc gridCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
+proc gridCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.gcsafe, raises: [].} =
   let parentGrid = cast[ptr UiNodeGridParent](userData)
   if parentGrid == nil:
     return
@@ -709,7 +709,7 @@ proc resolveGridLayoutScratch(b: var UiBuilder, parentIdx: int, parentGrid: ptr 
 
   result = usedColsOut > 0 and usedRowsOut > 0
 
-proc applyGridLayoutToChildren(b: var UiBuilder, parentIdx: int, parentGrid: ptr UiNodeGridParent) =
+proc applyGridLayoutToChildren(b: var UiBuilder, parentIdx: int, parentGrid: ptr UiNodeGridParent) {.gcsafe, raises: [].} =
   if parentIdx < 0 or parentIdx >= b.frame.nodes.len:
     return
   if parentGrid == nil:

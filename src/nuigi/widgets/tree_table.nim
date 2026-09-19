@@ -75,7 +75,7 @@ type
     listStorage: UiDynamicVirtualListStorage
     hideRoot*: bool
 
-  TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.}
+  TreeTableRowRenderer* = proc(b: var UiBuilder, cursor: TreeCursor, index: int) {.nimcall, gcsafe, raises: [].}
 
   TreeTableOptions* = object
     ## Options for `treeTable`. All fields have sensible defaults; use
@@ -227,14 +227,14 @@ proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
   nodeStorage(b, node, storage)
   return storage
 
-method clone*(c: TreeCursor): TreeCursor {.base.} =
+method clone*(c: TreeCursor): TreeCursor {.base, gcsafe, raises: [].} =
   ## Copies a cursor so callers can navigate without mutating the original.
   result = TreeCursor()
   result.fieldName = c.fieldName
   result.index = c.index
   result.path = c.path
 
-method cursorKey*(c: TreeCursor): string {.base.} =
+method cursorKey*(c: TreeCursor): string {.base, gcsafe, raises: [].} =
   ## Returns stable node identity used to preserve expansion state.
   ## Subtypes should override this, for example with a filesystem path.
   result = ""
@@ -242,32 +242,32 @@ method cursorKey*(c: TreeCursor): string {.base.} =
     result.add($i)
     result.add("/")
 
-method moveNext*(c: TreeCursor, count: int = 1): bool {.base.} =
+method moveNext*(c: TreeCursor, count: int = 1): bool {.base, gcsafe, raises: [].} =
   ## Moves to a later sibling and returns false when it does not exist.
   false
 
-method movePrev*(c: TreeCursor, count: int = 1): bool {.base.} =
+method movePrev*(c: TreeCursor, count: int = 1): bool {.base, gcsafe, raises: [].} =
   ## Moves to an earlier sibling and returns false when it does not exist.
   false
 
-method childCount*(c: TreeCursor): int {.base.} =
+method childCount*(c: TreeCursor): int {.base, gcsafe, raises: [].} =
   ## Returns the number of direct children under the current node.
   0
 
-method enterChild*(c: TreeCursor): bool {.base.} =
+method enterChild*(c: TreeCursor): bool {.base, gcsafe, raises: [].} =
   ## Moves to the first child and returns false when the current node is a leaf.
   false
 
-method exitChild*(c: TreeCursor): bool {.base.} =
+method exitChild*(c: TreeCursor): bool {.base, gcsafe, raises: [].} =
   ## Moves to the parent and returns false when already at the cursor root.
   false
 
-method updatePath*(c: TreeCursor, path: seq[int]) {.base.} =
+method updatePath*(c: TreeCursor, path: seq[int]) {.base, gcsafe, raises: [].} =
   ## Replaces the positional path and keeps the sibling index synchronized.
   c.path = path
   c.index = if path.len > 0: path[^1] else: 0
 
-method replacePathPrefix*(c: TreeCursor, oldPrefixLen: int, newPrefix: seq[int]) {.base.} =
+method replacePathPrefix*(c: TreeCursor, oldPrefixLen: int, newPrefix: seq[int]) {.base, gcsafe, raises: [].} =
   ## Rebases after an ancestor moves while preserving the descendant suffix.
   if oldPrefixLen == newPrefix.len:
     for index in 0 ..< newPrefix.len:
@@ -283,7 +283,7 @@ method replacePathPrefix*(c: TreeCursor, oldPrefixLen: int, newPrefix: seq[int])
     path[newPrefix.len + index] = c.path[oldPrefixLen + index]
   c.updatePath(path)
 
-method resolveChild*(c: TreeCursor, child: TreeCursor): TreeCursor {.base.} =
+method resolveChild*(c: TreeCursor, child: TreeCursor): TreeCursor {.base, gcsafe, raises: [].} =
   ## Resolves `child` against the current children using its index only as a hint.
   ## Identity comes from cursorKey; indexed data sources should override this.
   prof("resolveChild")
@@ -724,7 +724,7 @@ proc expandNode*(e: TreeTable, cursor: TreeCursor) =
   discard e.addExpandedNode(resolvedCursor, parentIndex)
   e.recomputeTotals()
 
-proc requestTreeTableExpand*(b: var UiBuilder, cursor: TreeCursor): bool =
+proc requestTreeTableExpand*(b: var UiBuilder, cursor: TreeCursor): bool {.raises: [].} =
   ## Queues expansion on the nearest tree table owning the current deferred row.
   for storage in b.nodeStorageParents():
     if storage of TreeTable:
@@ -955,7 +955,7 @@ proc buildChevronDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
   b.withParent(nodeIdx):
     discard b.customRenderCommands(cmds)
 
-proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
+proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) {.gcsafe.} =
   ## Renders one row with indentation, expansion control, background, and cells.
   prof("treeTableField")
   let hasChildren = e.walkCursor.childCount() > 0
@@ -1022,7 +1022,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) =
   if b.wasClicked(includeChildren = true):
     discard b.requestFocus(rowFocusId)
   if b.focusedNode == rowFocusId:
-    discard b.applyFocusHighlight()
+    discard b.focusHighlightDelayed(rowFocusId)
 
   b.layoutHorizontal:
     discard b.fit()
@@ -1415,28 +1415,31 @@ proc treeTableColumnLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.rais
           else:
             b.ensureNodeCustomCommands(row) = indentAvail
 
-proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
+proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) {.gcsafe, raises: [].} =
   ## Builds one deferred row by incrementally walking the visible preorder.
   ## The frame walk cursor is shared across increasing virtual-list indices.
   prof("buildTreeTableRow")
-  var ctx = b.getOrCreateStorage(b.frame.nodes[userData].addr)
-  if ctx.walkCursor == nil:
-    ctx.walkCursor = ctx.cursor.clone()
-    ctx.walkIndex = 0
-  let targetIndex = itemIndex + (if ctx.hideRoot: 1 else: 0)
-  if ctx.walkIndex == 0:
-    if not ctx.seek(targetIndex):
-      return
-  block:
-    prof("step")
-    while ctx.walkIndex < targetIndex:
-      var walkCursor = ctx.walkCursor
-      if not stepForward(walkCursor, ctx, ctx.walkNode):
-        break
-      ctx.walkCursor = walkCursor
-      ctx.walkIndex += 1
-  ctx.renderedCursors.add(ctx.walkCursor.clone())
-  treeTableField(b, ctx, itemIndex)
+  try:
+    var ctx = b.getOrCreateStorage(b.frame.nodes[userData].addr)
+    if ctx.walkCursor == nil:
+      ctx.walkCursor = ctx.cursor.clone()
+      ctx.walkIndex = 0
+    let targetIndex = itemIndex + (if ctx.hideRoot: 1 else: 0)
+    if ctx.walkIndex == 0:
+      if not ctx.seek(targetIndex):
+        return
+    block:
+      prof("step")
+      while ctx.walkIndex < targetIndex:
+        var walkCursor = ctx.walkCursor
+        if not stepForward(walkCursor, ctx, ctx.walkNode):
+          break
+        ctx.walkCursor = walkCursor
+        ctx.walkIndex += 1
+    ctx.renderedCursors.add(ctx.walkCursor.clone())
+    treeTableField(b, ctx, itemIndex)
+  except:
+    discard
 
 proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions, rowRenderer: TreeTableRowRenderer) =
   ## Builds a virtualized tree table using the complete options object.

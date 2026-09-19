@@ -184,7 +184,7 @@ proc beginFontRenderFrame*(r: var FontRender) {.inline, raises: [].} =
   r.glyphPackingDeferredCount = 0
   let cacheCapacity = max(1, r.textMeshCacheCapacity)
   # LRU eviction: head.next is the least-recently-used node.
-  while r.textMeshCache.len > cacheCapacity:
+  for _ in 0 ..< (r.textMeshCache.len - cacheCapacity):
     let head = r.textMeshLruHead
     if head != nil:
       var oldest = head.next

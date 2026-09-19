@@ -17,7 +17,7 @@ export colorpicker, textfield
 
 include nuigi/util/compat2
 
-type UiVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall.}
+type UiVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall, gcsafe, raises: [].}
 
 proc virtualList*(b: var UiBuilder,
     scrollOffset: var float,
@@ -764,7 +764,7 @@ proc getOrCreateDropdownStorage(b: var UiBuilder, node: ptr UiNode): DropdownSto
   nodeStorage(b, node, storage)
   return storage
 
-proc dropdownPopupReposition(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall.} =
+proc dropdownPopupReposition(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall, gcsafe, raises: [].} =
   if rawData == 0:
     return
   let ownerId = UiNodeId(uint64(rawData))
@@ -1181,7 +1181,7 @@ type UiVirtualListData* = object
   buildItem*: UiVirtualListItemProc
   buildItemUserData*: int
 
-proc virtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
+proc virtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) {.gcsafe, raises: [].} =
   prof("virtualListDeferredBuild")
   if rawData == 0:
     return

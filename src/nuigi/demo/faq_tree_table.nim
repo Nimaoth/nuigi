@@ -103,7 +103,7 @@ proc createFaq(): FaqPost =
 proc faqCursor(root: FaqPost): FaqCursor =
   FaqCursor(post: root, fieldName: root.body, path: @[])
 
-method clone*(cursor: FaqCursor): TreeCursor =
+method clone*(cursor: FaqCursor): TreeCursor {.gcsafe, raises: [].} =
   let copy = FaqCursor(
     post: cursor.post,
     fieldName: cursor.fieldName,
@@ -189,7 +189,7 @@ proc faqKindLabel(kind: FaqPostKind): string =
   of FaqAnswer: "Answer"
 
 proc renderFaqRow(
-    b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+    b: var UiBuilder, cursor: TreeCursor, index: int) {.nimcall, gcsafe, raises: [].} =
   let faq = FaqCursor(cursor)
   let post = faq.post
   b.node:

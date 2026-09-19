@@ -14,6 +14,8 @@ when defined(nimony):
 
 import nuigi/widgets/tree_table, nuigi/debug/profiler
 
+{.push gcsafe, raises: [].}
+
 type
   FileSystemEntryKind* = enum
     File, Folder
@@ -116,24 +118,27 @@ proc listEntries(cache: FileSystemCache, directoryPath: string): ptr seq[string]
   if directoryPath in cache.listings:
     return cache.listings.mgetOrPut(directoryPath, @[]).addr
   var entries: seq[string] = @[]
-  if dirExists(directoryPath):
-    when defined(nimony):
-      try:
-        for kind, entryPath in walkDir(path(directoryPath)):
-          let entryPathString = $entryPath
-          entries.add(extractFilename(entryPathString))
-          cache.kinds[entryPathString] =
+  try:
+    if dirExists(directoryPath):
+      when defined(nimony):
+        try:
+          for kind, entryPath in walkDir(path(directoryPath)):
+            let entryPathString = $entryPath
+            entries.add(extractFilename(entryPathString))
+            cache.kinds[entryPathString] =
+              if kind == pcDir or kind == pcLinkToDir: Folder else: File
+        except:
+          discard
+      else:
+        for kind, entryPath in walkDir(directoryPath):
+          entries.add(extractFilename(entryPath))
+          cache.kinds[entryPath] =
             if kind == pcDir or kind == pcLinkToDir: Folder else: File
-      except:
-        discard
-    else:
-      for kind, entryPath in walkDir(directoryPath):
-        entries.add(extractFilename(entryPath))
-        cache.kinds[entryPath] =
-          if kind == pcDir or kind == pcLinkToDir: Folder else: File
-    cache.kinds[directoryPath] = Folder
-    entries.sort(system.cmp[string])
-  cache.listings[directoryPath] = entries
+      cache.kinds[directoryPath] = Folder
+      entries.sort(system.cmp[string])
+    cache.listings[directoryPath] = entries
+  except:
+    discard
   return cache.listings.mgetOrPut(directoryPath, @[]).addr
 
 method clone*(c: FileSystemCursor): TreeCursor =

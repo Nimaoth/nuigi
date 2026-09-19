@@ -52,8 +52,8 @@ proc profSampleFn*(x: float32, userData: int): float32 =
   let s = clamp(userData, 0, MaxPlotStats - 1)
   return profPlotSampleData[s][i]
 
-when defined(profiler) and not defined(nimony):
-  proc buildFlameDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
+when defined(nuigiProfiler) and not defined(nimony):
+  proc buildFlameDeferredImpl(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, raises: [].} =
     prof "buildFlameDeferred"
     if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
       return
@@ -66,7 +66,7 @@ when defined(profiler) and not defined(nimony):
     if contentSize.x <= 0 or contentSize.y <= 0:
       return
 
-    let nowTicks = lastEventTimestamp("frame", gprof.frameIndex)
+    let nowTicks = lastEventTimestamp("frame", getProfiler().frameIndex)
     let now = nowTicks.float64 / NS_PER_US.float64
     let width = contentSize.x
     let xOffset: float32 = width - 25.0'f32
@@ -76,10 +76,10 @@ when defined(profiler) and not defined(nimony):
 
     proc timeStampToX(timestamp, now: float64, xOffset: float32): float32 =
       let offset = -(now - timestamp)
-      return offset.float32 * gprof.scaleX + xOffset + gprof.scrollX
+      return offset.float32 * getProfiler().scaleX + xOffset + getProfiler().scrollX
 
     proc pixelToTimestamp(x, now: float64, xOffset: float32): float64 =
-      let offset = (x - xOffset.float64 - gprof.scrollX.float64) / gprof.scaleX.float64
+      let offset = (x - xOffset.float64 - getProfiler().scrollX.float64) / getProfiler().scaleX.float64
       return now + offset
 
     # --- interaction (zoom / pan) using the previous frame's node position ---------
@@ -93,16 +93,16 @@ when defined(profiler) and not defined(nimony):
     if b.previousOutput.scrolledId == b.currentNode.id:
       let input = b.frameCtx.input
       if ModAlt in input.modsDown:
-        gprof.scrollX += input.wheel.y * 20.0'f32
+        getProfiler().scrollX += input.wheel.y * 20.0'f32
       else:
         let mts = pixelToTimestamp(mouseLocal.x.float64, now, xOffset)
-        gprof.scaleX *= (1.0'f32 + input.wheel.y * 0.1'f32)
-        if gprof.scaleX < 0.001'f32:
-          gprof.scaleX = 0.001'f32
-        if gprof.scaleX > 1000.0'f32:
-          gprof.scaleX = 1000.0'f32
+        getProfiler().scaleX *= (1.0'f32 + input.wheel.y * 0.1'f32)
+        if getProfiler().scaleX < 0.001'f32:
+          getProfiler().scaleX = 0.001'f32
+        if getProfiler().scaleX > 1000.0'f32:
+          getProfiler().scaleX = 1000.0'f32
         let newX = timeStampToX(mts, now, xOffset)
-        gprof.scrollX += mouseLocal.x - newX
+        getProfiler().scrollX += mouseLocal.x - newX
 
     # --- gather visible frames -------------------------------------------------------
     type RectInfo = tuple
@@ -148,8 +148,8 @@ when defined(profiler) and not defined(nimony):
     # --- emit custom render commands for the flame graph --------------------------
     let cap = max(1, rects.len * 2)
     var commands = b.frame.arena[].allocEmptyArray(cap, UiRenderCommand)
-    let record = gprof.record
-    gprof.record = false
+    let record = getProfiler().record
+    getProfiler().record = false
     for r in rects:
       let x = min(r.x1, r.x2)
       let w = abs(r.x2 - r.x1)
@@ -189,21 +189,25 @@ when defined(profiler) and not defined(nimony):
         discard b.textColor(rgba(0.0'f32, 0.0'f32, 0.0'f32, 1.0'f32)).fontSize(12).padding(1)
         discard b.text(label)
         if b.wasRightClicked(b.currentNode):
-          let i = gprof.plottedStats.find(r.tag)
+          let i = getProfiler().plottedStats.find(r.tag)
           if i != -1:
-            gprof.plottedStats.del(i)
+            getProfiler().plottedStats.del(i)
           else:
-            gprof.plottedStats.add(r.tag)
-          profPlottedStatsCsv = gprof.plottedStats.join(",")
+            getProfiler().plottedStats.add(r.tag)
+          profPlottedStatsCsv = getProfiler().plottedStats.join(",")
         if b.wasHovered(b.currentNode):
           b.tooltip:
             discard b.fit().padding(4)
             discard b.backgroundColor(b.themeStyle(UiStyleIndexTooltip)[].fillColor).borderWidth(1).borderColor(b.themeStyle(UiStyleIndexTooltip)[].borderColor)
             b.label(r.tag & " " & $(r.ms) & "ms")
 
-    gprof.record = record
+    getProfiler().record = record
 
-  proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) =
+  proc buildFlameDeferred(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, gcsafe, raises: [].} =
+    {.gcsafe.}:
+      buildFlameDeferredImpl(b, nodeIdx, userData)
+
+  proc buildPlotDeferredImpl(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, gcsafe, raises: [].} =
     prof "buildPlotDeferred"
     if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
       return
@@ -216,15 +220,15 @@ when defined(profiler) and not defined(nimony):
     if contentSize.x <= 0 or contentSize.y <= 0:
       return
 
-    if gprof.stopOnShow and b.previousNodeIndex(b.currentNode.id, nodeIdx) == -1:
-      gprof.record = false
+    if getProfiler().stopOnShow and b.previousNodeIndex(b.currentNode.id, nodeIdx) == -1:
+      getProfiler().record = false
 
-    if gprof.plottedStats.len == 0:
-      gprof.plottedStats = @["frame", "tick"]
-    if gprof.timeHistory.len != gprof.plottedStats.len:
-      gprof.timeHistory.setLen(gprof.plottedStats.len)
+    if getProfiler().plottedStats.len == 0:
+      getProfiler().plottedStats = @["frame", "tick"]
+    if getProfiler().timeHistory.len != getProfiler().plottedStats.len:
+      getProfiler().timeHistory.setLen(getProfiler().plottedStats.len)
 
-    let n = gprof.timeHistory[0].len
+    let n = getProfiler().timeHistory[0].len
     let fi = frameTimeIndex
 
     let lineColors = [
@@ -241,35 +245,35 @@ when defined(profiler) and not defined(nimony):
     ]
 
     let nodeAbs = b.absoluteNodePos(nodeIdx)
-    let statCount = min(gprof.plottedStats.len, MaxPlotStats)
+    let statCount = min(getProfiler().plottedStats.len, MaxPlotStats)
     profPlotSampleCount = n
 
     # fill one sample buffer per plotted stat (newest sample at the right edge)
     for s in 0 ..< statCount:
       for i in 0 ..< n:
         let sampleIdx = (fi - i + n) mod n
-        profPlotSampleData[s][profPlotSampleData[s].len - i - 1] = gprof.timeHistory[s][sampleIdx]
+        profPlotSampleData[s][profPlotSampleData[s].len - i - 1] = getProfiler().timeHistory[s][sampleIdx]
 
     var series: array[MaxPlotStats, PlotSeries]
     for s in 0 ..< statCount:
       series[s] = PlotSeries(
         fn: profSampleFn,
         userData: s,
-        label: uiString(gprof.plottedStats[s]),
+        label: uiString(getProfiler().plottedStats[s]),
         lineColor: lineColors[s mod lineColors.len],
         fillTopColor: fillColors[s mod fillColors.len],
         fillBottomColor: rgba(0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32),
       )
 
     if b.previousOutput.scrolledId == b.currentNode.id:
-      gprof.plotScale *= (1.0'f32 - b.frameCtx.input.wheel.y * 0.1'f32)
+      getProfiler().plotScale *= (1.0'f32 - b.frameCtx.input.wheel.y * 0.1'f32)
 
     let commands = buildPlotVertices(
       b,
       nodeAbs,
       contentSize,
       vec2(0.0'f32, (n - 1).float32),
-      vec2(0.0'f32, gprof.plotScale),
+      vec2(0.0'f32, getProfiler().plotScale),
       series.toOpenArray(0, statCount - 1),
       resolution = 500,
       lineThickness = 1.5'f32,
@@ -278,35 +282,39 @@ when defined(profiler) and not defined(nimony):
 
     discard b.customRenderCommands(commands)
 
+  proc buildPlotDeferred(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall, gcsafe, raises: [].} =
+    {.gcsafe.}:
+      buildPlotDeferredImpl(b, nodeIdx, userData)
+
 proc buildNuiProfiler*(b: var UiBuilder) =
   ## Build the nuigi-based profiler UI (flame graph + per-tag time plot).
   ## Reference implementation: `drawProfiler` in `profiler.nim` (dear imgui renderer).
-  when defined(profiler) and not defined(nimony):
+  when defined(nuigiProfiler) and not defined(nimony):
     prof "buildNuiProfiler"
     b.layoutVertical("nuigi-profiler"):
       discard b.fillX().fitY().gap(4).padding(4)
 
       b.layoutHorizontal("profiler-controls-1"):
         discard b.fillX().fitY().gap(6)
-        if b.checkbox("Record", gprof.record):
+        if b.checkbox("Record", getProfiler().record):
           discard
-        if b.checkbox("Stop on hitch", gprof.stopOnThreshold):
+        if b.checkbox("Stop on hitch", getProfiler().stopOnThreshold):
           discard
-        if b.checkbox("Stop on show", gprof.stopOnShow):
+        if b.checkbox("Stop on show", getProfiler().stopOnShow):
           discard
         if b.button("Reset"):
-          gprof.scaleX = 0.7'f32
-          gprof.scrollX = 0.0'f32
-        profFrameIndexFloat = gprof.frameIndex.float32
+          getProfiler().scaleX = 0.7'f32
+          getProfiler().scrollX = 0.0'f32
+        profFrameIndexFloat = getProfiler().frameIndex.float32
         b.layoutHorizontal:
           discard b.fitX().fitY()
           b.label("Frame")
           if b.dragFloat(profFrameIndexFloat, 0.5'f32, 0.0'f32, 50.0'f32):
-            gprof.frameIndex = profFrameIndexFloat.int32
+            getProfiler().frameIndex = profFrameIndexFloat.int32
         b.layoutHorizontal:
           discard b.fitX().fitY()
           b.label("Scale")
-          if b.dragFloat(gprof.scaleX, 1, 0.0'f32, 1000.0'f32):
+          if b.dragFloat(getProfiler().scaleX, 1, 0.0'f32, 1000.0'f32):
             discard
 
       b.layoutHorizontal("profiler-controls-2"):
@@ -314,14 +322,14 @@ proc buildNuiProfiler*(b: var UiBuilder) =
         b.layoutHorizontal:
           discard b.fitX().fitY()
           b.label("Plot Scale")
-          if b.dragFloat(gprof.plotScale, 0.5'f32, 1.0'f32, 32.0'f32):
+          if b.dragFloat(getProfiler().plotScale, 0.5'f32, 1.0'f32, 32.0'f32):
             discard
         if profPlottedStatsCsv.len == 0:
-          profPlottedStatsCsv = gprof.plottedStats.join(",")
+          profPlottedStatsCsv = getProfiler().plottedStats.join(",")
         if b.textField(profPlottedStatsCsv, "comma-separated tags, e.g. frame, tickGame, drawEntities"):
           let parsed = parsePlottedStatsCsv(profPlottedStatsCsv)
           if parsed.len > 0:
-            gprof.plottedStats = parsed
+            getProfiler().plottedStats = parsed
 
       b.node("profiler-plot"):
         discard b.fillX().height(300.0'f32).maskChildren().scrollable()

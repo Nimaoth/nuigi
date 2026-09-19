@@ -1,6 +1,6 @@
 ## Compile-time optional frame and scoped-event profiler.
 ##
-## With `-d:profiler` under Nim 2, instrumentation records timestamped begin/end
+## With `-d:nuigiProfiler` under Nim 2, instrumentation records timestamped begin/end
 ## events and rolling frame statistics in global buffers for `profiler_ui`.
 ## Without that define, or under Nimony, the public timing hooks collapse to
 ## inexpensive no-ops so instrumented call sites need no conditional code.
@@ -10,16 +10,16 @@ import nuigi/core/timer
 
 include nuigi/util/compat2
 
-when defined(profiler) and not defined(nimony):
+when defined(nuigiProfiler) and not defined(nimony):
   import nuigi/core/vecmath
 
 proc profNow*(): uint64 =
-  when defined(profiler) and not defined(nimony):
+  when defined(nuigiProfiler) and not defined(nimony):
     return timer.getTicksNS()
   else:
     return 0
 
-when defined(profiler) and not defined(nimony):
+when defined(nuigiProfiler) and not defined(nimony):
 
   let TimestampEndBit*: uint64 = 1'u64 shl 63
   let TimestampEndMask*: uint64 = uint64.high shr 1
@@ -61,7 +61,11 @@ when defined(profiler) and not defined(nimony):
     frameStart: 0,
   )
 
-when defined(profiler) and not defined(nimony):
+  proc getProfiler*(): var Profiler {.gcsafe, inline.} =
+    {.gcsafe.}:
+      return gprof
+
+when defined(nuigiProfiler) and not defined(nimony):
   template prof*(tag: string) =
     # todo: make this smaller
     when defined(nimony) or defined(nlvm):
@@ -70,26 +74,28 @@ when defined(profiler) and not defined(nimony):
       const info = instantiationInfo()
       const location = (tag, info.filename, info.line.uint32, info.column.uint32)
 
-    let record = gprof.record
-    if record:
-      eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
-      inc eventHistoryIndex
-      if eventHistoryIndex >= eventHistory.len:
-        eventHistoryIndex = 0
-
-    defer:
+    {.gcsafe.}:
+      let record = gprof.record
       if record:
-        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
+        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
         inc eventHistoryIndex
         if eventHistoryIndex >= eventHistory.len:
           eventHistoryIndex = 0
+
+    defer:
+      {.gcsafe.}:
+        if record:
+          eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
+          inc eventHistoryIndex
+          if eventHistoryIndex >= eventHistory.len:
+            eventHistoryIndex = 0
 
     discard
 else:
   template prof*(tag: string) =
     discard
 
-when defined(profiler) and not defined(nimony):
+when defined(nuigiProfiler) and not defined(nimony):
   template profd*(tag: string) =
     when defined(nimony) or defined(nlvm):
       let location = (tag, "", 0.uint32, 0.uint32)
@@ -97,75 +103,79 @@ when defined(profiler) and not defined(nimony):
       const info = instantiationInfo()
       let location = (tag, info.filename, info.line.uint32, info.column.uint32)
 
-    let record = gprof.record
-    if record:
-      eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
-      inc eventHistoryIndex
-      if eventHistoryIndex >= eventHistory.len:
-        eventHistoryIndex = 0
-
-    defer:
+    {.gcsafe.}:
+      let record = gprof.record
       if record:
-        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
+        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
         inc eventHistoryIndex
         if eventHistoryIndex >= eventHistory.len:
           eventHistoryIndex = 0
+
+    defer:
+      {.gcsafe.}:
+        if record:
+          eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
+          inc eventHistoryIndex
+          if eventHistoryIndex >= eventHistory.len:
+            eventHistoryIndex = 0
 
     discard
 else:
   template profd*(tag: string) =
     discard
 
-when defined(profiler) and not defined(nimony):
+when defined(nuigiProfiler) and not defined(nimony):
   proc lastEventTimestamp*(tag: string, frameIndex: int): uint64 =
-    when defined(profiler) and not defined(nimony):
+    {.gcsafe.}:
+      when defined(nuigiProfiler) and not defined(nimony):
+        var i = gprof.frameStart - 1
+        if i < 0:
+          i = eventHistory.high
+        var frameIndex = frameIndex
+        while i != gprof.frameStart:
+          let event {.cursor.} = eventHistory[i]
+          if event.timestamp == 0:
+            break
+
+          if (eventHistory[i].timestamp and TimestampEndBit) != 0 and eventHistory[i].location.tag == tag:
+            if frameIndex == 0:
+              return eventHistory[i].timestamp and TimestampEndMask
+            dec frameIndex
+
+          dec i
+          if i < 0:
+            i = eventHistory.high
+
+        return profNow()
+      else:
+        return 0
+
+  iterator profileFrames*(): (int, int, ProfFrame) {.sideEffect.} =
+    {.gcsafe.}:
+      var stack = newSeq[ProfEvent](0)
       var i = gprof.frameStart - 1
       if i < 0:
         i = eventHistory.high
-      var frameIndex = frameIndex
       while i != gprof.frameStart:
-        let event {.cursor.} = eventHistory[i]
+        let event = eventHistory[i].addr
         if event.timestamp == 0:
           break
 
-        if (eventHistory[i].timestamp and TimestampEndBit) != 0 and eventHistory[i].location.tag == tag:
-          if frameIndex == 0:
-            return eventHistory[i].timestamp and TimestampEndMask
-          dec frameIndex
+        let isEnd = (event.timestamp and TimestampEndBit) != 0
+        if isEnd:
+          stack.add(event[])
+        else:
+          if stack.len > 0:
+            let last = stack.pop()
+            yield (i, stack.len, ProfFrame(first: event.timestamp, last: last.timestamp and TimestampEndMask, location: event.location))
 
         dec i
         if i < 0:
           i = eventHistory.high
 
-      return profNow()
-    else:
-      return 0
-
-  iterator profileFrames*(): (int, int, ProfFrame) {.sideEffect.} =
-    var stack = newSeq[ProfEvent](0)
-    var i = gprof.frameStart - 1
-    if i < 0:
-      i = eventHistory.high
-    while i != gprof.frameStart:
-      let event = eventHistory[i].addr
-      if event.timestamp == 0:
-        break
-
-      let isEnd = (event.timestamp and TimestampEndBit) != 0
-      if isEnd:
-        stack.add(event[])
-      else:
-        if stack.len > 0:
-          let last = stack.pop()
-          yield (i, stack.len, ProfFrame(first: event.timestamp, last: last.timestamp and TimestampEndMask, location: event.location))
-
-      dec i
-      if i < 0:
-        i = eventHistory.high
-
-  # while stack.len > 0:
-  #   let last = stack.pop()
-  #   yield (i, stack.len, ProfFrame(first: 0, last: last.timestamp and TimestampEndMask, location: last.location))
+    # while stack.len > 0:
+    #   let last = stack.pop()
+    #   yield (i, stack.len, ProfFrame(first: 0, last: last.timestamp and TimestampEndMask, location: last.location))
 
   proc setCsvBuffer*(buf: var array[1024, char], values: openArray[string]) =
     for i in 0..<buf.len:
@@ -202,38 +212,39 @@ when defined(profiler) and not defined(nimony):
         result.add(tag)
 
   proc profilerBeginFrame*(setFrameStart = true) =
-    proc toMs(ticks: uint64): float64 =
-      return ticks.float64 / 1000000
-    if gprof.record:
-      let nowTicks = lastEventTimestamp("frame", gprof.frameIndex)
-      if setFrameStart:
-        gprof.frameStart = eventHistoryIndex
-      for i in 0..<gprof.timeHistory.len:
-        gprof.timeHistory[i][frameTimeIndex] = 0
+    {.gcsafe.}:
+      proc toMs(ticks: uint64): float64 =
+        return ticks.float64 / 1000000
+      if gprof.record:
+        let nowTicks = lastEventTimestamp("frame", gprof.frameIndex)
+        if setFrameStart:
+          gprof.frameStart = eventHistoryIndex
+        for i in 0..<gprof.timeHistory.len:
+          gprof.timeHistory[i][frameTimeIndex] = 0
 
-      var events: seq[tuple[depth: int, frame: ProfFrame]] = @[]
-      for (index, depth, frame) in profileFrames():
-        if frame.last <= nowTicks:
-          for i, p in gprof.plottedStats:
-            if frame.location.tag.startsWith(p):
-              events.add (depth: depth, frame: frame)
+        var events: seq[tuple[depth: int, frame: ProfFrame]] = @[]
+        for (index, depth, frame) in profileFrames():
+          if frame.last <= nowTicks:
+            for i, p in gprof.plottedStats:
+              if frame.location.tag.startsWith(p):
+                events.add (depth: depth, frame: frame)
 
-          if depth == 0 and events.len > 1:
-            break
+            if depth == 0 and events.len > 1:
+              break
 
-      var current = (depth: int.high, frame: ProfFrame())
-      for i in countdown(events.len - 1, 0):
-        let (depth, frame) = events[i]
-        if current.depth < int.high and frame.first > current.frame.last:
-          current = (depth: int.high, frame: ProfFrame())
-        if depth > current.depth and current.frame.location.tag == frame.location.tag:
-          continue
-        if frame.last <= nowTicks:
-          for i, p in gprof.plottedStats:
-            if frame.location.tag.startsWith(p):
-              current = (depth, frame)
-              gprof.timeHistory[i][frameTimeIndex] += toMs(frame.last - frame.first).float32
+        var current = (depth: int.high, frame: ProfFrame())
+        for i in countdown(events.len - 1, 0):
+          let (depth, frame) = events[i]
+          if current.depth < int.high and frame.first > current.frame.last:
+            current = (depth: int.high, frame: ProfFrame())
+          if depth > current.depth and current.frame.location.tag == frame.location.tag:
+            continue
+          if frame.last <= nowTicks:
+            for i, p in gprof.plottedStats:
+              if frame.location.tag.startsWith(p):
+                current = (depth, frame)
+                gprof.timeHistory[i][frameTimeIndex] += toMs(frame.last - frame.first).float32
 
-      inc frameTimeIndex
-      if frameTimeIndex == gprof.timeHistory[0].len:
-        frameTimeIndex = 0
+        inc frameTimeIndex
+        if frameTimeIndex == gprof.timeHistory[0].len:
+          frameTimeIndex = 0

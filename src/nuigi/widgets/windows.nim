@@ -32,7 +32,7 @@ type WindowSpaceStorage* = ref object of UiNodeStorageData
   windows*: seq[WindowActivity]
   activationCounter*: uint64
 
-proc getOrCreateWindowStorage(b: var UiBuilder, node: ptr UiNode, defaultPos, defaultSize: Vec2): WindowStorage =
+proc getOrCreateWindowStorage(b: var UiBuilder, node: ptr UiNode, defaultPos, defaultSize: vecmath.Vec2): WindowStorage =
   let existing = nodeStorageGet(b, node)
   if existing != nil:
     return cast[WindowStorage](existing)
@@ -103,7 +103,7 @@ proc windowSpaceDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
 
 proc windowSpace*(b: var UiBuilder) =
   b.node("windows"):
-    discard b.fillX().fillY()
+    discard b.fillX().fillY().noHover()
     b.windows = b.currentNode.id
     discard b.getOrCreateWindowSpaceStorage(b.currentNode)
     discard b.deferBuild(windowSpaceDeferredBuild)
@@ -254,8 +254,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
       let windowNodeIndex = b.stack[^1]
       let curNode = b.currentNode
       let windowStorage = getOrCreateWindowStorage(b, curNode,
-        vec2(inX, inY),
-        vec2(max(minWindowW, width), max(minWindowH, height)))
+        vecmath.vec2(inX, inY),
+        vecmath.vec2(max(minWindowW, width), max(minWindowH, height)))
       b.configureWindowNode(windowStorage)
       if b.backendType == UiBackendType.Terminal:
         discard b.padding(1)

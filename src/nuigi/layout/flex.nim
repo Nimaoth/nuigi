@@ -105,9 +105,9 @@ proc nodeFlex*(b: UiBuilder, node: ptr UiNode, childLayout = false): ptr UiNodeF
   else:
     addr(defaultFlexStorage)
 
-proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr UiNodeFlex) {.raises: [].}
+proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr UiNodeFlex) {.gcsafe, raises: [].}
 
-proc flexCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
+proc flexCustomLayout(b: var UiBuilder, nodeIdx: int, userData: int) {.gcsafe, raises: [].} =
   let parentFlex = cast[ptr UiNodeFlex](userData)
   if parentFlex == nil:
     return
