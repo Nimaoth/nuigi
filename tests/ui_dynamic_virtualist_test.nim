@@ -1,4 +1,5 @@
-import nuigi, nuigi/widgets/dynamic_virtuallist, nuigi/core/vecmath
+import nuigi, nuigi/widgets, nuigi/widgets/[dynamic_virtuallist, list_table],
+  nuigi/core/vecmath
 
 {.passL: "-Lbuild".}
 
@@ -44,6 +45,16 @@ proc buildVariableHeightItem(b: var UiBuilder, itemIndex: int, userData: int) =
     else:
       50.0'f32
   discard b.height(itemHeight)
+
+proc buildTableRow(b: var UiBuilder, itemIndex: int, userData: int) =
+  discard itemIndex
+  discard userData
+  b.node:
+    discard b.size(10.0'f32, 20.0'f32)
+  b.node:
+    discard b.size(60.0'f32, 30.0'f32)
+  b.node:
+    discard b.size(20.0'f32, 10.0'f32)
 
 proc postLayoutVariableHeightItems(
     b: var UiBuilder, nodeIdx: int, userData: int) {.raises: [].} =
@@ -290,10 +301,42 @@ proc testUpwardEntryHeightChangeAnchorsFollowingItem() =
   require(abs(b.frame.nodes[secondItemIndex].pos.y - 10.0'f32) < 0.001,
     "the previously visible following item should remain at the same position")
 
+proc testListTableAlignsRenderedColumns() =
+  var b = newBuilder(fixedMeasureText)
+  discard b.beginUiFrame(300.0'f32, 100.0'f32)
+  discard b.listTable(10, 30.0'f32, [
+    tableColumnFixed(40.0'f32),
+    tableColumnFit(),
+    tableColumnFill(),
+  ], buildTableRow, columnGap = 5.0'f32)
+  b.endUiFrame(buildRenderCommands = false)
+
+  let viewportIndex = b.dynamicListStorageNodeIndex()
+  let rowIndex = b.firstChildIndex(viewportIndex)
+  require(rowIndex >= 0, "list table should build a visible row")
+  let firstCell = b.firstChildIndex(rowIndex)
+  let secondCell = b.frame.nodes[firstCell].nextSibling
+  let thirdCell = b.frame.nodes[secondCell].nextSibling
+  require(b.frame.nodes[firstCell].size.x == 40.0'f32,
+    "fixed list-table column width mismatch")
+  require(b.frame.nodes[secondCell].size.x == 60.0'f32,
+    "fit list-table column should use the widest rendered cell")
+  require(b.frame.nodes[thirdCell].size.x == 180.0'f32,
+    "fill list-table column should consume remaining viewport width")
+  require(b.frame.nodes[secondCell].pos.x == 45.0'f32 and
+      b.frame.nodes[thirdCell].pos.x == 110.0'f32,
+    "list-table cells should share aligned column positions")
+  require(b.frame.nodes[rowIndex].size.y == 30.0'f32,
+    "list-table row should fit its tallest cell")
+  require(b.frame.nodes[firstCell].pos.y == 5.0'f32 and
+      b.frame.nodes[thirdCell].pos.y == 10.0'f32,
+    "list-table cells should be vertically centered")
+
 proc runTests() =
   testOnlyVisibleItemsAreBuiltAndMeasured()
   testPostLayoutHeightUpdatesCacheAndScrollAnchor()
   testUpwardEntryHeightChangeAnchorsFollowingItem()
+  testListTableAlignsRenderedColumns()
   testCachedHeightsSurviveAndGuideFollowingFrame()
   testWheelScrollContinuesWithMomentum()
   testTerminalWheelScrollsOneRow()
