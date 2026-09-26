@@ -27,7 +27,7 @@ type UiDynamicVirtualListStorage* = ref object of UiNodeStorageData
   customRowLayout: UiCustomLayoutProc
   customRowLayoutUserData: int
   previousFirstVisibleItem: int
-  viewportHeight: float32
+  viewportHeight*: float32
   scrollbarTrackIndex: int
   scrollbarThumbIndex: int
 
@@ -115,6 +115,92 @@ proc centerItem*(storage: UiDynamicVirtualListStorage, itemIndex: int, viewportH
 proc centerItem*(storage: UiDynamicVirtualListStorage, itemIndex: int) =
   ## Centers an item using the viewport height measured during the previous frame.
   storage.centerItem(itemIndex, storage.viewportHeight)
+
+proc scrollByY*(storage: UiDynamicVirtualListStorage, deltaY: float32) =
+  ## Relative pixel scroll (e.g. wheel / scrollLines equivalents). The deferred
+  ## build clamps the result into range.
+  if storage == nil:
+    return
+  storage.scrollOffsetY += deltaY
+  storage.scrollVelocityY = 0.0'f32
+
+proc scrollToItemAtOffset*(storage: UiDynamicVirtualListStorage, itemIndex: int,
+    yOffset: float32, viewportHeight: float32 = 0.0'f32): bool =
+  ## Places `itemIndex` at `yOffset` px from the top of the viewport
+  ## (mirrors `ScrollBox.scrollToY`). Returns false when the viewport height is
+  ## not known yet so the caller can keep the request pending.
+  if storage == nil or storage.itemCount <= 0:
+    return false
+  let heightHint = max(1.0'f32, storage.heightHint)
+  let vp = if viewportHeight > 0.0'f32: viewportHeight else: storage.viewportHeight
+  if vp <= 0.0'f32:
+    return false
+  let clampedItemIndex = clamp(itemIndex, 0, storage.itemCount - 1)
+  let itemTop = storage.estimatedItemTop(clampedItemIndex, heightHint)
+  let maxScroll = max(0.0'f32,
+    storage.estimatedTotalHeight(storage.itemCount, heightHint) - vp)
+  storage.scrollOffsetY = clamp(itemTop - yOffset, 0.0'f32, maxScroll)
+  storage.scrollVelocityY = 0.0'f32
+  true
+
+proc ensureItemVisible*(storage: UiDynamicVirtualListStorage, itemIndex: int,
+    viewportHeight: float32, margin: float32): bool =
+  ## Minimal scroll to bring `itemIndex` into view with `margin` px from the
+  ## top/bottom edges (mirrors the non-center branch of `ScrollBox.scrollTo`).
+  ## Returns false when the viewport height is not known yet.
+  if storage == nil or storage.itemCount <= 0:
+    return false
+  let vp = if viewportHeight > 0.0'f32: viewportHeight else: storage.viewportHeight
+  if vp <= 0.0'f32:
+    return false
+  let heightHint = max(1.0'f32, storage.heightHint)
+  let clampedItemIndex = clamp(itemIndex, 0, storage.itemCount - 1)
+  let itemTop = storage.estimatedItemTop(clampedItemIndex, heightHint)
+  let itemHeight = storage.estimatedItemHeight(clampedItemIndex, heightHint)
+  let itemBottom = itemTop + itemHeight
+  let maxScroll = max(0.0'f32,
+    storage.estimatedTotalHeight(storage.itemCount, heightHint) - vp)
+  let m = clamp(margin, 0.0'f32, max(0.0'f32, vp * 0.5'f32 - itemHeight * 0.5'f32))
+  if itemTop < storage.scrollOffsetY + m:
+    storage.scrollOffsetY = clamp(itemTop - m, 0.0'f32, maxScroll)
+    storage.scrollVelocityY = 0.0'f32
+  elif itemBottom > storage.scrollOffsetY + vp - m:
+    var targetY = vp - m - itemHeight
+    targetY = max(targetY, m)
+    # Match ScrollBox: place item top at targetY.
+    storage.scrollOffsetY = clamp(itemTop - targetY, 0.0'f32, maxScroll)
+    storage.scrollVelocityY = 0.0'f32
+  true
+
+proc scrollToItem*(storage: UiDynamicVirtualListStorage, itemIndex: int,
+    viewportHeight: float32, margin: float32, center: bool,
+    centerOffscreen: bool): bool =
+  ## Mirrors `ScrollBox.scrollTo(index, center, centerOffscreen)` for the
+  ## deferred list: centered scroll when `center`, centered only when offscreen
+  ## when `centerOffscreen`, otherwise minimal `ensureItemVisible` scroll.
+  ## Returns false when the viewport height is not known yet.
+  if storage == nil or storage.itemCount <= 0:
+    return false
+  let vp = if viewportHeight > 0.0'f32: viewportHeight else: storage.viewportHeight
+  if vp <= 0.0'f32:
+    return false
+  if center:
+    storage.centerItem(itemIndex, vp)
+    return true
+  let heightHint = max(1.0'f32, storage.heightHint)
+  let clampedItemIndex = clamp(itemIndex, 0, storage.itemCount - 1)
+  let itemTop = storage.estimatedItemTop(clampedItemIndex, heightHint)
+  let itemHeight = storage.estimatedItemHeight(clampedItemIndex, heightHint)
+  let itemBottom = itemTop + itemHeight
+  let m = clamp(margin, 0.0'f32, max(0.0'f32, vp * 0.5'f32 - itemHeight * 0.5'f32))
+  let visible = itemTop >= storage.scrollOffsetY + m and
+    itemBottom <= storage.scrollOffsetY + vp - m
+  if centerOffscreen and not visible:
+    storage.centerItem(clampedItemIndex, vp)
+    return true
+  if centerOffscreen and visible:
+    return true
+  return storage.ensureItemVisible(clampedItemIndex, vp, m)
 
 proc firstVisibleItem(storage: UiDynamicVirtualListStorage, itemCount: int,
     heightHint, scrollOffset: float32): int =
