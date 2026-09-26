@@ -9,11 +9,12 @@ import std/math
 import nuigi
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler
+import nuigi/widgets/collapsing_header
 import nuigi/widgets/colorpicker
 import nuigi/widgets/textfield
 
 import nuigi/layout/flex
-export colorpicker, textfield
+export collapsing_header, colorpicker, textfield
 
 include nuigi/util/compat2
 
