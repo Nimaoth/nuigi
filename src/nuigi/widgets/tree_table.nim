@@ -120,6 +120,7 @@ type
       ## Hover highlight. When custom, used verbatim; otherwise a theme hover
       ## color distinct from both alternating colors (`ButtonHover`).
     hasCustomHoverColor*: bool
+    expandCollapseButtons*: bool
 
   TreeTableLayout* = object
     ## Internal layout payload passed as `userData` to `treeTableColumnLayout`.
@@ -173,6 +174,7 @@ proc defaultTreeTableOptions*(): TreeTableOptions =
     highlightHoveredRow: true,
     hoverColor: UiColor(r: 0, g: 0, b: 0, a: 0),
     hasCustomHoverColor: false,
+    expandCollapseButtons: true,
   )
 
 proc initTreeTableOptions*(
@@ -1052,6 +1054,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) {.gcsafe.} 
           # Chevron mesh points right when collapsed and down when expanded.
           discard b.deferBuild(buildChevronDeferred, if isExpanded: 1 else: 0)
 
+  prof("rowRenderer")
   onRaiseQuit(e.rowRenderer(b, e.walkCursor, index))
 
 iterator tableCells(b: UiBuilder, rowIdx: int): int =
@@ -1507,19 +1510,20 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   except:
     return
 
-  b.layoutHorizontal:
-    discard b.fit()
-    if b.backendType == UiBackendType.Terminal:
-      discard b.gap(1)
-    else:
-      discard b.gapRelative(2.0'f32 / treeTableBaseFontSize)
-    if b.button("Expand all"):
-      startExpandAll(ctx)
-    if b.button("Collapse all"):
-      collapseAll(ctx)
-    if ctx.isExpandingAll():
-      b.label("Expanding..."):
-        discard b.alignCenter()
+  if options.expandCollapseButtons:
+    b.layoutHorizontal:
+      discard b.fit()
+      if b.backendType == UiBackendType.Terminal:
+        discard b.gap(1)
+      else:
+        discard b.gapRelative(2.0'f32 / treeTableBaseFontSize)
+      if b.button("Expand all"):
+        startExpandAll(ctx)
+      if b.button("Collapse all"):
+        collapseAll(ctx)
+      if ctx.isExpandingAll():
+        b.label("Expanding..."):
+          discard b.alignCenter()
 
   if ctx.isExpandingAll():
     if ctx.continueExpandAll():
@@ -1532,8 +1536,9 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
     let focusedRow = ctx.visibleRowIndex(focusedCursor)
     if focusedRow >= 0:
       ctx.listStorage.centerItem(focusedRow)
-  b.label("Items: " & $count):
-    discard b.fitX()
+  if options.expandCollapseButtons:
+    b.label("Items: " & $count):
+      discard b.fitX()
   let hasColumns = options.columns.len > 0
   let hasColumnLines = options.showColumnLines
   let hasIndentLines = options.showIndentationLines
