@@ -1970,7 +1970,7 @@ proc testTreeTableTreeTexts() =
     storage.initialized = true
     expandAll(storage)
     b.nodeStorage(b.currentNode, storage)
-    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.gcsafe, raises: [], nimcall.} =
       b.label(cursor.fieldName & ":"):
         discard b.fitX().fitY()
       b.node:
@@ -2055,7 +2055,7 @@ proc testTerminalTreeTableExpandSymbols() =
   b.node:
     discard b.fill()
     let cursor = newTreeCursor(2, 2)
-    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+    proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.gcsafe, raises: [], nimcall.} =
       b.label(cursor.fieldName):
         discard b.fit()
     b.treeTable(cursor, renderRow)
@@ -2088,7 +2088,7 @@ proc testTerminalTreeTableExpandSymbols() =
     let hiddenCursor = newTreeCursor(2, 2)
     var options = defaultTreeTableOptions()
     options.hideRoot = true
-    proc renderHiddenRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+    proc renderHiddenRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.gcsafe, raises: [], nimcall.} =
       b.label(cursor.fieldName):
         discard b.fit()
     hiddenRootBuilder.treeTable(hiddenCursor, options, renderHiddenRow)
