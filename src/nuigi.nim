@@ -2424,16 +2424,16 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     borderColor: grayBorder,
   )
   result[int(UiStyleIndexMenuItem) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: UiColor(r: 0.13'f32, g: 0.13'f32, b: 0.14'f32, a: 0.0'f32),
     borderColor: UiColor(r: 0.13'f32, g: 0.13'f32, b: 0.14'f32, a: 0.0'f32),
   )
   result[int(UiStyleIndexMenuItemHover) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: grayHover,
@@ -2480,39 +2480,37 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     borderColor: grayBorder,
   )
   result[int(UiStyleIndexRow) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 3.0'f32,
     fillColor: graySurface,
     borderColor: graySurface,
   )
   result[int(UiStyleIndexRowAlt) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 0.0'f32,
     cornerRadius: 3.0'f32,
     fillColor: graySurfaceHi,
     borderColor: graySurfaceHi,
   )
   result[int(UiStyleIndexTooltip) - 1] = UiStyle(
-    paddingX: 8.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: graySurface,
     borderColor: grayBorder,
   )
   result[int(UiStyleIndexAccent) - 1] = UiStyle(
-    paddingX: 6.0'f32,
-    paddingY: 6.0'f32,
+    paddingX: 4.0'f32,
+    paddingY: 2.0'f32,
     borderWidth: 1.0'f32,
     cornerRadius: 4.0'f32,
     fillColor: accent,
     borderColor: accent,
   )
-
-
 
 proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   result = newSeq[UiNodeText](UiTextStyleCount)
