@@ -69,6 +69,9 @@ proc alloc*(arena: var Arena, size: int, alignment: int = 0): pointer =
   assert bucket.len <= bucket.capacity
   return cast[pointer](alignedAddress)
 
+proc allocRaw*(arena: var Arena, size: int, alignment: int = 0): pointer =
+  alloc(arena, size, alignment)
+
 proc allocEmptyArray*[T](arena: var Arena, num: int, x: typedesc[T]): ArrayView[T] =
   assert num >= 0
   if num == 0:
