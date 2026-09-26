@@ -107,8 +107,8 @@ type
     vertices: seq[TextMeshVertex]
     lastUsedTick: uint64
     complete: bool
-    prev: TextMeshCacheEntry
-    next: TextMeshCacheEntry
+    prev {.cursor.}: TextMeshCacheEntry
+    next {.cursor.}: TextMeshCacheEntry
 
   FontRender* = object
     flags*: FontRenderFlags
@@ -1011,6 +1011,33 @@ proc storeTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangemen
     vertices: seq[TextMeshVertex], complete: bool): TextMesh {.raises: [].} =
   prof("storeTextMesh")
   result = TextMesh()
+
+  if r.textMeshCache.hasKey(key):
+    let entry = r.textMeshCache.getOrQuit(key)
+    entry.arrangement = arrangement
+    entry.pos = pos
+    entry.screenOffset = screenOffset
+    entry.color = color
+    entry.transform = transform
+    entry.flags = r.flags
+    entry.vertices = vertices
+    entry.lastUsedTick = r.textMeshCacheTick
+    entry.complete = complete
+
+    if entry != r.textMeshLruHead:
+      let head = r.textMeshLruHead
+      entry.prev.next = entry.next
+      entry.next.prev = entry.prev
+      entry.next = head.next
+      entry.prev = head
+      head.next.prev = entry
+      head.next = entry
+      r.textMeshLruHead = entry
+
+    if entry.vertices.len > 0:
+      result.data = cast[ptr UncheckedArray[TextMeshVertex]](entry.vertices[0].addr)
+      result.count = entry.vertices.len
+    return
 
   var entry = TextMeshCacheEntry(
     key: key,
