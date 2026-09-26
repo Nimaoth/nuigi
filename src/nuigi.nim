@@ -1534,8 +1534,9 @@ iterator nodeStorageParents*(b: var UiBuilder): UiNodeStorageData =
 
 proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's text data.
-  if b.currentNode.textIndex.int <= b.themeTextStyles.len:
-    let currentStyle = b.frame.texts[b.currentNode.textIndex]
+  let slot = int(b.currentNode.textIndex)
+  if slot > 0 and slot <= b.themeTextStyles.len:
+    let currentStyle = b.frame.texts[slot - 1]
     b.frame.texts.add(currentStyle)
     node.textIndex = b.frame.texts.len.uint16
     return b.frame.texts[^1]
@@ -1547,8 +1548,9 @@ proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inlin
 
 proc ensureNodeStyle*(b: var UiBuilder, node: ptr UiNode): var UiStyle {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's style data.
-  if b.currentNode.styleIndex.int <= b.themeStyles.len:
-    let currentStyle = b.frame.styles[b.currentNode.styleIndex]
+  let slot = int(b.currentNode.styleIndex)
+  if slot > 0 and slot <= b.themeStyles.len:
+    let currentStyle = b.frame.styles[slot - 1]
     b.frame.styles.add(currentStyle)
     node.styleIndex = b.frame.styles.len.uint16
     return b.frame.styles[^1]
