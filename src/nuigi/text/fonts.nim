@@ -96,7 +96,7 @@ type
     data*: nil ptr UncheckedArray[TextMeshVertex]
     count*: int
 
-  TextMeshCacheEntry = ref object
+  TextMeshCacheEntry {.acyclic.} = ref object
     key: uint64
     arrangement: UiTextArrangement
     pos: Vec2
@@ -107,8 +107,8 @@ type
     vertices: seq[TextMeshVertex]
     lastUsedTick: uint64
     complete: bool
-    prev {.cursor.}: TextMeshCacheEntry
-    next {.cursor.}: TextMeshCacheEntry
+    prev: TextMeshCacheEntry
+    next: TextMeshCacheEntry
 
   FontRender* = object
     flags*: FontRenderFlags
@@ -190,6 +190,9 @@ proc beginFontRenderFrame*(r: var FontRender) {.inline, raises: [].} =
       var oldest = head.next
       oldest.prev.next = oldest.next   # unlink oldest from the ring
       oldest.next.prev = oldest.prev
+      oldest.next = nil
+      oldest.prev = nil
+      oldest.vertices.setLen(0)
       r.textMeshCache.del(oldest.key)
   inc r.textMeshCacheTick
 

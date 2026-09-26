@@ -210,6 +210,12 @@ func murmurHash(x: openArray[char]): Hash =
   h1 = h1 xor (h1 shr 16)
   return cast[Hash](h1)
 
+func hash*(x: openArray[char]): Hash =
+  ## Efficient hashing of a char slice without allocating.
+  ## `hash(string)` below forwards to this so both owned strings and
+  ## borrowed views share the same hash values.
+  result = murmurHash(x)
+
 func hash*(x: string): Hash =
   ## Efficient hashing of strings.
   ##

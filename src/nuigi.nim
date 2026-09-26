@@ -34,9 +34,6 @@ type
     ## `CmdRawVertices` render commands. The UI does not interpret it; it is
     ## passed through to the renderer.
 
-const
-  textArrangementCacheCapacity = 512
-
 type
   UiFlag* = enum
     ## Per-node behavior flags stored in `UiFlags`. They drive layout
@@ -113,10 +110,19 @@ type
       ## Record events only for the node selected by `UiBuilder.traceNodeId`.
 
   UiString* = object ## Wrapper around string which caches the hash of the string.
+    ## `UiString` can either own its content (`value`) or borrow it via
+    ## `viewData`/`viewLen`. When `viewData` is non-nil the view is used
+    ## instead of `value`, so callers can pass slices without copying or
+    ## allocating. Borrowed views must outlive the frame they are used in;
+    ## the text arrangement cache always copies views into `value` on insert.
     valueHash: Hash
       ## Cached FNV-1a hash of `value`, used for O(1) `==` and as the basis of node-ID hashing.
     value: string
       ## The underlying string content.
+    viewData*: ptr UncheckedArray[char]
+      ## Borrowed char data; nil means `value` owns the content.
+    viewLen*: int
+      ## Length of the borrowed view in bytes.
 
   UiFlags* = set[UiFlag]
     ## Set of `UiFlag` behaviors attached to a node.
@@ -848,6 +854,7 @@ type
     animations*: seq[UiAnimation]
       ## Active per-node animations.
     animationSpeed*: float32 = 1.0'f32
+    textArrangementCacheCapacity*: int
       ## Global multiplier applied to every animation track's speed.
     configuringAnimationStack*: seq[bool]
       ## Per-node flag: whether an `animate:` block is active (gates `...Anim` mutators).
@@ -1159,19 +1166,100 @@ proc accentVariation*(base: UiColor, hueShift: float32, brightness: float32): Ui
   else: return UiColor(r: v, g: p, b: q, a: base.a)
 
 func uiString*(s: string): UiString =
+  ## Owned copy: keeps a ref to `s` so the content stays alive.
   return UiString(valueHash: nui_hash.hash(s), value: s)
+
+func uiString*(s: openArray[char]): UiString =
+  ## Borrowed view: no copy or allocation. The caller must keep the backing
+  ## storage alive while the `UiString` is used (at least until the end of
+  ## the frame). The arrangement cache copies views into `value` on insert.
+  if s.len <= 0:
+    return UiString(valueHash: nui_hash.hash(s), value: "")
+  UiString(
+    valueHash: nui_hash.hash(s),
+    value: "",
+    viewData: cast[ptr UncheckedArray[char]](unsafeAddr s[0]),
+    viewLen: s.len,
+  )
+
+func isBorrowed*(s: UiString): bool {.inline.} =
+  ## True when `s` holds a borrowed view instead of an owned string.
+  s.viewData != nil
 
 func hash*(s: UiString): Hash =
   return s.valueHash
 
 func len*(s: UiString): int =
+  if s.viewData != nil:
+    return s.viewLen
   return s.value.len
 
+func `[]`*(s: UiString, i: int): char {.inline.} =
+  ## Allocation-free indexed access into owned or borrowed content.
+  if s.viewData != nil:
+    s.viewData[i]
+  else:
+    s.value[i]
+
+template toOpenArray*(s: UiString): openArray[char] =
+  ## View of the content without allocating. Valid as long as `s` and, for
+  ## borrowed strings, the external backing storage are alive. Must be passed
+  ## directly to an `openArray` parameter (it cannot be stored in a variable).
+  block:
+    let tmpCopy = s
+    if tmpCopy.viewData != nil:
+      toOpenArray(tmpCopy.viewData, 0, tmpCopy.viewLen - 1)
+    elif tmpCopy.value.len > 0:
+      tmpCopy.value.toOpenArray(0, tmpCopy.value.high)
+    else:
+      tmpCopy.value.toOpenArray(0, -1)
+
 func value*(s: UiString): string =
+  ## Owned string content. Copies borrowed views (allocates); use
+  ## `toOpenArray` on hot paths to avoid allocations.
+  if s.viewData != nil:
+    if s.viewLen <= 0:
+      return ""
+    result = ""
+    let destination = result.beginStore(s.viewLen)
+    copyMem(destination, s.viewData, s.viewLen)
+    result.endStore()
+    return result
   return s.value
 
+func contentEquals*(s: UiString, o: openArray[char]): bool =
+  ## Allocation-free content comparison against a char slice.
+  if s.len != o.len:
+    return false
+  for i in 0 ..< o.len:
+    if s[i] != o[i]:
+      return false
+  return true
+
+func toOwned*(s: UiString): UiString =
+  ## Copy a borrowed view into the owned `value` (allocates once). Owned
+  ## strings are returned unchanged.
+  if s.viewData == nil:
+    return s
+  UiString(valueHash: s.valueHash, value: value(s))
+
+proc ensureOwned*(s: var UiString) {.inline.} =
+  ## Copy a borrowed view into `value` in place (allocates once if borrowed).
+  if s.viewData != nil:
+    s = s.toOwned
+
 func `==`*(a, b: UiString): bool =
-  return a.valueHash == b.valueHash and a.value == b.value
+  if a.valueHash != b.valueHash:
+    return false
+  if a.len != b.len:
+    return false
+  for i in 0 ..< a.len:
+    if a[i] != b[i]:
+      return false
+  return true
+
+func `$`*(s: UiString): string {.inline.} =
+  value(s)
 
 func intersectClipRect*(a, b: UiClipRect): UiClipRect =
   ## Compute the intersection of two clip rectangles. Returns an empty rect if they don't overlap.
@@ -1259,10 +1347,12 @@ proc buildTextArrangement(b: UiBuilder, text: ptr UiNodeText, key: uint64, maxWi
   prof("buildTextArrangement")
   result = UiTextArrangementCacheEntry()
   if b.measureText != nil:
-    result.arrangement = b.measureText(text.text.value, text.fontId, text.fontSize * b.fontScale, maxWidth)
+    result.arrangement = b.measureText(text.text.toOpenArray, text.fontId, text.fontSize * b.fontScale, maxWidth)
   result.arrangement.fontSize = text.fontSize * b.fontScale
   result.key = key
-  result.text = text.text
+  # Cache entries outlive the frame, so borrowed views must be copied into
+  # the owned string here (the only allocation on this path).
+  result.text = text.text.toOwned
   result.fontSize = text.fontSize
   result.fontId = text.fontId
   result.maxWidth = maxWidth
@@ -1286,11 +1376,45 @@ proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float
     if onRaiseQuit(b.textArrangementLookup.hasKey(key)):
       del(b.textArrangementLookup, key)
 
-  if b.textArrangementEntries.len >= textArrangementCacheCapacity:
+  if b.textArrangementEntries.len >= b.textArrangementCacheCapacity:
     b.evictOldestTextArrangement()
 
   let newIdx = b.textArrangementEntries.len
   b.textArrangementEntries.add(b.buildTextArrangement(text, key, maxWidth))
+  b.textArrangementEntries[newIdx].lastUsedTick = b.textArrangementTick
+  b.textArrangementLookup[key] = newIdx
+  b.textArrangementEntries[newIdx].arrangement.addr
+
+proc getTextArrangement*(b: var UiBuilder, text: openArray[char], fontId: UiFontId,
+    fontSize: float32, maxWidth: float32 = -1): ptr UiTextArrangement {.raises: [].} =
+  ## Borrowed-view arrangement lookup without allocating. The caller must keep
+  ## `text` alive until the call returns; cache inserts copy into an owned string.
+  prof("getTextArrangementView")
+  let borrowed = uiString(text)
+  let key = makeTextArrangementKey(borrowed, fontSize * b.fontScale, fontId, maxWidth)
+  inc b.textArrangementTick
+
+  let idx = onRaiseQuit(b.textArrangementLookup.getOrDefault(key, -1))
+  if idx >= 0 and idx < b.textArrangementEntries.len:
+    let entry = b.textArrangementEntries[idx].addr
+    if entry.key == key and entry.text == borrowed and entry.fontSize == fontSize and
+        entry.fontId == fontId and entry.maxWidth == maxWidth:
+      entry.lastUsedTick = b.textArrangementTick
+      return entry.arrangement.addr
+    var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId)
+    entry[] = b.buildTextArrangement(tmp.addr, key, maxWidth)
+    entry.lastUsedTick = b.textArrangementTick
+    return entry.arrangement.addr
+  elif idx >= b.textArrangementEntries.len:
+    if onRaiseQuit(b.textArrangementLookup.hasKey(key)):
+      del(b.textArrangementLookup, key)
+
+  if b.textArrangementEntries.len >= b.textArrangementCacheCapacity:
+    b.evictOldestTextArrangement()
+
+  var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId)
+  let newIdx = b.textArrangementEntries.len
+  b.textArrangementEntries.add(b.buildTextArrangement(tmp.addr, key, maxWidth))
   b.textArrangementEntries[newIdx].lastUsedTick = b.textArrangementTick
   b.textArrangementLookup[key] = newIdx
   b.textArrangementEntries[newIdx].arrangement.addr
@@ -2636,6 +2760,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     fontScale: 1,
   )
 
+  result.textArrangementCacheCapacity = 4096
   result.measureText = measureText
   result.buildTextMesh = buildTextMesh
   result.previousOutput.clearFrameOutput()
@@ -5591,10 +5716,25 @@ proc cornerRadii*(b: var UiBuilder, topLeft, topRight, bottomRight, bottomLeft: 
   b
 
 proc text*(b: var UiBuilder, value: string): var UiBuilder {.discardable.} =
-  ## Set the current node's text content. Enables DrawText and triggers size-to-content recalculation.
+  ## Set the current node's text content (owned copy). Enables DrawText and
+  ## triggers size-to-content recalculation. Comparison is allocation-free;
+  ## only a changed value hashes and keeps a ref.
   b.currentNode.flags.incl DrawText
   var t = addr(b.ensureNodeText(b.currentNode))
-  if t.text.value != value:
+  if not t.text.contentEquals(value):
+    t.text = value.uiString
+    t.measuredTextDirty = true
+  b.updateNodeFit(b.currentNode)
+  b
+
+proc text*(b: var UiBuilder, value: openArray[char]): var UiBuilder {.discardable.} =
+  ## Set the current node's text content as a borrowed view without copying
+  ## or allocating. The caller must keep the backing storage alive until the
+  ## end of the frame (measurement/rendering). Comparison and shaping are
+  ## allocation-free; only arrangement-cache inserts copy.
+  b.currentNode.flags.incl DrawText
+  var t = addr(b.ensureNodeText(b.currentNode))
+  if not t.text.contentEquals(value):
     t.text = value.uiString
     t.measuredTextDirty = true
   b.updateNodeFit(b.currentNode)
@@ -6347,9 +6487,17 @@ proc layerIndex*(b: var UiBuilder, value: int32): var UiBuilder {.discardable.} 
 
 proc measuredTextSize*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): Vec2 =
   ## Measure the pixel size of the text using the frame's measureText callback.
-  if text.text.value.len == 0:
+  if text.text.len == 0:
     return vec2(0.0'f32, 0.0'f32)
   let arrangement = b.getTextArrangement(text, maxWidth)
+  return arrangement.size
+
+proc measuredTextSize*(b: var UiBuilder, text: openArray[char], fontId: UiFontId,
+    fontSize: float32, maxWidth: float32 = -1): Vec2 =
+  ## Measure a borrowed char slice without allocating. Cache inserts still copy.
+  if text.len == 0:
+    return vec2(0.0'f32, 0.0'f32)
+  let arrangement = b.getTextArrangement(text, fontId, fontSize, maxWidth)
   return arrangement.size
 
 proc cachedMeasuredTextSize*(b: var UiBuilder, node: ptr UiNode): Vec2 {.raises: [].} =
@@ -6360,7 +6508,7 @@ proc cachedMeasuredTextSize*(b: var UiBuilder, node: ptr UiNode): Vec2 {.raises:
 
   let nodeText = addr(b.frame.texts[textSlot - 1])
 
-  if nodeText.text.value.len == 0:
+  if nodeText.text.len == 0:
     nodeText.measuredTextSizeCache = vec2(0.0'f32, 0.0'f32)
     nodeText.measuredTextDirty = false
     return nodeText.measuredTextSizeCache

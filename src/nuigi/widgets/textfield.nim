@@ -149,7 +149,9 @@ proc measuredPrefixWidth(b: var UiBuilder, text: string, byteCount: int,
   if byteCount <= 0:
     return 0.0'f32
   var prefixStyle = textStyle
-  prefixStyle.text = text[0 ..< byteCount].uiString
+  # Borrowed view: no allocation for the slice; the arrangement cache copies
+  # on insert only.
+  prefixStyle.text = text.toOpenArray(0, byteCount - 1).uiString
   b.measuredTextSize(prefixStyle.addr).x
 
 proc cursorPositionAtX(b: var UiBuilder, text: string, pointerX: float32,
