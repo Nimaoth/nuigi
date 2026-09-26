@@ -99,7 +99,7 @@ proc testTreeTableFocusNavigation() =
   var initialized = false
   var treeStorage: TreeTable
 
-  proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.canRaise, nimcall.} =
+  proc renderRow(b: var UiBuilder, cursor: TreeCursor, index: int) {.gcsafe, raises: [], nimcall.} =
     let _ = index
     b.label(cursor.cursorKey())
 
