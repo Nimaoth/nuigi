@@ -1026,13 +1026,14 @@ proc storeTextMesh(r: var FontRender, key: uint64, arrangement: UiTextArrangemen
 
     if entry != r.textMeshLruHead:
       let head = r.textMeshLruHead
-      entry.prev.next = entry.next
-      entry.next.prev = entry.prev
-      entry.next = head.next
-      entry.prev = head
-      head.next.prev = entry
-      head.next = entry
-      r.textMeshLruHead = entry
+      if head != nil:
+        entry.prev.next = entry.next
+        entry.next.prev = entry.prev
+        entry.next = head.next
+        entry.prev = head
+        head.next.prev = entry
+        head.next = entry
+        r.textMeshLruHead = entry
 
     if entry.vertices.len > 0:
       result.data = cast[ptr UncheckedArray[TextMeshVertex]](entry.vertices[0].addr)
