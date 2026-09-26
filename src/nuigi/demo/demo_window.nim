@@ -831,6 +831,7 @@ proc buildTransformExamples*(b: var UiBuilder) =
 
 var awClicked = 0
 var awChecked = false
+var awCollapsingExpanded = false
 var awSlider = 0.5'f32
 var awDrag = 0.5'f32
 var awDragFree = 2.0'f32
@@ -890,6 +891,11 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
       labelCell("checkbox")
       widgetCell:
         if b.checkbox("Enabled", awChecked): discard
+      labelCell("collapsingHeader")
+      widgetCell:
+        b.collapsingHeader("Details", awCollapsingExpanded):
+          b.labelWrapped("This content is only built while the header is expanded."):
+            discard b.fillX().paddingRelative(6.0'f32 / demoBaseFontSize)
       labelCell("slider")
       widgetCell:
         discard b.slider(awSlider, 0.0'f32, 1.0'f32, 0.5'f32)
