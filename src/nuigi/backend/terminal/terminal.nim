@@ -409,7 +409,7 @@ proc drawStroke(backend: var TerminalBackend, rect, clip: CellRect, color: UiCol
     if right != rect.x:
       backend.putCell(right, y, "│", 1, color.rgb, clip)
 
-proc drawText(backend: var TerminalBackend, pos: Vec2, text: string, color: UiColor,
+proc drawText(backend: var TerminalBackend, pos: Vec2, text: openArray[char], color: UiColor,
     clip: CellRect, wrap: bool) =
   var x = floor(pos.x).int
   var y = floor(pos.y).int
@@ -465,7 +465,7 @@ proc render*(backend: var TerminalBackend, builder: UiBuilder) =
         let nodeText = builder.frame.texts[textIndex]
         let wrap = command.nodeIndex >= 0 and command.nodeIndex.int < builder.frame.nodes.len and
           WrapText in builder.frame.nodes[command.nodeIndex.int].flags
-        backend.drawText(transform.transformPoint2(command.pos), nodeText.text.value,
+        backend.drawText(transform.transformPoint2(command.pos), nodeText.text.toOpenArray,
           nodeText.textColor, clips[^1], wrap)
     of CmdImage:
       let rect = transformedCellRect(transform, command.pos, command.size)

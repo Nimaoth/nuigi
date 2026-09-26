@@ -257,7 +257,7 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
           # When the window is removed from the live tree it is promoted to a virtual node;
           # animate its transform scale from 1 down to 0 so it shrinks away, then gets dropped.
           previousNodeIndex = b.previousNodeIndex(b.currentNode.id, b.currentNodeIndex)
-          var previousScale = vec2(1.0'f32)
+          var previousScale = vecmath.vec2(1.0'f32)
           if previousNodeIndex != -1:
             let n = b.previousFrame.nodes[previousNodeIndex]
             let transformSlot = int(n.transformIndex)
@@ -784,7 +784,7 @@ proc dropdownPopupReposition(b: var UiBuilder, nodeIdx: int, rawData: int) {.nim
   let overlaySize = if overlayIdx >= 0 and overlayIdx < b.nodes.len:
     b.nodes[overlayIdx].size
   else:
-    vec2(100000.0'f32, 100000.0'f32)
+    vecmath.vec2(100000.0'f32, 100000.0'f32)
   var popupX = storage.btnAbsPos.x
   var popupY = storage.btnAbsPos.y + storage.btnHeight + 2.0'f32
   if popupY + popupH > overlaySize.y:
