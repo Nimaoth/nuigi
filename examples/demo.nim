@@ -147,11 +147,7 @@ proc themeEditorListFonts(): seq[(string, UiFontId)] {.raises: [], gcsafe.} =
 
 proc themeEditorResolveFont(name: string): UiFontId {.raises: [], gcsafe.} =
   gcsafeb:
-    let faces = gFontRender.listFontFaces()
-    for i in 0 ..< faces.len:
-      if faces[i][0] == name:
-        return UiFontId(faces[i][1])
-    return 0'i16
+    return max(0'i16, gFontRender.findFont(name))
 
 func toUiKey(key: Keycode): tuple[found: bool, uiKey: UiKey] =
   case key

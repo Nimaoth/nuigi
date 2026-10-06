@@ -5233,7 +5233,7 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
     return b
 
   let n = b.frame.nodes[idx].addr
-  profd("layout " & n[].nodeDebugName())
+  profd("layout")
   n.flags.incl IsPostProcessing
   n.flags.incl PostProcessChildren
   for i in 0..1:

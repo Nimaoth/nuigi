@@ -104,8 +104,9 @@ const
   EnableAutoWrap = "\e[?7h"
   EnableMouse = "\e[?1002h\e[?1003h\e[?1006h"
   DisableMouse = "\e[?1002l\e[?1003l\e[?1006l"
-  EnableKittyKeyboard = "\e[>11u"
   DisableKittyKeyboard = "\e[<u"
+
+const DefaultKittyKeyboardFlags* = 25
 
 type
   TerminalColor = object
@@ -122,10 +123,13 @@ type
   TerminalBackend* = object
     width*, height*: int
     hadEvents*: bool
+    lastEvents*: seq[TerminalInputEvent]
     cells: seq[TerminalCell]
+    previousCells: seq[TerminalCell]
     inputParser: TerminalInputParser
     input*: UiInputSnapshot
     kittyKeyboard: bool
+    requestedKittyKeyboardFlags: int
     active*: bool
 
 proc rgb(color: UiColor): TerminalColor =
@@ -157,11 +161,12 @@ proc transformedCellRect(transform: UiAffine2, pos, size: Vec2): CellRect =
   )
 
 proc terminalMeasureText*(text: openArray[char], fontId: UiFontId,
-    fontSize: float32, maxWidth: float32): UiTextArrangement {.raises: [].} =
+    fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.raises: [].} =
   let cellLimit = if maxWidth > 0: max(1, floor(maxWidth).int) else: 0
   let measured = terminalTextSize(text, cellLimit)
   return UiTextArrangement(
     fontSize: 1.0'f32,
+    textFlags: textFlags,
     size: vec2(measured.width.float32, measured.height.float32),
     ascent: 1.0'f32,
     descent: 0.0'f32,
@@ -172,9 +177,13 @@ proc newTerminalBuilder*(): UiBuilder =
     backendType = UiBackendType.Terminal)
 
 proc resize(backend: var TerminalBackend, width, height: int) =
+  let oldWidth = backend.width
+  let oldHeight = backend.height
   backend.width = max(1, width)
   backend.height = max(1, height)
   backend.cells.setLen(backend.width * backend.height)
+  if backend.width != oldWidth or backend.height != oldHeight:
+    backend.previousCells.setLen(0)
 
 proc terminalSize(): tuple[width, height: int] =
   when defined(windows):
@@ -189,18 +198,28 @@ proc terminalSize(): tuple[width, height: int] =
     except CatchableError:
       return (width: 80, height: 24)
 
-proc init*(backend: var TerminalBackend) =
+proc setEscapeTimeout*(backend: var TerminalBackend, timeoutMs: int) =
+  backend.inputParser.setEscapeTimeout(timeoutMs)
+
+proc init*(backend: var TerminalBackend,
+  kittyKeyboardFlags = DefaultKittyKeyboardFlags,
+  escapeTimeoutMs = DefaultEscapeTimeoutMs) =
   if backend.active:
     return
   let size = terminalSize()
   backend.resize(size.width, size.height)
-  backend.inputParser.escapeTimeoutMs = DefaultEscapeTimeoutMs
+  backend.previousCells.setLen(0)
+  backend.setEscapeTimeout(escapeTimeoutMs)
+  backend.kittyKeyboard = false
+  backend.requestedKittyKeyboardFlags = kittyKeyboardFlags and 0x1f
   backend.active = true
   when defined(nimony):
     initConsole()
     stdout.write(EnterAlternateScreen & DisableAutoWrap & "\e[2J\e[H\e[?25l")
     stdout.write(EnableMouse)
-    stdout.write(EnableKittyKeyboard)
+    if backend.requestedKittyKeyboardFlags != 0:
+      stdout.write("\e[>" & $backend.requestedKittyKeyboardFlags & "u")
+      stdout.write("\e[?u")
     stdout.write("\e[18t")
     stdout.flushFile()
   else:
@@ -208,7 +227,9 @@ proc init*(backend: var TerminalBackend) =
       initConsole()
       stdout.write(EnterAlternateScreen & DisableAutoWrap & "\e[2J\e[H\e[?25l")
       stdout.write(EnableMouse)
-      stdout.write(EnableKittyKeyboard)
+      if backend.requestedKittyKeyboardFlags != 0:
+        stdout.write("\e[>" & $backend.requestedKittyKeyboardFlags & "u")
+        stdout.write("\e[?u")
       stdout.write("\e[18t")
       stdout.flushFile()
     except CatchableError:
@@ -219,14 +240,16 @@ proc deinit*(backend: var TerminalBackend) =
     return
   backend.active = false
   when defined(nimony):
-    stdout.write(DisableKittyKeyboard)
+    if backend.requestedKittyKeyboardFlags != 0:
+      stdout.write(DisableKittyKeyboard)
     stdout.write(DisableMouse)
     stdout.write("\e[0m\e[?25h" & EnableAutoWrap & ExitAlternateScreen)
     stdout.flushFile()
     deinitConsole()
   else:
     try:
-      stdout.write(DisableKittyKeyboard)
+      if backend.requestedKittyKeyboardFlags != 0:
+        stdout.write(DisableKittyKeyboard)
       stdout.write(DisableMouse)
       stdout.write("\e[0m\e[?25h" & EnableAutoWrap & ExitAlternateScreen)
       stdout.flushFile()
@@ -314,13 +337,13 @@ proc applyInputEvent(backend: var TerminalBackend, event: TerminalInputEvent) =
   of TerminalPixelSize, TerminalCellPixelSize:
     discard
 
-proc pollInput*(backend: var TerminalBackend): UiInputSnapshot =
+proc pollInput*(backend: var TerminalBackend,
+    inputBytes: openArray[char]): UiInputSnapshot =
   backend.beginInputFrame()
   backend.hadEvents = false
-  let inputBytes = readAvailableInput()
-  let events = backend.inputParser.parseInput(inputBytes)
-  backend.hadEvents = events.len > 0
-  for event in events:
+  backend.lastEvents = backend.inputParser.parseInput(inputBytes)
+  backend.hadEvents = backend.lastEvents.len > 0
+  for event in backend.lastEvents:
     backend.applyInputEvent(event)
 
   let size = terminalSize()
@@ -328,6 +351,10 @@ proc pollInput*(backend: var TerminalBackend): UiInputSnapshot =
     backend.resize(size.width, size.height)
     backend.hadEvents = true
   backend.input
+
+proc pollInput*(backend: var TerminalBackend): UiInputSnapshot =
+  let inputBytes = readAvailableInput()
+  backend.pollInput(inputBytes)
 
 proc clear(backend: var TerminalBackend) =
   let blank = TerminalCell(grapheme: " ", foreground: TerminalColor(r: 255, g: 255, b: 255))
@@ -425,7 +452,30 @@ proc drawText(backend: var TerminalBackend, pos: Vec2, text: openArray[char], co
     backend.putCell(x, y, grapheme.text, grapheme.width, color.rgb, clip)
     x += grapheme.width
 
-proc render*(backend: var TerminalBackend, builder: UiBuilder) =
+proc appendCursorPosition(output: var string, x, y: int) =
+  output.add "\e["
+  output.add $(y + 1)
+  output.add ";"
+  output.add $(x + 1)
+  output.add "H"
+
+proc appendCellStyle(output: var string, cell: TerminalCell) =
+  output.add "\e[38;2;" & $cell.foreground.r & ";" & $cell.foreground.g & ";" & $cell.foreground.b & "m"
+  output.add "\e[48;2;" & $cell.background.r & ";" & $cell.background.g & ";" & $cell.background.b & "m"
+
+proc appendCell(output: var string, cell: TerminalCell, x, y: int) =
+  if cell.continuation:
+    return
+  output.appendCursorPosition(x, y)
+  output.appendCellStyle(cell)
+  output.add cell.grapheme
+
+proc snapshotCells(backend: var TerminalBackend) =
+  backend.previousCells.setLen(backend.cells.len)
+  for i in 0 ..< backend.cells.len:
+    backend.previousCells[i] = backend.cells[i]
+
+proc render*(backend: var TerminalBackend, builder: var UiBuilder) =
   backend.clear()
   let screen = CellRect(x: 0, y: 0, w: backend.width, h: backend.height)
   var clips = @[screen]
@@ -462,7 +512,7 @@ proc render*(backend: var TerminalBackend, builder: UiBuilder) =
     of CmdText:
       let textIndex = command.textIndex.int - 1
       if textIndex >= 0 and textIndex < builder.frame.texts.len:
-        let nodeText = builder.frame.texts[textIndex]
+        let nodeText {.cursor.} = builder.frame.texts[textIndex]
         let wrap = command.nodeIndex >= 0 and command.nodeIndex.int < builder.frame.nodes.len and
           WrapText in builder.frame.nodes[command.nodeIndex.int].flags
         backend.drawText(transform.transformPoint2(command.pos), nodeText.text.toOpenArray,
@@ -477,25 +527,30 @@ proc render*(backend: var TerminalBackend, builder: UiBuilder) =
       discard
 
   var output = newStringOfCap(backend.width * backend.height * 2)
-  output.add "\e[H"
-  var previousForeground = TerminalColor(r: 255, g: 255, b: 255)
-  var previousBackground = TerminalColor()
-  var firstStyle = true
+  let fullRedraw = backend.previousCells.len != backend.cells.len
   for y in 0 ..< backend.height:
+    var lineChanged = fullRedraw
+    var lineHasWideGlyph = false
     for x in 0 ..< backend.width:
-      let cell = backend.cells[y * backend.width + x]
-      if cell.continuation:
-        continue
-      if firstStyle or cell.foreground != previousForeground or cell.background != previousBackground:
-        output.add "\e[38;2;" & $cell.foreground.r & ";" & $cell.foreground.g & ";" & $cell.foreground.b & "m"
-        output.add "\e[48;2;" & $cell.background.r & ";" & $cell.background.g & ";" & $cell.background.b & "m"
-        previousForeground = cell.foreground
-        previousBackground = cell.background
-        firstStyle = false
-      output.add cell.grapheme
-    if y + 1 < backend.height:
-      output.add "\e[0m\r\n"
-      firstStyle = true
+      let index = y * backend.width + x
+      if backend.cells[index].continuation or
+          (not fullRedraw and backend.previousCells[index].continuation):
+        lineHasWideGlyph = true
+      if not fullRedraw and backend.cells[index] != backend.previousCells[index]:
+        lineChanged = true
+
+    if not lineChanged:
+      continue
+    if fullRedraw or lineHasWideGlyph:
+      for x in 0 ..< backend.width:
+        output.appendCell(backend.cells[y * backend.width + x], x, y)
+    else:
+      for x in 0 ..< backend.width:
+        let index = y * backend.width + x
+        if backend.cells[index] != backend.previousCells[index]:
+          output.appendCell(backend.cells[index], x, y)
+
   output.add "\e[0m"
   stdout.write(output)
   stdout.flushFile()
+  backend.snapshotCells()
