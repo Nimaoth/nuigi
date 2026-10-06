@@ -1,4 +1,4 @@
-import nuigi, nuigi/core/vecmath, nuigi/widgets, nuigi/widgets/colorpicker
+import nuigi, nuigi/core/[vecmath, array_view], nuigi/widgets, nuigi/widgets/colorpicker
 import nuigi/widgets/tree_table
 
 include nuigi/util/compat2
@@ -42,6 +42,15 @@ proc hasFrameText(b: UiBuilder, expected: string): bool =
   for text in b.frame.texts:
     if text.text.value == expected:
       return true
+  false
+
+proc hasRawMeshCommand(b: UiBuilder): bool =
+  for nodeIndex in 0 ..< b.frame.nodes.len:
+    let commands = b.nodeCustomCommands(nodeIndex)
+    if commands != nil:
+      for command in commands[]:
+        if command.kind == CmdRawVertices and command.vertexCount > 0:
+          return true
   false
 
 type FocusTreeCursor = ref object of TreeCursor
@@ -404,6 +413,34 @@ proc testFocusRestorationAcrossUnrenderedScope() =
   require(b.focusedNode == itemAId,
     "restoreFocus should recover the remembered item after its scope was absent")
 
+proc testNextFrameActionsAndScopeFocus() =
+  var b = newBuilder(fixedMeasureText)
+  var actionRuns = 0
+  var scopeId = noneNodeId()
+  var childId = noneNodeId()
+
+  discard b.beginUiFrame(200.0, 120.0)
+  b.node("scope"):
+    scopeId = b.currentNode.id
+    discard b.focusScope()
+    b.node("child"):
+      childId = b.currentNode.id
+      discard b.focusable()
+      b.requestFocus()
+    require(b.isFocusWithin(), "current scope should contain focused child")
+  require(b.isFocusWithin(scopeId), "scope should remember focused descendant")
+  b.enqueueNextFrame(proc() {.closure, gcsafe, raises: [].} = inc actionRuns)
+  require(actionRuns == 0, "queued action must not run during construction")
+  b.flushNextFrameActions()
+  require(actionRuns == 1, "public flush should run queued actions")
+  b.enqueueNextFrame(proc() {.closure, gcsafe, raises: [].} = inc actionRuns)
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0)
+  require(actionRuns == 2, "queued action should run at next frame start")
+  require(b.focusedNode == childId and b.isFocusWithin(scopeId),
+    "scope focus query should survive the frame boundary")
+
 proc testKeyboardFocusActivation() =
   var b = newBuilder(fixedMeasureText)
 
@@ -458,6 +495,85 @@ proc testCheckboxKeyboardActivation() =
     input = UiInputSnapshot(keysPressed: {KeySpace}))
   require(b.checkbox("Choice", checked), "Space should activate the focused checkbox")
   require(checked, "keyboard activation should toggle the checkbox value")
+
+proc testCollapsingHeaderActivation() =
+  var b = newBuilder(fixedMeasureText)
+  var expanded = false
+
+  template buildHeader() =
+    b.collapsingHeader("Details", expanded):
+      b.label("Expanded content")
+
+  discard b.beginUiFrame(200.0, 120.0)
+  buildHeader()
+  require(not b.hasFrameText("Expanded content"),
+    "collapsed headers should not build their content")
+  b.endUiFrame(buildRenderCommands = false)
+  require(b.hasRawMeshCommand(),
+    "graphical collapsing headers should emit a chevron mesh")
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(keysPressed: {KeyTab}))
+  buildHeader()
+  require(not expanded, "Tab should focus without expanding the header")
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(keysPressed: {KeyEnter}))
+  buildHeader()
+  require(expanded, "Enter should expand the focused header")
+  require(b.hasFrameText("Expanded content"),
+    "expanded headers should build their content")
+
+proc testTerminalCollapsingHeaderArrows() =
+  var b = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
+  var expanded = false
+
+  discard b.beginUiFrame(200.0, 120.0)
+  b.collapsingHeader("Details", expanded):
+    b.label("Expanded content")
+  require(b.hasFrameText("▶"), "collapsed terminal headers should show a right arrow")
+  require(not b.hasFrameText("▼"), "collapsed terminal headers should not show a down arrow")
+
+  expanded = true
+  discard b.beginUiFrame(200.0, 120.0)
+  b.collapsingHeader("Details", expanded):
+    b.label("Expanded content")
+  require(b.hasFrameText("▼"), "expanded terminal headers should show a down arrow")
+
+proc testCollapsingHeaderContentAnimation() =
+  var b = newBuilder(fixedMeasureText)
+  var expanded = true
+
+  template buildHeader() =
+    b.collapsingHeader("Animated details", expanded):
+      b.label("Animated content")
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(frameIndex: 1))
+  buildHeader()
+  b.endUiFrame(buildRenderCommands = false)
+
+  expanded = false
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(frameIndex: 2), animationTick = 1.0'f32 / 120.0'f32)
+  buildHeader()
+  require(b.hasFrameText("Animated content"),
+    "collapsing headers should retain content during the closing animation")
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(frameIndex: 3), animationTick = 1.0'f32)
+  buildHeader()
+  require(b.hasFrameText("Animated content"),
+    "content should remain built until the previous animated height reaches zero")
+  b.endUiFrame(buildRenderCommands = false)
+
+  discard b.beginUiFrame(200.0, 120.0,
+    input = UiInputSnapshot(frameIndex: 4))
+  buildHeader()
+  require(not b.hasFrameText("Animated content"),
+    "collapsed headers should stop building content after the animation completes")
 
 proc testTabBarKeyboardFocus() =
   var b = newBuilder(fixedMeasureText)
@@ -678,9 +794,13 @@ proc runTests() =
   testExplicitTabOrder()
   testExplicitDirectionalNavigation()
   testFocusRestorationAcrossUnrenderedScope()
+  testNextFrameActionsAndScopeFocus()
   testKeyboardFocusActivation()
   testButtonKeyboardActivation()
   testCheckboxKeyboardActivation()
+  testCollapsingHeaderActivation()
+  testTerminalCollapsingHeaderArrows()
+  testCollapsingHeaderContentAnimation()
   testTabBarKeyboardFocus()
   testTerminalTabBarItemPadding()
   testTabBarActivationSkipsDisabledContent()

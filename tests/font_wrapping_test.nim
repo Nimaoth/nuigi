@@ -62,6 +62,25 @@ proc main() =
   let explicitLines = renderer.arrangeText("one\ntwo", fontSize, fontId)
   assert explicitLines.lineCount == 2
 
+  # let boldId = renderer.addFontFace("assets/dontuse/fonts/DejaVuSansMono-Bold.ttf")
+  # let obliqueId = renderer.addFontFace("assets/dontuse/fonts/DejaVuSansMono-Oblique.ttf")
+  # assert boldId >= 0 and obliqueId >= 0
+  # assert renderer.styledFontId(fontId, {UiTextFlag.Bold}) == boldId
+  # assert renderer.styledFontId(fontId, {UiTextFlag.Italic}) == obliqueId
+  # assert renderer.styledFontId(fontId, {UiTextFlag.Bold, UiTextFlag.Italic}) == boldId
+  # assert renderer.styledFontId(boldId, {}) == boldId
+  # assert renderer.findFont("DejaVuSansMono") == fontId
+  # assert renderer.findFont("DejaVuSansMono", {UiTextFlag.Bold}) == boldId
+  # assert renderer.findFont("DejaVuSansMono-Bold") == boldId
+  # assert renderer.findFont("DejaVu Sans Mono", {UiTextFlag.Italic}) == obliqueId
+  # assert renderer.findFont("missing font") == -1
+  # let boldText = renderer.arrangeText("bold", fontSize, fontId, textFlags = {UiTextFlag.Bold})
+  # assert boldText.glyphs.len > 0 and boldText.glyphs[0].fontIndex == boldId.int32
+  # let group = renderer.addFontGroup(@[fontId])
+  # let boldGroup = renderer.styledFontId(group, {UiTextFlag.Bold})
+  # assert boldGroup != group
+  # assert renderer.styledFontId(group, {UiTextFlag.Bold}) == boldGroup
+
   echo "font fallback wrapping tests passed"
 
 main()

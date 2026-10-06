@@ -71,6 +71,55 @@ proc testKeyboardSequences() =
   require(kittyEvents[0].kind == TerminalKey and kittyEvents[0].key == KeyEnter and
     kittyEvents[0].action == InputRelease, "Kitty release payload")
 
+proc testEscapeTimeout() =
+  var parser = default(TerminalInputParser)
+  parser.setEscapeTimeout(1_000)
+  require(parser.parseInput("\e").len == 0,
+    "a lone escape should wait for a possible sequence")
+  let altEvents = parser.parseInput("a")
+  require(altEvents.len == 1 and altEvents[0].kind == TerminalKey and
+    altEvents[0].key == KeyA and altEvents[0].keyMods == {ModAlt},
+    "input before the escape timeout should form an Alt chord")
+
+  var backend = default(TerminalBackend)
+  backend.setEscapeTimeout(0)
+  let escapeInput = backend.pollInput("\e")
+  require(KeyEscape in escapeInput.keysPressed,
+    "the backend should emit Escape when its timeout expires")
+  require(backend.hadEvents,
+    "a timed-out Escape should mark the backend as active")
+
+proc testExternalInputAndKittyNegotiation() =
+  var backend = default(TerminalBackend)
+  discard backend.pollInput("\e[?25u")
+  require(backend.lastEvents.len == 1 and
+    backend.lastEvents[0].kind == TerminalKittyFlags,
+    "the backend should expose parsed events from the latest poll")
+  let pressed = backend.pollInput("\e[97;1:1u")
+  require(KeyA in pressed.keysPressed and KeyA in pressed.keysDown,
+    "negotiated Kitty press should set held key state")
+  let idle = backend.pollInput("")
+  require(backend.lastEvents.len == 0,
+    "an idle poll should clear the previous parsed-event batch")
+  require(KeyA in idle.keysDown,
+    "negotiated Kitty held key should survive an idle frame")
+  let released = backend.pollInput("\e[97;1:3u")
+  require(KeyA in released.keysReleased and KeyA notin released.keysDown,
+    "negotiated Kitty release should clear held key state")
+
+  discard backend.pollInput("\e[97;1:1u\e[97;1:1u")
+  require(backend.lastEvents.len == 2 and
+    backend.lastEvents[0].kind == TerminalKey and
+    backend.lastEvents[1].kind == TerminalKey,
+    "the parsed event batch should preserve duplicate rapid key presses")
+
+  var legacyBackend = default(TerminalBackend)
+  discard legacyBackend.pollInput("\e[?0u")
+  discard legacyBackend.pollInput("\e[97;1:1u")
+  let legacyIdle = legacyBackend.pollInput("")
+  require(KeyA notin legacyIdle.keysDown,
+    "unsupported Kitty keys should remain frame-local")
+
 proc testMouseSequence() =
   var parser = default(TerminalInputParser)
   let events = parser.parseInput("\e[<0;4;3M")
@@ -123,6 +172,8 @@ proc main() =
   testUnicodeWidths()
   testChunkedUtf8()
   testKeyboardSequences()
+  testEscapeTimeout()
+  testExternalInputAndKittyNegotiation()
   testMouseSequence()
   testShouldRender()
 

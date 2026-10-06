@@ -19,6 +19,49 @@ proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
   discard maxWidth
   UiTextArrangement(fontSize: fontSize)
 
+proc underlineMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
+    maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
+  UiTextArrangement(fontSize: fontSize, ascent: 15.0'f32,
+    size: vec2(text.len.float32 * 10.0'f32, 20.0'f32), textFlags: textFlags)
+
+proc testColoredUnderline() =
+  let tint = rgba(0.9'f32, 0.2'f32, 0.3'f32, 1.0'f32)
+  for testCase in [(false, 14.0'f32, 0.0'f32, 1.0'f32),
+      (true, 14.0'f32, 0.0'f32, 1.0'f32),
+      (false, 21.0'f32, 0.0'f32, 2.0'f32),
+      (true, 21.0'f32, 0.0'f32, 2.0'f32),
+      (false, 14.0'f32, 2.6'f32, 3.0'f32),
+      (true, 14.0'f32, 2.6'f32, 3.0'f32)]:
+    let (meshMode, fontSize, overrideThickness, expectedThickness) = testCase
+    let expectedY = 35.0'f32 + max(1.0'f32, fontSize * 0.05'f32)
+    var builder = newBuilder(underlineMeasureText)
+    discard builder.beginUiFrame(100.0'f32, 100.0'f32)
+    var textNodeIndex = -1
+    builder.node:
+      textNodeIndex = builder.currentNodeIndex
+      discard builder.position(10.0'f32, 20.0'f32).fit()
+        .textFlags({UiTextFlag.Bold, UiTextFlag.Italic, UiTextFlag.Underline})
+        .underlineColor(tint).underlineThickness(overrideThickness).fontSize(fontSize).text("abc")
+    builder.endUiFrame(buildMeshRenderCommands = meshMode)
+    var underlineCount = 0
+    for command in builder.frameOutput.commands:
+      if command.nodeIndex != textNodeIndex.int32:
+        continue
+      if meshMode and command.kind == CmdRawVertices:
+        inc underlineCount
+        require(command.vertexCount == 6, "underline mesh should contain one rectangle")
+        require(command.vertexData[0].color.sameColor(tint), "underline mesh tint mismatch")
+        require(command.vertexData[0].pos == vec2(10.0'f32, expectedY),
+          "underline mesh should start below the baseline")
+        require(abs(command.vertexData[2].pos.y - command.vertexData[0].pos.y - expectedThickness) < 0.001'f32,
+          "underline mesh thickness should be rounded to whole pixels")
+      elif not meshMode and command.kind == CmdRectFill:
+        inc underlineCount
+        require(command.color.sameColor(tint), "underline command tint mismatch")
+        require(command.pos == vec2(10.0'f32, expectedY), "underline position mismatch")
+        require(command.size == vec2(30.0'f32, expectedThickness), "underline dimensions mismatch")
+    require(underlineCount == 1, "text node should emit exactly one underline")
+
 proc flatPlotValue(x: float32, userData: int): float32 =
   discard x
   discard userData
@@ -201,6 +244,7 @@ proc testAntialiasedPlotGeometry() =
     "plot line gradient should fade from its inset solid edge to an exterior edge")
 
 when isMainModule:
+  testColoredUnderline()
   testPerCornerFillGeometry()
   testPerSideBorderGeometryAndColors()
   testUniformStyleFallbacks()

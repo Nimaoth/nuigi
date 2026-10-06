@@ -955,6 +955,116 @@ proc testButtonHoverAndPressed() =
   require(secondFill.r > firstFill.r, "button hover fill should animate toward hover color when previously hovered")
   require(secondFill.r < 0.96'f32 + 0.0001'f32, "button hover fill should remain below click highlight color")
 
+proc buildMouseClickTargets(b: var UiBuilder): tuple[first, second: UiNodeId] =
+  b.node(1'u64):
+    discard b.position(0, 0).size(40, 40)
+    result.first = b.currentNode.id
+  b.node(2'u64):
+    discard b.position(60, 0).size(40, 40)
+    result.second = b.currentNode.id
+  b.endUiFrame(buildRenderCommands = false)
+
+proc mouseClickFrame(b: var UiBuilder, input: UiInputSnapshot): tuple[first, second: UiNodeId] =
+  discard b.beginUiFrame(120.0'f32, 60.0'f32, input = input)
+  return b.buildMouseClickTargets()
+
+proc testPressAndReleaseWithinOneFrame() =
+  for button in [MouseLeft, MouseRight]:
+    var b = newBuilder(fixedMeasureText)
+    let targets = b.mouseClickFrame(UiInputSnapshot())
+    for click in 1..3:
+      let input = UiInputSnapshot(mouse: vec2(70.0'f32, 10.0'f32),
+        mousePressed: {button}, mouseReleased: {button},
+        mouseClickCount: click.uint8)
+      discard b.mouseClickFrame(input)
+      if button == MouseLeft:
+        require(b.wasPressed(targets.second), "same-frame left click must report its press")
+        require(b.wasClicked(targets.second), "same-frame left click must report its click")
+        require(b.previousOutput.clickedIndex >= 0, "same-frame click must report its node index")
+        require(not b.wasHeld(targets.second), "released same-frame click must not remain held")
+        require(b.previousOutput.heldIndex == -1, "released same-frame click must clear its held index")
+      else:
+        require(b.previousOutput.rightPressedId == targets.second,
+          "same-frame right click must report its press")
+        require(b.wasRightClicked(targets.second), "same-frame right click must report its click")
+        require(b.previousOutput.rightClickedIndex >= 0,
+          "same-frame right click must report its node index")
+      discard b.mouseClickFrame(UiInputSnapshot(mouse: input.mouse))
+      require(not b.wasClicked(targets.second) and not b.wasRightClicked(targets.second),
+        "click must not repeat in the following frame")
+
+proc testSameFrameClickUsesCurrentPressTarget() =
+  for button in [MouseLeft, MouseRight]:
+    var b = newBuilder(fixedMeasureText)
+    let targets = b.mouseClickFrame(UiInputSnapshot())
+    discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(10.0'f32),
+      mousePressed: {button}, mouseDown: {button}))
+    discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(70.0'f32, 10.0'f32),
+      mousePressed: {button}, mouseReleased: {button}))
+    if button == MouseLeft:
+      require(b.wasClicked(targets.second) and not b.wasClicked(targets.first),
+        "same-frame left click must use the new press target, not the previous held node")
+    else:
+      require(b.wasRightClicked(targets.second) and not b.wasRightClicked(targets.first),
+        "same-frame right click must use the new press target, not the previous pressed node")
+
+proc testSeparateFrameMouseClickTargets() =
+  for button in [MouseLeft, MouseRight]:
+    for releaseOverTarget in [false, true]:
+      var b = newBuilder(fixedMeasureText)
+      let targets = b.mouseClickFrame(UiInputSnapshot())
+      discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(10.0'f32),
+        mousePressed: {button}, mouseDown: {button}))
+      discard b.mouseClickFrame(UiInputSnapshot(
+        mouse: vec2(if releaseOverTarget: 10.0'f32 else: 70.0'f32, 10.0'f32),
+        mouseReleased: {button}))
+      let clicked = if button == MouseLeft:
+          b.wasClicked(targets.first)
+        else:
+          b.wasRightClicked(targets.first)
+      require(clicked == releaseOverTarget,
+        "separate-frame clicks must still require release over the original press target")
+
+proc testSameFrameClickPreservesFinalDownState() =
+  var b = newBuilder(fixedMeasureText)
+  let targets = b.mouseClickFrame(UiInputSnapshot())
+  discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(10.0'f32),
+    mousePressed: {MouseLeft, MouseRight}, mouseReleased: {MouseLeft, MouseRight},
+    mouseDown: {MouseLeft, MouseRight}))
+  require(b.wasClicked(targets.first) and b.wasRightClicked(targets.first),
+    "both buttons must detect a click when both transitions are present")
+  require(b.wasHeld(targets.first), "final mouseDown state must keep the left button held")
+
+proc testSameFrameClickOutsideUi() =
+  var b = newBuilder(fixedMeasureText)
+  let targets = b.mouseClickFrame(UiInputSnapshot())
+  discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(200.0'f32),
+    mousePressed: {MouseLeft, MouseRight}, mouseReleased: {MouseLeft, MouseRight}))
+  require(b.previousOutput.clickedId == noneNodeId() and
+      b.previousOutput.rightClickedId == noneNodeId(),
+    "same-frame clicks outside the UI must not report a clicked target")
+  require(b.previousOutput.clickedIndex == -1 and b.previousOutput.rightClickedIndex == -1,
+    "same-frame clicks outside the UI must not report a clicked index")
+  require(not b.wasPressed(targets.first) and not b.wasHeld(targets.first),
+    "same-frame clicks outside the UI must not press or hold an existing node")
+
+proc testMouseDragReleaseStillReported() =
+  var b = newBuilder(fixedMeasureText)
+  let targets = b.mouseClickFrame(UiInputSnapshot())
+  discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(10.0'f32),
+    mousePressed: {MouseLeft}, mouseDown: {MouseLeft}))
+  discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(20.0'f32, 10.0'f32),
+    mouseDelta: vec2(10.0'f32, 0.0'f32), mouseDown: {MouseLeft}))
+  require(b.previousOutput.draggedId == targets.first, "moving a held node must report dragging")
+  discard b.mouseClickFrame(UiInputSnapshot(mouse: vec2(70.0'f32, 10.0'f32),
+    mouseDelta: vec2(50.0'f32, 0.0'f32), mouseReleased: {MouseLeft}))
+  require(b.previousOutput.draggedId == targets.first,
+    "release must still report the previously dragged node")
+  require(b.previousOutput.draggedIndex >= 0, "drag release must report its node index")
+  require(not b.wasHeld(targets.first), "drag release must clear held state")
+  require(b.previousOutput.clickedId == noneNodeId(),
+    "drag release over a different node must not report a click")
+
 proc testHitBoundsExcludeBottomEdge() =
   var b = newBuilder(fixedMeasureText, textHeight = 1.0'f32,
     backendType = UiBackendType.Terminal)
@@ -2189,6 +2299,12 @@ proc runTests() =
   testStableExplicitIdsAcrossFrames()
   testPushPopIdScopes()
   # testButtonHoverAndPressed()
+  testPressAndReleaseWithinOneFrame()
+  testSameFrameClickUsesCurrentPressTarget()
+  testSeparateFrameMouseClickTargets()
+  testSameFrameClickPreservesFinalDownState()
+  testSameFrameClickOutsideUi()
+  testMouseDragReleaseStillReported()
   testHitBoundsExcludeBottomEdge()
   testTerminalScrollBoxContentHasNoPadding()
   testTerminalScrollBoxUsesCellScrollbar()
