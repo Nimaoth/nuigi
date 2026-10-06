@@ -3,6 +3,7 @@ when defined(nimony):
   import std/dirs
 import nuigi, nuigi/widgets, nuigi/layout/[flex, grid], nuigi/core/[vecmath, arena, array_view]
 import nuigi/widgets/[tree_table, file_system_cursor]
+import nuigi/styling/theme
 
 include nuigi/util/compat2
 
@@ -2338,7 +2339,103 @@ proc runTests() =
   testTreeTableTreeTexts()
   testTerminalTreeTableExpandSymbols()
 
+proc testNamedThemeStyles() =
+  var builder = newBuilder(fixedMeasureText)
+  require(builder.themeStyleIndex("panel-active") == UiStyleIndexPanelActive.uint16,
+    "active view surface should be registered by name")
+  require(builder.themeStyleIndex("header-active") == UiStyleIndexHeaderActive.uint16,
+    "active view header should be registered by name")
+  for (base, active) in [(UiStyleIndexPanel, UiStyleIndexPanelActive),
+      (UiStyleIndexHeader, UiStyleIndexHeaderActive)]:
+    require(builder.themeStyle(base)[].paddingX == builder.themeStyle(active)[].paddingX,
+      "active view styles should preserve base metrics")
+    require(builder.themeStyle(base)[].fillColor != builder.themeStyle(active)[].fillColor,
+      "active view styles should have distinct defaults")
+  let (palette, _) = createThemeFromColor(rgba(0.2'f32, 0.4'f32, 0.6'f32, 1))
+  require(palette[UiStyleIndexPanelActive.int - 1].fillColor !=
+      builder.themeStyle(UiStyleIndexPanelActive)[].fillColor,
+    "primary-color palette should initialize active surfaces")
+  require(palette[UiStyleIndexHeaderActive.int - 1].fillColor !=
+      builder.themeStyle(UiStyleIndexHeaderActive)[].fillColor,
+    "primary-color palette should initialize active headers")
+  require(builder.themeStyleIndex("scrollbar-handle") == UiStyleIndexScrollBarHandle.uint16,
+    "built-in widget names should use kebab case with scrollbar as one word")
+  require(builder.themeTextStyleIndex("default-mono") == UiStyleIndexDefaultMono.uint16,
+    "built-in text names should be registered")
+  for index in UiStyleIndexDefault .. UiStyleIndex.high:
+    var found = false
+    for name, slot in builder.themeStyleIndices.pairs:
+      if slot == index.uint16:
+        found = true
+    require(found, "every built-in widget slot should have a name")
+  for index in UiStyleIndexDefaultText .. UiTextStyleIndex.high:
+    var found = false
+    for name, slot in builder.themeTextStyleIndices.pairs:
+      if slot == index.uint16:
+        found = true
+    require(found, "every built-in text slot should have a name")
+
+  let widgetCount = builder.themeStyles.len
+  let textCount = builder.themeTextStyles.len
+  let tint = rgba(0.2'f32, 0.3'f32, 0.4'f32, 0.5'f32)
+  discard builder.setThemeStyle("custom", UiStyle(fillColor: tint, paddingX: 7))
+  discard builder.setThemeTextStyle("custom", UiNodeText(textColor: tint, fontSize: 19))
+  let widgetIndex = builder.themeStyleIndex("custom")
+  let textIndex = builder.themeTextStyleIndex("custom")
+  require(widgetIndex.int == widgetCount + 1 and textIndex.int == textCount + 1,
+    "custom widget and text names should allocate independent slots")
+  discard builder.setThemeStyle("custom", UiStyle(fillColor: tint, paddingX: 9))
+  discard builder.setThemeTextStyle("custom", UiNodeText(textColor: tint, fontSize: 21))
+  require(builder.themeStyles.len == widgetCount + 1 and builder.themeTextStyles.len == textCount + 1,
+    "updating a named style should reuse its slot")
+  discard builder.setThemeStyleIndex("alias", widgetIndex)
+  discard builder.setThemeTextStyleIndex("alias", textIndex)
+  require(builder.themeStyle("alias")[].paddingX == 9, "widget aliases should resolve")
+  require(builder.themeTextStyle("alias")[].fontSize == 21, "text aliases should resolve")
+  discard builder.setThemeStyleIndex("builtin-alias", UiStyleIndexPanel)
+  discard builder.setThemeTextStyleIndex("builtin-alias", UiStyleIndexDefaultText)
+
+  for frame in 0 .. 1:
+    discard builder.beginUiFrame(100.0'f32, 100.0'f32)
+    builder.node:
+      discard builder.fit().styleIndex("alias").textStyleIndex("alias")
+      require(builder.currentNode.styleIndex == widgetIndex, "named widget setter should select slot")
+      require(builder.currentNode.textIndex == textIndex, "named text setter should select slot")
+      builder.setCurrentNodeStyleIndex("custom")
+      builder.setCurrentNodeTextIndex("custom")
+      discard builder.text("named")
+      require(builder.nodeStyle(builder.currentNode)[].paddingX == 9, "named widget style should render")
+      require(builder.nodeText(builder.currentNode)[].fontSize == 21, "named text style should render")
+    builder.node:
+      discard builder.fit().copyStyleIndex("custom").copyTextStyleIndex("custom").text("copied")
+      require(builder.nodeStyle(builder.currentNode)[].paddingX == 9, "named style copy should preserve metrics")
+      require(builder.nodeText(builder.currentNode)[].fontSize == 21, "named text copy should preserve metrics")
+    builder.endUiFrame()
+  discard builder.setThemeStyleIndex("alias", UiStyleIndexHeader)
+  discard builder.setThemeTextStyleIndex("alias", UiStyleIndexHeaderText)
+  require(builder.themeStyleIndex("alias") == UiStyleIndexHeader.uint16, "widget aliases may be rebound")
+  require(builder.themeTextStyleIndex("alias") == UiStyleIndexHeaderText.uint16, "text aliases may be rebound")
+  var separate = newBuilder(fixedMeasureText)
+  require(not separate.themeStyleIndices.hasKey("custom"), "name tables should be builder-local")
+  require(not separate.themeTextStyleIndices.hasKey("custom"), "text name tables should be builder-local")
+  discard separate.setThemeStyle("default", UiStyle(paddingX: 13))
+  discard separate.setThemeTextStyle("default-text", UiNodeText(fontSize: 27))
+  require(separate.defaultStyle.paddingX == 13, "named default setter should update defaultStyle")
+  require(separate.defaultText.fontSize == 27, "named default text setter should update defaultText")
+
 when isMainModule:
+  if paramCount() > 0:
+    var builder = newBuilder(fixedMeasureText)
+    case paramStr(1)
+    of "--unknown-style": discard builder.styleIndex("missing")
+    of "--unknown-text-style": discard builder.textStyleIndex("missing")
+    of "--invalid-style-slot": discard builder.setThemeStyleIndex("invalid", 0'u16)
+    of "--invalid-text-slot": discard builder.setThemeTextStyleIndex("invalid", high(uint16))
+    of "--empty-style-name": discard builder.setThemeStyle("", UiStyle())
+    of "--empty-text-name": discard builder.setThemeTextStyle("", UiNodeText())
+    else: quit "Unknown core test argument"
+    quit "Expected named theme API to reject invalid input"
+  testNamedThemeStyles()
   runTests()
 
 # Intentionally no endUiFrame/render calls here: tests validate flags/layout only,

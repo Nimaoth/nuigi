@@ -39,7 +39,7 @@ All extra flags are passed through to the Nim compiler automatically.
 
 ## Tests
 
-Tests and benchmarks are separate programs under `tests/`. Run the complete suite for one compiler with `./build.exe test` (Nim 2 by default), `./build.exe test --nim2`, or `./build.exe test --nimony`. The Nimony suite omits `font_wrapping_test.nim`; focused test and benchmark commands are documented in [docs/testing.md](docs/testing.md).
+Tests and benchmarks are separate programs under `tests/`. Run the complete suite for one compiler with `./build.exe test` (Nim 2 by default), `./build.exe test --nim2`, or `./build.exe test --nimony`. Both compiler suites run every test; focused test and benchmark commands are documented in [docs/testing.md](docs/testing.md).
 
 ## Key config files
 

@@ -16,8 +16,8 @@ include nuigi/util/compat2
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler
 import nuigi/rendering/mesh
-import nuigi/text/text
-export mesh, text
+import nuigi/text/text as nui_text
+export mesh, nui_text
 
 from nuigi/core/hash as nui_hash import Hash, `!&`, `!$`
 
@@ -860,8 +860,12 @@ type
       ## Output produced for the current frame.
     themeStyles*: seq[UiStyle]
       ## Named theme styles addressed by `UiStyleIndex`.
+    themeStyleIndices*: Table[string, uint16]
+      ## Case-sensitive names and aliases for widget theme slots.
     themeTextStyles*: seq[UiNodeText]
       ## Named theme text styles addressed by `UiTextStyleIndex`.
+    themeTextStyleIndices*: Table[string, uint16]
+      ## Case-sensitive names and aliases for text theme slots.
     animations*: seq[UiAnimation]
       ## Active per-node animations.
     animationSpeed*: float32 = 1.0'f32
@@ -994,7 +998,7 @@ type
   UiStyleIndex* = enum
     ## Named theme style slots in `UiBuilder.themeStyles`. Slots are 1-based when
     ## used as node `styleIndex` (slot 0 / `None` means "unset"). `initDefaultThemeStyles`
-    ## fills these from `UiStyleIndexDefault` up to `UiStyleIndexAccent`.
+    ## fills these from `UiStyleIndexDefault` through `UiStyleIndex.high`.
     UiStyleIndexNone
       ## Sentinel: no style assigned.
     UiStyleIndexDefault
@@ -1074,7 +1078,22 @@ type
     UiStyleIndexTooltip
       ## Tooltip popup.
     UiStyleIndexAccent
-      ## Accent color block (base for `accentVariation`); last slot (`UiThemeStyleSlotCount`).
+      ## Accent color block (base for `accentVariation`).
+    UiStyleIndexCursor
+    UiStyleIndexSelection
+    UiStyleIndexSearchMatch
+    UiStyleIndexMatchingText
+    UiStyleIndexContext
+    UiStyleIndexDiffInsertedLine
+    UiStyleIndexDiffRemovedLine
+    UiStyleIndexDiffChangedLine
+    UiStyleIndexDiffInsertedText
+    UiStyleIndexDiffRemovedText
+    UiStyleIndexDiffChangedText
+    UiStyleIndexPanelActive
+      ## Active view surface.
+    UiStyleIndexHeaderActive
+      ## Active view header.
 
   UiTextStyleIndex* = enum
     ## Named theme text-style slots in `UiBuilder.themeTextStyles`. Like `UiStyleIndex`,
@@ -1136,10 +1155,46 @@ type
       ## Header/section-title text (last slot; `UiTextStyleCount`).
     UiStyleIndexDefaultMono
       ## Default monospace text style.
+    UiStyleIndexCursorText
+    UiStyleIndexErrorText
+    UiStyleIndexWarningText
+    UiStyleIndexInfoText
+    UiStyleIndexHintText
+    UiStyleIndexContextText
+    UiStyleIndexSignatureActiveParamText
+    UiStyleIndexSignatureActiveText
+    UiStyleIndexSignatureInactiveParamText
+    UiStyleIndexSignatureInactiveText
+    UiStyleIndexRainbow0Text
+    UiStyleIndexRainbow1Text
+    UiStyleIndexRainbow2Text
+    UiStyleIndexRainbow3Text
+    UiStyleIndexRainbow4Text
+    UiStyleIndexRainbow5Text
+    UiStyleIndexRainbow6Text
+    UiStyleIndexRainbow7Text
+    UiStyleIndexRainbow8Text
+    UiStyleIndexRainbow9Text
+    UiStyleIndexTerminalAnsiBlackText
+    UiStyleIndexTerminalAnsiRedText
+    UiStyleIndexTerminalAnsiGreenText
+    UiStyleIndexTerminalAnsiYellowText
+    UiStyleIndexTerminalAnsiBlueText
+    UiStyleIndexTerminalAnsiMagentaText
+    UiStyleIndexTerminalAnsiCyanText
+    UiStyleIndexTerminalAnsiWhiteText
+    UiStyleIndexTerminalAnsiBrightBlackText
+    UiStyleIndexTerminalAnsiBrightRedText
+    UiStyleIndexTerminalAnsiBrightGreenText
+    UiStyleIndexTerminalAnsiBrightYellowText
+    UiStyleIndexTerminalAnsiBrightBlueText
+    UiStyleIndexTerminalAnsiBrightMagentaText
+    UiStyleIndexTerminalAnsiBrightCyanText
+    UiStyleIndexTerminalAnsiBrightWhiteText
 
 const
-  UiThemeStyleSlotCount* = int(UiStyleIndexAccent)
-  UiTextStyleCount* = int(UiStyleIndexDefaultMono)
+  UiThemeStyleSlotCount* = int(UiStyleIndex.high)
+  UiTextStyleCount* = int(UiTextStyleIndex.high)
 
 proc accentVariation*(base: UiColor, hueShift: float32, brightness: float32): UiColor =
   ## Derive a color from `base` by rotating hue (`hueShift` in turns, 0..1)
@@ -1828,6 +1883,40 @@ proc setTraceMode*(b: var UiBuilder, mode: UiTraceMode, nodeId: UiNodeId): var U
   b.traceNodeId = nodeId
   b
 
+proc themeStyleIndex*(b: UiBuilder, name: string): uint16 =
+  if not b.themeStyleIndices.hasKey(name):
+    quit "Unknown theme style: " & name
+  result = b.themeStyleIndices.getOrQuit(name)
+  if result == 0 or result.int > b.themeStyles.len:
+    quit "Invalid theme style index for: " & name
+
+proc themeTextStyleIndex*(b: UiBuilder, name: string): uint16 =
+  if not b.themeTextStyleIndices.hasKey(name):
+    quit "Unknown theme text style: " & name
+  result = b.themeTextStyleIndices.getOrQuit(name)
+  if result == 0 or result.int > b.themeTextStyles.len:
+    quit "Invalid theme text style index for: " & name
+
+proc setThemeStyleIndex*(b: var UiBuilder, name: string, index: uint16): var UiBuilder {.discardable.} =
+  ## Register or rebind a name to an existing nonzero theme slot.
+  if name.len == 0 or index == 0 or index.int > b.themeStyles.len:
+    quit "Invalid theme style registration: " & name
+  b.themeStyleIndices[name] = index
+  b
+
+proc setThemeStyleIndex*(b: var UiBuilder, name: string, index: UiStyleIndex): var UiBuilder {.discardable.} =
+  b.setThemeStyleIndex(name, index.uint16)
+
+proc setThemeTextStyleIndex*(b: var UiBuilder, name: string, index: uint16): var UiBuilder {.discardable.} =
+  ## Register or rebind a name to an existing nonzero text theme slot.
+  if name.len == 0 or index == 0 or index.int > b.themeTextStyles.len:
+    quit "Invalid theme text style registration: " & name
+  b.themeTextStyleIndices[name] = index
+  b
+
+proc setThemeTextStyleIndex*(b: var UiBuilder, name: string, index: UiTextStyleIndex): var UiBuilder {.discardable.} =
+  b.setThemeTextStyleIndex(name, index.uint16)
+
 proc setCurrentNodeText*(b: var UiBuilder, value: UiNodeText) {.inline.} =
   ## Set the text data for the current node.
   b.ensureNodeText(b.currentNode) = value
@@ -1839,6 +1928,9 @@ proc setCurrentNodeTextIndex*(b: var UiBuilder, value: uint16) {.inline.} =
 proc setCurrentNodeTextIndex*(b: var UiBuilder, value: int) {.inline.} =
   ## Set the text index for the current node. Negative values are clamped to 0.
   b.currentNode.textIndex = max(0, value).uint16
+
+proc setCurrentNodeTextIndex*(b: var UiBuilder, name: string) {.inline.} =
+  b.setCurrentNodeTextIndex(b.themeTextStyleIndex(name))
 
 proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, textIndex: uint16) {.inline.} =
   ## Copy a theme style into the current node's own style slot by theme index.
@@ -1859,6 +1951,9 @@ proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, textIndex: uint16) {.inline.}
 proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, textIndex: int) {.inline.} =
   ## Copy a theme style into the current node's own style slot by theme index (int overload).
   b.copyCurrentNodeTextAtIndex(max(0, textIndex).uint16)
+
+proc copyCurrentNodeTextAtIndex*(b: var UiBuilder, name: string) {.inline.} =
+  b.copyCurrentNodeTextAtIndex(b.themeTextStyleIndex(name))
 
 proc ensureThemeTextStyleSlot(b: var UiBuilder, styleIndex: uint16): var UiNodeText =
   let slot = int(styleIndex)
@@ -1899,6 +1994,20 @@ proc setThemeTextStyle*(b: var UiBuilder, styleIndex: int, value: UiNodeText): v
   ## Set a theme style slot by index (int overload).
   b.setThemeTextStyle(max(0, styleIndex).uint16, value)
 
+proc themeTextStyle*(b: UiBuilder, name: string): ptr UiNodeText {.inline.} =
+  b.themeTextStyle(b.themeTextStyleIndex(name))
+
+proc setThemeTextStyle*(b: var UiBuilder, name: string, value: UiNodeText): var UiBuilder {.discardable.} =
+  ## Update a named slot, or append and register a new one.
+  if name.len == 0:
+    quit "Theme text style name must not be empty"
+  if b.themeTextStyleIndices.hasKey(name):
+    return b.setThemeTextStyle(b.themeTextStyleIndex(name), value)
+  if b.themeTextStyles.len >= high(uint16).int:
+    quit "Theme text style slots exhausted"
+  let index = b.addThemeTextStyle(value)
+  b.setThemeTextStyleIndex(name, index)
+
 proc setCurrentNodeStyle*(b: var UiBuilder, value: UiStyle) {.inline.} =
   ## Set the style for the current node.
   b.ensureNodeStyle(b.currentNode) = value
@@ -1911,6 +2020,9 @@ proc setCurrentNodeStyleIndex*(b: var UiBuilder, value: int) {.inline.} =
   ## Set the style index for the current node. Negative values are clamped to 0.
   b.currentNode.styleIndex = max(0, value).uint16
 
+proc setCurrentNodeStyleIndex*(b: var UiBuilder, name: string) {.inline.} =
+  b.setCurrentNodeStyleIndex(b.themeStyleIndex(name))
+
 proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: uint16) {.inline.} =
   ## Copy a theme style into the current node's own style slot by theme index.
   let slot = int(styleIndex)
@@ -1921,6 +2033,9 @@ proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: uint16) {.inline
 proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, styleIndex: int) {.inline.} =
   ## Copy a theme style into the current node's own style slot by theme index (int overload).
   b.copyCurrentNodeStyleAtIndex(max(0, styleIndex).uint16)
+
+proc copyCurrentNodeStyleAtIndex*(b: var UiBuilder, name: string) {.inline.} =
+  b.copyCurrentNodeStyleAtIndex(b.themeStyleIndex(name))
 
 proc ensureThemeStyleSlot(b: var UiBuilder, styleIndex: uint16): var UiStyle =
   let slot = int(styleIndex)
@@ -1957,6 +2072,21 @@ proc setThemeStyle*(b: var UiBuilder, styleIndex: int, value: UiStyle): var UiBu
   ## Set a theme style slot by index (int overload).
   b.setThemeStyle(max(0, styleIndex).uint16, value)
 
+proc themeStyle*(b: UiBuilder, name: string): ptr UiStyle {.inline.} =
+  b.themeStyle(b.themeStyleIndex(name))
+
+proc setThemeStyle*(b: var UiBuilder, name: string, value: UiStyle): var UiBuilder {.discardable.} =
+  ## Update a named slot, or append and register a new one.
+  if name.len == 0:
+    quit "Theme style name must not be empty"
+  if b.themeStyleIndices.hasKey(name):
+    return b.setThemeStyle(b.themeStyleIndex(name), value)
+  if b.themeStyles.len >= high(uint16).int:
+    quit "Theme style slots exhausted"
+  let index = (b.themeStyles.len + 1).uint16
+  discard b.setThemeStyle(index, value)
+  b.setThemeStyleIndex(name, index)
+
 proc virtualizeNode*(b: var UiBuilder): var UiBuilder {.discardable.} =
   ## Mark the current node so that, if it is absent from a future frame, it is
   ## automatically promoted into a persistent virtual node (see `endUiFrame`).
@@ -1985,6 +2115,10 @@ proc styleIndex*(b: var UiBuilder, value: UiStyleIndex): var UiBuilder {.discard
   b.setCurrentNodeStyleIndex(value.uint16)
   b
 
+proc styleIndex*(b: var UiBuilder, name: string): var UiBuilder {.discardable.} =
+  b.setCurrentNodeStyleIndex(name)
+  b
+
 proc copyStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
   ## Fluent setter: copy a theme style into the current node's style slot.
   b.copyCurrentNodeStyleAtIndex(value)
@@ -2000,6 +2134,10 @@ proc copyStyleIndex*(b: var UiBuilder, value: UiStyleIndex): var UiBuilder {.dis
   b.copyCurrentNodeStyleAtIndex(value.uint16)
   b
 
+proc copyStyleIndex*(b: var UiBuilder, name: string): var UiBuilder {.discardable.} =
+  b.copyCurrentNodeStyleAtIndex(name)
+  b
+
 proc textStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
   ## Fluent setter: set the current node's text style index to a theme slot.
   b.setCurrentNodeTextIndex(value)
@@ -2008,6 +2146,10 @@ proc textStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardab
 proc textStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discardable.} =
   ## Fluent setter: set the current node's text style index to a theme slot (int overload).
   b.setCurrentNodeTextIndex(value)
+  b
+
+proc textStyleIndex*(b: var UiBuilder, name: string): var UiBuilder {.discardable.} =
+  b.setCurrentNodeTextIndex(name)
   b
 
 proc copyTextStyleIndex*(b: var UiBuilder, value: uint16): var UiBuilder {.discardable.} =
@@ -2023,6 +2165,10 @@ proc copyTextStyleIndex*(b: var UiBuilder, value: int): var UiBuilder {.discarda
 proc copyTextStyleIndex*(b: var UiBuilder, value: UiTextStyleIndex): var UiBuilder {.discardable.} =
   ## Fluent setter: copy a theme text style into the current node's text slot (int overload).
   b.copyCurrentNodeTextAtIndex(value.uint16)
+  b
+
+proc copyTextStyleIndex*(b: var UiBuilder, name: string): var UiBuilder {.discardable.} =
+  b.copyCurrentNodeTextAtIndex(name)
   b
 
 proc setCurrentNodeGap*(b: var UiBuilder, value: float32) {.inline.} =
@@ -2525,6 +2671,24 @@ proc initDefaultThemeStyles*(): seq[UiStyle] =
     fillColor: accent,
     borderColor: accent,
   )
+  result[int(UiStyleIndexCursor) - 1] = UiStyle(fillColor: graySurfaceHi)
+  result[int(UiStyleIndexSelection) - 1] = UiStyle(fillColor: UiColor(r: 0.3'f32, g: 0.4'f32, b: 0.6'f32, a: 0.5'f32))
+  result[int(UiStyleIndexSearchMatch) - 1] = UiStyle(fillColor: UiColor(r: 0.9'f32, g: 0.7'f32, b: 0.2'f32, a: 0.4'f32))
+  let searchMatchStyle = result[int(UiStyleIndexSearchMatch) - 1]
+  result[int(UiStyleIndexMatchingText) - 1] = searchMatchStyle
+  result[int(UiStyleIndexContext) - 1] = UiStyle(fillColor: graySurface)
+  for index in UiStyleIndexDiffInsertedLine .. UiStyleIndexDiffChangedText:
+    let fill = case index
+      of UiStyleIndexDiffInsertedLine, UiStyleIndexDiffInsertedText: UiColor(r: 0.1'f32, g: 0.2'f32, b: 0.1'f32, a: 1)
+      of UiStyleIndexDiffRemovedLine, UiStyleIndexDiffRemovedText: UiColor(r: 0.2'f32, g: 0.1'f32, b: 0.1'f32, a: 1)
+      else: UiColor(r: 0.2'f32, g: 0.2'f32, b: 0.1'f32, a: 1)
+    result[index.int - 1] = UiStyle(fillColor: fill)
+  var activePanel = result[int(UiStyleIndexPanel) - 1]
+  activePanel.fillColor = UiColor(r: 0.08'f32, g: 0.08'f32, b: 0.09'f32, a: 1.0'f32)
+  result[int(UiStyleIndexPanelActive) - 1] = activePanel
+  var activeHeader = result[int(UiStyleIndexHeader) - 1]
+  activeHeader.fillColor = grayHover
+  result[int(UiStyleIndexHeaderActive) - 1] = activeHeader
 
 proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
   result = newSeq[UiNodeText](UiTextStyleCount)
@@ -2667,6 +2831,26 @@ proc initDefaultThemeTextStyles*(): seq[UiNodeText] =
     text: "Mono".uiString,
     textColor: defaultText,
   )
+  let baseTextStyle = result[int(UiStyleIndexDefaultText) - 1]
+  for index in UiStyleIndexCursorText .. UiTextStyleIndex.high:
+    result[index.int - 1] = baseTextStyle
+  result[int(UiStyleIndexErrorText) - 1].textColor = UiColor(r: 1, g: 0.3'f32, b: 0.3'f32, a: 1)
+  result[int(UiStyleIndexWarningText) - 1].textColor = accentWarm
+  result[int(UiStyleIndexInfoText) - 1].textColor = UiColor(r: 0.3'f32, g: 0.7'f32, b: 1, a: 1)
+  result[int(UiStyleIndexHintText) - 1].textColor = UiColor(r: 0.5'f32, g: 0.8'f32, b: 0.6'f32, a: 1)
+  for index in UiStyleIndexRainbow0Text .. UiStyleIndexRainbow9Text:
+    result[index.int - 1].textColor = UiColor()
+  let ansiColors = [
+    UiColor(r: 0.5'f32, g: 0.5'f32, b: 0.5'f32, a: 1), UiColor(r: 1, g: 0.5'f32, b: 0.5'f32, a: 1),
+    UiColor(r: 0.5'f32, g: 1, b: 0.5'f32, a: 1), UiColor(r: 1, g: 1, b: 0.5'f32, a: 1),
+    UiColor(r: 0.5'f32, g: 0.5'f32, b: 1, a: 1), UiColor(r: 1, g: 0.5'f32, b: 1, a: 1),
+    UiColor(r: 0.5'f32, g: 1, b: 1, a: 1), UiColor(r: 1, g: 1, b: 1, a: 1),
+    UiColor(r: 0.7'f32, g: 0.7'f32, b: 0.7'f32, a: 1), UiColor(r: 1, g: 0.7'f32, b: 0.7'f32, a: 1),
+    UiColor(r: 0.7'f32, g: 1, b: 0.7'f32, a: 1), UiColor(r: 1, g: 1, b: 0.7'f32, a: 1),
+    UiColor(r: 0.7'f32, g: 0.7'f32, b: 1, a: 1), UiColor(r: 1, g: 0.7'f32, b: 1, a: 1),
+    UiColor(r: 0.7'f32, g: 1, b: 1, a: 1), UiColor(r: 1, g: 1, b: 1, a: 1)]
+  for i, tint in ansiColors:
+    result[UiStyleIndexTerminalAnsiBlackText.int - 1 + i].textColor = tint
 
 func rgba*[T: SomeNumber](r, g, b: T, a: T = T(1)): UiColor =
   ## Construct a UiColor from numeric values (0-1 range for float, 0-255 for int).
@@ -2737,6 +2921,17 @@ template traceUiNode*(b: UiBuilder, eventName: string, idx: int): untyped =
         " flags=" & $n.flags
       )
 
+proc themeSlotName*(name: string): string =
+  result = ""
+  let suffix = name["UiStyleIndex".len .. ^1].replace("ScrollBar", "Scrollbar")
+  for c in suffix:
+    if c in {'A' .. 'Z'}:
+      if result.len > 0:
+        result.add '-'
+      result.add c.toLowerAscii
+    else:
+      result.add c
+
 proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMeshFn = nil,
   textHeight = 16.0'f32, antialiasMeshWidth = 0.0'f32,
   backendType = UiBackendType.Graphical): UiBuilder =
@@ -2773,6 +2968,11 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     lastNode: cast[ptr UiNode](sentinelNode),
     fontScale: 1,
   )
+
+  for index in UiStyleIndexDefault .. UiStyleIndex.high:
+    discard result.setThemeStyleIndex(themeSlotName($index), index)
+  for index in UiStyleIndexDefaultText .. UiTextStyleIndex.high:
+    discard result.setThemeTextStyleIndex(themeSlotName($index), index)
 
   result.textArrangementCacheCapacity = 4096
   result.measureText = measureText
