@@ -2,6 +2,9 @@
 import std/[parseopt, options, strutils, os, strformat, dirs, files, sequtils, unicode, osproc, times, tables, json, jsonutils, threadpool, sets, sugar, algorithm, strtabs]
 
 let windowsMesonPath = "C:/Users/nimao/AppData/Roaming/Python/Python310/Scripts/meson.exe"
+const msvcStaticRuntimeFlag =
+  when defined(windows): " -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded"
+  else: ""
 
 proc findMsBuild(): string =
   # Locate MSBuild.exe so the same build works locally and on CI (e.g. GitHub
@@ -163,6 +166,15 @@ proc copyLinuxLibrary(searchDir, libraryName: string) =
     echo "Could not find ", libraryName, " under ", searchDir
     quit(1)
 
+proc copyBuiltLibrary(searchDir, sourceName, targetName: string) =
+  for path in walkDirRec(searchDir, yieldFilter = {pcFile, pcLinkToFile}):
+    if extractFilename(path).toLowerAscii() == sourceName.toLowerAscii():
+      createDir("build")
+      copyFile(path, "build" / targetName)
+      return
+  echo "Could not find ", sourceName, " under ", searchDir
+  quit(1)
+
 proc buildSdl3(debug = false) =
   echo "buildSdl3"
   createDir("vendor")
@@ -182,6 +194,21 @@ proc buildSdl3(debug = false) =
     shell &"cmake -S vendor/SDL -B {buildDir} -DCMAKE_BUILD_TYPE={mode} -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF"
     shell &"cmake --build {buildDir} --config {mode} --parallel"
     copyLinuxLibrary(buildDir, "libSDL3.so")
+
+proc buildSdl3Static() =
+  echo "buildSdl3Static"
+  createDir("vendor")
+  if not dirExists("vendor/SDL"):
+    shell("git clone https://github.com/libsdl-org/SDL", "vendor")
+
+  requireProgram("cmake", "Install CMake to build SDL3.")
+  let buildDir = "build/sdl3_static"
+  shell &"cmake -S vendor/SDL -B {buildDir} -DCMAKE_BUILD_TYPE=Release -DSDL_SHARED=OFF -DSDL_STATIC=ON -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF{msvcStaticRuntimeFlag}"
+  shell &"cmake --build {buildDir} --config Release --parallel"
+  when defined(windows):
+    copyBuiltLibrary(buildDir, "SDL3-static.lib", "SDL3.lib")
+  else:
+    copyBuiltLibrary(buildDir, "libSDL3.a", "libSDL3.a")
 
 proc buildSdl3Wasm() =
   # Build SDL3 as a static wasm library with the Emscripten toolchain so it can
@@ -231,6 +258,21 @@ proc buildFreetype(debug = false) =
     shell &"cmake -S vendor/freetype -B {buildDir} -DCMAKE_BUILD_TYPE={mode} -DBUILD_SHARED_LIBS=ON -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE -DFT_DISABLE_ZLIB=TRUE"
     shell &"cmake --build {buildDir} --config {mode} --parallel"
     copyLinuxLibrary(buildDir, "libfreetype.so")
+
+proc buildFreetypeStatic() =
+  echo "buildFreetypeStatic"
+  createDir("vendor")
+  if not dirExists("vendor/freetype"):
+    shell("git clone https://gitlab.freedesktop.org/freetype/freetype.git", "vendor")
+
+  requireProgram("cmake", "Install CMake to build FreeType.")
+  let buildDir = "build/freetype_static"
+  shell &"cmake -S vendor/freetype -B {buildDir} -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE -DFT_DISABLE_ZLIB=TRUE{msvcStaticRuntimeFlag}"
+  shell &"cmake --build {buildDir} --config Release --parallel"
+  when defined(windows):
+    copyBuiltLibrary(buildDir, "freetype.lib", "freetype.lib")
+  else:
+    copyBuiltLibrary(buildDir, "libfreetype.a", "libfreetype.a")
 
 proc buildHarfbuzz() =
   echo "buildHarfbuzz"
@@ -301,10 +343,14 @@ proc buildFribidi() =
     shell &"meson compile -C {buildDir}"
     copyLinuxLibrary(buildDir, "libfribidi.so")
 
-proc buildNuiDemo(compiler: NimCompiler) =
+proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
-  let outFlag = if wasm: "-o:build/nuigi-demo.js" else: "-o:bin/demo.exe"
+  createDir("bin")
+  let outFlag =
+    if wasm: "-o:build/nuigi-demo.js"
+    elif staticDependencies: "-o:bin/demo-static.exe"
+    else: "-o:bin/demo.exe"
   if wasm:
     if gEmscriptenEnv.len == 0:
       gEmscriptenEnv = emscriptenEnv()
@@ -321,9 +367,18 @@ proc buildNuiDemo(compiler: NimCompiler) =
       "--passL:-Lbuild"
     else:
       "--passL:-Lbuild --passL:'-Wl,-rpath,\\$ORIGIN'"
+  let staticSdlSystemLink =
+    when defined(windows):
+      if staticDependencies:
+        "--passL:-lkernel32 --passL:-luser32 --passL:-lgdi32 --passL:-lwinmm --passL:-limm32 --passL:-lole32 --passL:-loleaut32 --passL:-lversion --passL:-luuid --passL:-ladvapi32 --passL:-lsetupapi --passL:-lshell32 --passL:-lhid --passL:-lmincore --passL:-ldinput8"
+      else:
+        ""
+    else:
+      ""
+  let noHarfbuzz = if staticDependencies: "-d:nuiNoHarfbuzz" else: ""
   case compiler
   of Nim2:
-    shell &"nim c {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nim c {outFlag} --cc:clang --lineDir:off -d:freetypeStatic -d:sdl3 {noHarfbuzz} {sdlLink} {staticSdlSystemLink} {passthroughArgs} examples/demo.nim"
   of Nim2Ic:
     shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
@@ -631,6 +686,12 @@ proc main() =
   of "freetype":
     buildFreetype()
 
+  of "sdl3-static":
+    buildSdl3Static()
+
+  of "freetype-static":
+    buildFreetypeStatic()
+
   of "harfbuzz":
     buildHarfbuzz()
 
@@ -647,6 +708,11 @@ proc main() =
           not fileExists("assets/custom.frag.spv"):
         buildShader()
     buildNuiDemo(compiler)
+
+  of "demo-static":
+    buildSdl3Static()
+    buildFreetypeStatic()
+    buildNuiDemo(Nim2, staticDependencies = true)
 
   of "terminal-demo":
     buildTerminalDemo(compiler)
