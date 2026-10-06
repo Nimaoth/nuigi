@@ -77,6 +77,10 @@ type
 
   LoadedFont = object
     name: string
+    family: string
+    style: int # bit 0: bold, bit 1: italic
+    weight: int
+    styleVariants: array[4, FontId] # groups only: cached styled groups, indexed by style
     children: seq[FontId]
     data: seq[uint8]
     face: FT_Face
@@ -135,7 +139,31 @@ type
     textMeshLruHead: nil TextMeshCacheEntry
     textMeshCacheTick: uint64
     glyphAdvanceCache: Table[(int, int, FT_UInt), cfloat] # (fontIndex, sizeIdx, glyphIndex) -> advance
+    fontFamilies: Table[string, array[4, FontId]] # normalized family name -> font per style
     fontLibrary*: FT_Library
+
+const noFontStyleVariants = [-1'i16, -1'i16, -1'i16, -1'i16]
+
+func fontStyleIndex(flags: UiTextFlags): int {.inline.} =
+  result = 0
+  if UiTextFlag.Bold in flags:
+    result = result or 1
+  if UiTextFlag.Italic in flags:
+    result = result or 2
+
+func normalizedFontName(name: string): string =
+  result = ""
+  for c in name:
+    if c in {'a'..'z', '0'..'9'}:
+      result.add c
+    elif c in {'A'..'Z'}:
+      result.add chr(ord(c) + 32)
+
+proc fontCString(value: cstring): string =
+  when defined(nimony):
+    fromCString(value)
+  else:
+    $value
 
 proc markFontAtlasDirty*(r: var FontRender, x, y, w, h: int) {.raises: [].} =
   if w <= 0 or h <= 0:
@@ -176,8 +204,8 @@ func canGrowFontAtlas*(r: FontRender): bool {.inline.} =
 func nextFontAtlasSize*(r: FontRender): tuple[width, height: int] {.inline.} =
   (min(r.fontAtlasWidth * 2, r.maxFontAtlasSize), min(r.fontAtlasHeight * 2, r.maxFontAtlasSize))
 
-func glyphCacheKey(glyphIndex: FT_UInt, subpixelPhase: int): uint64 {.inline.} =
-  (glyphIndex.uint64 shl 2) or subpixelPhase.uint64
+func glyphCacheKey(glyphIndex: FT_UInt, subpixelPhase: int, textFlags: UiTextFlags = {}): uint64 {.inline.} =
+  (glyphIndex.uint64 shl 6) or (subpixelPhase.uint64 shl 4) or textFlagBits(textFlags)
 
 proc beginFontRenderFrame*(r: var FontRender) {.inline, raises: [].} =
   r.glyphPackingTimeNs = 0
@@ -234,6 +262,64 @@ proc ftAscentDescent(r: var FontRender, primaryFont: int = 0): tuple[asc: cfloat
     return (0, 0)
   let m = r.fonts[faceIdx].face.size.metrics
   return (m.ascender.cfloat / 64.0, m.descender.cfloat / 64.0)
+
+proc registerFontFamilyMember(r: var FontRender, fontId: FontId) {.raises: [].} =
+  let key = normalizedFontName(r.fonts[fontId].family)
+  if key.len == 0:
+    return
+  var variants = noFontStyleVariants
+  if r.fontFamilies.hasKey(key):
+    variants = r.fontFamilies.getOrQuit(key)
+  let style = r.fonts[fontId].style
+  # Prefer the face closest to the canonical weight, e.g. Regular over Light/Medium.
+  let targetWeight = if (style and 1) != 0: 700 else: 400
+  let existing = variants[style]
+  if existing < 0 or abs(r.fonts[fontId].weight - targetWeight) < abs(r.fonts[existing].weight - targetWeight):
+    variants[style] = fontId
+  r.fontFamilies[key] = variants
+
+proc styledFontId*(r: var FontRender, fontId: FontId, flags: UiTextFlags): FontId {.raises: [].} =
+  ## Returns the loaded variant of `fontId` (same family) whose style is the
+  ## font's own style plus the bold/italic `flags`. Font groups map each child.
+  ## Returns `fontId` when no matching variant is loaded.
+  if fontId < 0 or fontId.int >= r.fonts.len:
+    return fontId
+  let requested = fontStyleIndex(flags)
+  if requested == 0:
+    return fontId
+
+  if r.fonts[fontId].children.len > 0:
+    let cached = r.fonts[fontId].styleVariants[requested]
+    if cached >= 0:
+      return cached
+    let children = r.fonts[fontId].children
+    var styledChildren: seq[FontId] = @[]
+    var changed = false
+    for child in children:
+      let styled = r.styledFontId(child, flags)
+      if styled != child:
+        changed = true
+      styledChildren.add styled
+    var styledGroup = fontId
+    if changed:
+      r.fonts.add(LoadedFont(children: styledChildren, styleVariants: noFontStyleVariants, activePixelSize: -1))
+      styledGroup = r.fonts.high.FontId
+    r.fonts[fontId].styleVariants[requested] = styledGroup
+    return styledGroup
+
+  let ownStyle = r.fonts[fontId].style
+  let desired = ownStyle or requested
+  if desired == ownStyle:
+    return fontId
+  let key = normalizedFontName(r.fonts[fontId].family)
+  if key.len == 0 or not r.fontFamilies.hasKey(key):
+    return fontId
+  let variants = r.fontFamilies.getOrQuit(key)
+  # Fall back to bold-only / italic-only when bold italic isn't loaded.
+  for candidate in [desired, desired and 1, desired and 2]:
+    if candidate != ownStyle and (candidate and ownStyle) == ownStyle and variants[candidate] >= 0:
+      return variants[candidate]
+  return fontId
 
 # Returns the index of the first loaded font that can render `codepoint`.
 # The requested `primaryFont` is checked first (so it acts as the main font),
@@ -316,14 +402,14 @@ when useHarfbuzz:
 
     0
 
-proc getPackedGlyphPtr(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int): nil ptr PackedChar {.raises: [].} =
+proc getPackedGlyphPtr(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int, textFlags: UiTextFlags = {}): nil ptr PackedChar {.raises: [].} =
   if fontIndex < 0 or fontIndex >= r.fonts.len:
     return nil
   assert r.fonts[fontIndex].children.len == 0
   if fontSize < 0 or fontSize >= r.fonts[fontIndex].sized.sizedData.len:
     return nil
   let slot = r.fonts[fontIndex].sized.sizedData[fontSize].addr
-  let key = glyphCacheKey(glyphIndex, subpixelPhase)
+  let key = glyphCacheKey(glyphIndex, subpixelPhase, textFlags)
   if not onRaiseQuit(slot.glyphIndexChars.hasKey(key)):
     return nil
   try:
@@ -403,7 +489,7 @@ proc ensureSizedSlot(fd: var FontData, fontSize: int) {.raises: [].} =
   while fd.sizedData.len <= fontSize:
     fd.sizedData.add(FontDataSized())
 
-proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int) {.raises: [].} =
+proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int, textFlags: UiTextFlags = {}) {.raises: [].} =
   if r.fontAtlasPixels.len == 0:
     return
   if fontIndex < 0 or fontIndex >= r.fonts.len:
@@ -414,7 +500,7 @@ proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UIn
 
   r.fonts[fontIndex].sized.ensureSizedSlot(fontSize)
   let slot = r.fonts[fontIndex].sized.sizedData[fontSize].addr
-  let key = glyphCacheKey(glyphIndex, subpixelPhase)
+  let key = glyphCacheKey(glyphIndex, subpixelPhase, textFlags)
   if onRaiseQuit(slot.glyphIndexChars.hasKey(key)):
     return
   if r.glyphPackingBudgetExhausted():
@@ -962,6 +1048,7 @@ proc textMeshCacheKey(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
   result = 14695981039346656037'u64
   result.mixTextMeshHash(arrangement.fontSize)
   result.mixTextMeshHash(arrangement.contentHash.uint64)
+  result.mixTextMeshHash(textFlagBits(arrangement.textFlags))
   result.mixTextMeshHash(pos.x)
   result.mixTextMeshHash(pos.y)
   result.mixTextMeshHash(screenOffset.x)
@@ -1115,8 +1202,8 @@ proc buildTextMesh*(r: var FontRender, arrangement: UiTextArrangement,
       let targetQuarterX = round((pos.x + glyph.pos.x + screenOffset.x) * glyphSubpixelPhases.float32).int
       let integerPenX = floor(targetQuarterX.float32 / glyphSubpixelPhases.float32).int
       let subpixelPhase = targetQuarterX - integerPenX * glyphSubpixelPhases
-      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, subpixelPhase)
-      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, subpixelPhase)
+      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, subpixelPhase, arrangement.textFlags)
+      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, subpixelPhase, arrangement.textFlags)
       if packed == nil:
         complete = false
         continue
@@ -1131,8 +1218,8 @@ proc buildTextMesh*(r: var FontRender, arrangement: UiTextArrangement,
     for glyph in arrangement.glyphs:
       let fontIndex = glyph.fontIndex.int
       let glyphIndex = FT_UInt(glyph.glyphIndex)
-      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, 0)
-      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, 0)
+      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, 0, arrangement.textFlags)
+      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, 0, arrangement.textFlags)
       if packed == nil:
         complete = false
         continue
@@ -1147,8 +1234,8 @@ proc buildTextMesh*(r: var FontRender, arrangement: UiTextArrangement,
     for glyph in arrangement.glyphs:
       let fontIndex = glyph.fontIndex.int
       let glyphIndex = FT_UInt(glyph.glyphIndex)
-      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, 0)
-      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, 0)
+      r.packFontGlyphOnDemand(fontIndex, glyphIndex, arrangement.fontSize.int, 0, arrangement.textFlags)
+      let packed = r.getPackedGlyphPtr(fontIndex, glyphIndex, arrangement.fontSize.int, 0, arrangement.textFlags)
       if packed == nil:
         complete = false
         continue
@@ -1163,16 +1250,18 @@ proc buildTextMesh*(r: var FontRender, arrangement: UiTextArrangement,
   result = r.storeTextMesh(cacheKey, arrangement, pos, screenOffset, color, transform,
     vertices, complete)
 
-proc arrangeText*(r: var FontRender, text: openArray[char], fontSize: float32, fontId: FontId, maxWidth: float32 = -1.0'f32): UiTextArrangement {.raises: [].} =
+proc arrangeText*(r: var FontRender, text: openArray[char], fontSize: float32, fontId: FontId, maxWidth: float32 = -1.0'f32, textFlags: UiTextFlags = {}): UiTextArrangement {.raises: [].} =
   prof("arrangeText")
   result = UiTextArrangement(
     fontSize: fontSize,
+    textFlags: textFlags,
   )
 
   if r.fonts.len == 0:
     return
 
-  let primaryFont = if fontId.int >= 0 and fontId.int < r.fonts.len: fontId.int else: 0
+  let baseFont = if fontId.int >= 0 and fontId.int < r.fonts.len: fontId else: 0'i16
+  let primaryFont = r.styledFontId(baseFont, textFlags).int
 
   let sizeIdx = fontSize.int
   r.ftSetupSize(sizeIdx)
@@ -1212,6 +1301,18 @@ proc addFontFace*(r: var FontRender, name: string, content: string): FontId {.ra
 
   entry.activePixelSize = -1
   entry.hasColor = entry.face.hasColor
+  entry.styleVariants = noFontStyleVariants
+  if entry.face.family_name != nil:
+    entry.family = fontCString(cast[cstring](entry.face.family_name))
+  entry.style = 0
+  if (entry.face.style_flags.int and FT_STYLE_FLAG_BOLD) != 0:
+    entry.style = entry.style or 1
+  if (entry.face.style_flags.int and FT_STYLE_FLAG_ITALIC) != 0:
+    entry.style = entry.style or 2
+  entry.weight = if (entry.style and 1) != 0: 700 else: 400
+  let os2 = cast[nil ptr TT_OS2](FT_Get_Sfnt_Table(entry.face, FT_SFNT_OS2))
+  if os2 != nil and os2.usWeightClass > 0:
+    entry.weight = os2.usWeightClass.int
 
   when useHarfbuzz:
     entry.hbReady = false
@@ -1225,8 +1326,10 @@ proc addFontFace*(r: var FontRender, name: string, content: string): FontId {.ra
       echo "HarfBuzz init failed for font: ", name, " - ", getCurrentExceptionMsg()
 
   r.fonts.add(entry)
-  echo "Loaded font: ", name
-  r.fonts.high.FontId
+  let fontId = r.fonts.high.FontId
+  r.registerFontFamilyMember(fontId)
+  echo "Loaded font: ", name, " (family: ", r.fonts[fontId].family, ", style: ", r.fonts[fontId].style, ", weight: ", r.fonts[fontId].weight, ")"
+  fontId
 
 proc addFontFace*(r: var FontRender, path: string): FontId {.raises: [].} =
   if cast[pointer](r.fontLibrary) == nil:
@@ -1250,8 +1353,28 @@ proc listFontFaces*(r: FontRender): seq[(string, FontId)] {.raises: [], gcsafe.}
 
 proc addFontGroup*(r: var FontRender, fonts: seq[FontId]): FontId {.raises: [].} =
   assert fonts.len > 0
-  r.fonts.add(LoadedFont(children: fonts))
+  r.fonts.add(LoadedFont(children: fonts, styleVariants: noFontStyleVariants))
   r.fonts.high.FontId
+
+proc findFont*(r: var FontRender, name: string, flags: UiTextFlags = {}): FontId {.raises: [].} =
+  ## Finds a font by face name or family name (case, space and punctuation
+  ## insensitive) and returns its variant matching the bold/italic `flags`.
+  ## Returns -1 if no font matches.
+  for i in 0 ..< r.fonts.len:
+    if r.fonts[i].name == name:
+      return r.styledFontId(i.FontId, flags)
+  let key = normalizedFontName(name)
+  if key.len == 0:
+    return -1
+  for i in 0 ..< r.fonts.len:
+    if r.fonts[i].name.len > 0 and normalizedFontName(r.fonts[i].name) == key:
+      return r.styledFontId(i.FontId, flags)
+  if r.fontFamilies.hasKey(key):
+    let variants = r.fontFamilies.getOrQuit(key)
+    for variant in variants:
+      if variant >= 0:
+        return r.styledFontId(variant, flags)
+  return -1
 
 proc resetFontAtlas*(r: var FontRender, grow: bool) {.raises: [].} =
   if not r.fontAtlasNeedsReset:
@@ -1339,4 +1462,5 @@ proc deinit*(r: var FontRender) =
   r.textMeshCache.clear()
   r.textMeshLruHead = nil
   r.glyphAdvanceCache.clear()
+  r.fontFamilies.clear()
   r.clearFontAtlasDirty()

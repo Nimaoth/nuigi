@@ -13,7 +13,7 @@ proc sameColor(a, b: UiColor): bool =
   a.r == b.r and a.g == b.g and a.b == b.b and a.a == b.a
 
 proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
-    maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+    maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   discard text
   discard fontId
   discard maxWidth

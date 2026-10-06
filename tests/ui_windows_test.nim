@@ -46,7 +46,7 @@ proc windowStorage(b: var UiBuilder, windowId: UiNodeId): nil WindowStorage =
     return cast[WindowStorage](stored)
   nil
 
-proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let naturalWidth = text.len.float32 * 10.0'f32
   let lineCount =

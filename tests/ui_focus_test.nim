@@ -13,7 +13,7 @@ proc require(cond: bool, msg: string) =
     doAssert(cond, msg)
 
 proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
-    maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+    maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let _ = maxWidth
   result = UiTextArrangement()

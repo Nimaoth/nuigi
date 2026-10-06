@@ -126,9 +126,9 @@ proc textureToGpuTexture*(texture: nil Texture): GPUTexture =
     return cast[GPUTexture](gpuTexPtr)
   return nil
 
-proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe.} =
+proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe.} =
   gcsafeb:
-    gFontRender.arrangeText(text, fontSize, fontId, maxWidth)
+    gFontRender.arrangeText(text, fontSize, fontId, maxWidth, textFlags)
 
 proc uiSdlBuildTextMesh(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
     color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.gcsafe.} =

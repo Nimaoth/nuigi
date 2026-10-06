@@ -40,7 +40,7 @@ proc removeTestDir(directory: string) =
   else:
     removeDir(directory)
 
-proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let naturalWidth = text.len.float32 * 10.0'f32
   let lineCount =
@@ -52,7 +52,7 @@ proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32, m
   result.fontSize = fontSize
   result.size = vec2(if maxWidth >= 0.0'f32: min(naturalWidth, maxWidth) else: naturalWidth, lineCount.float32 * 20.0'f32)
 
-proc fixedTerminalMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+proc fixedTerminalMeasureText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let naturalWidth = text.len.float32
   let lineCount =
@@ -181,6 +181,65 @@ proc testFlagsAndMutators() =
   require(b.frame.texts[n.textIndex - 1].text.value == "abc", "text mutator mismatch")
   require(approxEq(b.frame.styles[n.styleIndex - 1].fillColor.r, 0.2'f32), "fillColor.r mismatch")
   require(approxEq(b.frame.texts[n.textIndex - 1].textColor.g, 0.8'f32), "textColor.g mismatch")
+
+proc testHighlightedText() =
+  let normalColor = rgba(0.2, 0.3, 0.4, 1.0)
+  let highlightColor = rgba(0.9, 0.8, 0.1, 1.0)
+
+  var b = newTestBuilder()
+  let initialNodeCount = b.nodes.len
+  let unicodeHighlights = @[2]
+  b.highlightedText("abédefgh", unicodeHighlights, normalColor, highlightColor,
+    maxWidth = 7, fontScale = 1.5'f32)
+
+  var textIndices: seq[int] = @[]
+  for i in initialNodeCount ..< b.nodes.len:
+    if b.nodes[i].textIndex > 0:
+      textIndices.add(b.nodes[i].textIndex.int - 1)
+  require(textIndices.len == 5,
+    "highlighted text should create five visible spans, got " & $textIndices.len &
+      " text nodes from " & $(b.nodes.len - initialNodeCount) & " added nodes (" &
+      $initialNodeCount & " -> " & $b.nodes.len & ")")
+  require(b.frame.texts[textIndices[0]].text.value == "ab", "ordinary prefix mismatch")
+  require(b.frame.texts[textIndices[1]].text.value == "é", "UTF-8 byte-offset highlight mismatch")
+  require(b.frame.texts[textIndices[2]].text.value == "de", "abbreviated prefix mismatch")
+  require(b.frame.texts[textIndices[3]].text.value == "…", "ellipsis mismatch")
+  require(b.frame.texts[textIndices[4]].text.value == "h", "abbreviated suffix mismatch")
+  require(approxEq(b.frame.texts[textIndices[0]].textColor.r, normalColor.r),
+    "ordinary span color mismatch")
+  require(approxEq(b.frame.texts[textIndices[1]].textColor.r, highlightColor.r),
+    "highlight span color mismatch")
+  require(approxEq(b.frame.texts[textIndices[1]].fontSize,
+    b.themeTextStyle(UiStyleIndexLabelText)[].fontSize * 1.5'f32),
+    "highlighted text font scale mismatch")
+
+  var plain = newTestBuilder()
+  let plainInitialNodeCount = plain.nodes.len
+  let noHighlights: seq[int] = @[]
+  plain.highlightedText("abcdefghi", noHighlights, normalColor, highlightColor, maxWidth = 6)
+  textIndices.setLen(0)
+  for i in plainInitialNodeCount ..< plain.nodes.len:
+    if plain.nodes[i].textIndex > 0:
+      textIndices.add(plain.nodes[i].textIndex.int - 1)
+  require(textIndices.len == 3, "plain abbreviation should create three spans")
+  require(plain.frame.texts[textIndices[0]].text.value == "abc", "plain abbreviation prefix mismatch")
+  require(plain.frame.texts[textIndices[1]].text.value == "…", "plain abbreviation ellipsis mismatch")
+  require(plain.frame.texts[textIndices[2]].text.value == "hi", "plain abbreviation suffix mismatch")
+
+  var unsorted = newTestBuilder()
+  let unsortedInitialNodeCount = unsorted.nodes.len
+  let unsortedHighlights = @[4, 0, 0, 99]
+  unsorted.highlightedText("aébc", unsortedHighlights, normalColor, highlightColor)
+  textIndices.setLen(0)
+  for i in unsortedInitialNodeCount ..< unsorted.nodes.len:
+    if unsorted.nodes[i].textIndex > 0:
+      textIndices.add(unsorted.nodes[i].textIndex.int - 1)
+  require(textIndices.len == 3,
+    "unsorted and duplicate highlight offsets should produce rune spans")
+  require(approxEq(unsorted.frame.texts[textIndices[0]].textColor.r, highlightColor.r),
+    "first unsorted highlight mismatch")
+  require(approxEq(unsorted.frame.texts[textIndices[2]].textColor.r, highlightColor.r),
+    "last unsorted highlight mismatch")
 
 proc testTextWrappingUsesNodeWidthOnlyWhenEnabled() =
   var b = newTestBuilder()
@@ -2101,6 +2160,7 @@ proc testTerminalTreeTableExpandSymbols() =
 
 proc runTests() =
   testFlagsAndMutators()
+  testHighlightedText()
   testTextWrappingUsesNodeWidthOnlyWhenEnabled()
   testPositionAndSizeScalars()
   testBaseFontRelativePadding()

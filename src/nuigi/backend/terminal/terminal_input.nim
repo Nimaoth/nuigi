@@ -50,6 +50,9 @@ type
     escapeStartedAt: uint64
     escapeTimeoutMs*: int = DefaultEscapeTimeoutMs
 
+proc setEscapeTimeout*(parser: var TerminalInputParser, timeoutMs: int) =
+  parser.escapeTimeoutMs = max(0, timeoutMs)
+
 func utf8SequenceLength(first: char): int {.inline.} =
   let value = first.uint8
   if value < 0x80'u8: 1

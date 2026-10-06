@@ -14,7 +14,7 @@ proc require(cond: bool, msg: string) =
     doAssert(cond, msg)
 
 proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
-    maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+    maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let _ = maxWidth
   result = UiTextArrangement()
@@ -22,13 +22,13 @@ proc fixedMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
   result.size = vec2(text.len.float32 * 10.0'f32, 20.0'f32)
 
 proc fractionalMeasureText(text: openArray[char], fontId: int16, fontSize: float32,
-    maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
-  result = fixedMeasureText(text, fontId, fontSize, maxWidth)
+    maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
+  result = fixedMeasureText(text, fontId, fontSize, maxWidth, textFlags)
   if text.len > 0:
     result.size.x += 0.17'f32
 
 proc fixedTerminalMeasureText(text: openArray[char], fontId: int16,
-    fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+    fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   let _ = fontId
   let naturalWidth = text.len.float32
   let lineCount =

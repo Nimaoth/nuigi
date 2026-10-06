@@ -47,6 +47,80 @@ proc label*(b: var UiBuilder, inText: string) =
     discard b.copyTextStyleIndex(UiStyleIndexLabelText)
     discard b.text(inText)
 
+func containsHighlight(indices: openArray[int], byteOffset: int): bool =
+  for i in 0 ..< indices.len:
+    if indices[i] == byteOffset:
+      return true
+  return false
+
+func utf8RuneByteLen(first: char): int {.inline.} =
+  let value = first.ord
+  if value < 0x80: 1
+  elif (value and 0xe0) == 0xc0: 2
+  elif (value and 0xf0) == 0xe0: 3
+  elif (value and 0xf8) == 0xf0: 4
+  else: 1
+
+proc addHighlightedTextSpan(b: var UiBuilder, inText: string,
+  runeStarts: openArray[int], startRune, endRune: int, highlighted: bool,
+    color, highlightColor: UiColor, fontScale: float32, oversize: var int) =
+  const ellipsis = "…"
+  const ellipsisRunes = 1
+  var prefixRunes = endRune - startRune
+  var suffixRunes = 0
+  var abbreviated = false
+  if not highlighted and oversize > 0 and prefixRunes > ellipsisRunes + 2:
+    let reduction = min(oversize, prefixRunes - ellipsisRunes - 2)
+    let keptRunes = prefixRunes - reduction - ellipsisRunes
+    prefixRunes = (keptRunes + 1) div 2
+    suffixRunes = keptRunes - prefixRunes
+    oversize -= reduction
+    abbreviated = true
+
+  let spanColor = if highlighted: highlightColor else: color
+  let labelFontSize = b.themeTextStyle(UiStyleIndexLabelText)[].fontSize * fontScale
+  if prefixRunes > 0:
+    b.node:
+      discard b.fit().copyTextStyleIndex(UiStyleIndexLabelText)
+        .textColor(spanColor).fontSize(labelFontSize)
+      discard b.text(inText[runeStarts[startRune] ..< runeStarts[startRune + prefixRunes]])
+  if abbreviated:
+    b.node:
+      discard b.fit().copyTextStyleIndex(UiStyleIndexLabelText)
+        .textColor(color).fontSize(labelFontSize)
+      discard b.text(ellipsis)
+    if suffixRunes > 0:
+      b.node:
+        discard b.fit().copyTextStyleIndex(UiStyleIndexLabelText)
+          .textColor(color).fontSize(labelFontSize)
+        discard b.text(inText[runeStarts[endRune - suffixRunes] ..< runeStarts[endRune]])
+
+proc highlightedText*(b: var UiBuilder, inText: string,
+    highlightedIndices: openArray[int], color, highlightColor: UiColor,
+    maxWidth: int = int.high, fontScale: float32 = 1.0'f32) =
+  ## Renders highlighted UTF-8 runes while abbreviating only ordinary spans.
+  var runeStarts = b.frame.arena[].allocEmptyArray(inText.len + 1, int)
+  var byteOffset = 0
+  while byteOffset < inText.len:
+    runeStarts.add(byteOffset)
+    byteOffset += min(utf8RuneByteLen(inText[byteOffset]), inText.len - byteOffset)
+  runeStarts.add(inText.len)
+
+  b.layoutHorizontal:
+    b.debugName("highlighted-text")
+    discard b.fit()
+    var oversize = max(0, runeStarts.len - 1 - max(0, maxWidth))
+    var spanStart = 0
+    while spanStart < runeStarts.len - 1:
+      let highlighted = containsHighlight(highlightedIndices, runeStarts[spanStart])
+      var spanEnd = spanStart + 1
+      while spanEnd < runeStarts.len - 1 and
+        containsHighlight(highlightedIndices, runeStarts[spanEnd]) == highlighted:
+        inc spanEnd
+      addHighlightedTextSpan(b, inText, runeStarts.toOpenArray(), spanStart, spanEnd,
+        highlighted, color, highlightColor, fontScale, oversize)
+      spanStart = spanEnd
+
 template tooltip*(b: var UiBuilder, body: untyped): untyped =
   block:
     prof("tooltip")
@@ -338,7 +412,7 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
           discard b.text(label)
 
       b.node():
-        discard b.paddingRelative(2.0'f32 / 18.0'f32).fit()
+        discard b.padding(2.0).fit()
         b.node:
           b.debugName("checkbox-box")
           discard b.styleIndex(UiStyleIndexCheckbox)

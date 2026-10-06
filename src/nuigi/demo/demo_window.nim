@@ -981,6 +981,7 @@ proc buildAllWidgetsExample*(b: var UiBuilder) =
 
 var cvScroll = 0.0
 var cvItemCount = 200
+var cvFitItemCount = 3
 
 proc cvFixedItem(b: var UiBuilder, itemIndex: int, userData: int) =
   discard b.fillX().fitY().paddingRelative(6.0'f32 / demoBaseFontSize)
@@ -1071,6 +1072,30 @@ proc buildComplexWidgetsExample*(b: var UiBuilder) =
         discard b.dynamicVirtualList(cvItemCount,
           if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 40.0'f32,
           cvDynItem)
+
+      nameCell("dynamicVirtualList (fit)", "Sizes its height to the rows up to a maximum height of 220 pixels; the scrollbar only appears when the rows exceed it. Add or remove items to watch it grow, cap, and shrink again.")
+      b.layoutVertical:
+        discard b.fillX().heightRelative(250.0'f32 / demoBaseFontSize)
+          .paddingRelative(4.0'f32 / demoBaseFontSize)
+          .gapRelative(4.0'f32 / demoBaseFontSize)
+        b.layoutHorizontal:
+          discard b.fitX().fitY()
+          b.demoHorizontalGap(4.0'f32)
+          if b.button("Add item"):
+            inc cvFitItemCount
+          if b.button("Remove item"):
+            cvFitItemCount = max(0, cvFitItemCount - 1)
+          b.label("Items: " & $cvFitItemCount)
+        b.node:
+          discard b.fillX().fitY()
+            .maxHeight(if b.backendType == UiBackendType.Terminal: 10.0'f32 else: 220.0'f32)
+            .paddingRelative(4.0'f32 / demoBaseFontSize)
+          discard b.dynamicVirtualList(cvFitItemCount,
+            if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 40.0'f32,
+            cvDynItem)
+
+      b.node:
+        discard b.fillX().heightRelative(220.0'f32 / demoBaseFontSize)
 
 # ---------------------------------------------------------------------------
 # Type 2 — combined common layouts (basic features composed)

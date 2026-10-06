@@ -411,6 +411,13 @@ type
       ## Font face used to render `text`.
     textColor*: UiColor
       ## Color of the rendered text.
+    underlineColor*: UiColor
+      ## Color of the underline; transparent falls back to `textColor`.
+    underlineThickness*: float32
+      ## Thickness in pixels; zero scales with font size. Rounded to whole pixels.
+    textFlags*: UiTextFlags
+      ## Style flags (bold, italic, underline, strikethrough) passed to the
+      ## arrangement backend and included in the font cache key.
     measuredTextSizeCache*: Vec2
       ## Cached measured size of the laid-out text, invalidated by `measuredTextDirty`.
     measuredTextDirty*: bool
@@ -780,6 +787,8 @@ type
       ## Font size at arrangement time.
     fontId*: UiFontId
       ## Font face used.
+    textFlags*: UiTextFlags
+      ## Style flags used (part of the cache key).
     lastUsedTick*: uint64
       ## Tick of last use; drives LRU eviction.
     maxWidth*: float32
@@ -787,7 +796,7 @@ type
     arrangement*: UiTextArrangement
       ## The cached text arrangement (glyph positions, no atlas UVs).
 
-  UiMeasureTextFn* = proc(text: openArray[char], fontId: UiFontId, fontSize: float32, maxWidth: float32): UiTextArrangement {.raises: [].}
+  UiMeasureTextFn* = proc(text: openArray[char], fontId: UiFontId, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.raises: [].}
     ## Callback that shapes/wraps `text` into a cached `UiTextArrangement` (no atlas UVs).
   UiBuildTextMeshFn* = proc(arrangement: UiTextArrangement, pos: Vec2,
     screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
@@ -798,6 +807,8 @@ type
     ## Optional callback that returns the platform clipboard text.
   UiWriteClipboardFn* = proc(text: string): bool {.nimcall, raises: [].}
     ## Optional callback that writes text to the platform clipboard.
+  UiNextFrameAction* = proc() {.closure, gcsafe, raises: [].}
+    ## Application callback deferred until the start of the next UI frame.
 
   UiTextInputRequest* = object
     ## Frame-local request for platform text input and IME candidate placement.
@@ -876,6 +887,8 @@ type
       ## Whether directional focus navigation moved focus at frame start.
     focusChangedByKeyboard: bool
       ## Whether Tab or directional keyboard navigation changed focus this frame.
+    nextFrameActions: seq[UiNextFrameAction]
+      ## Application actions queued during construction and run before next-frame interaction.
     debugDrawGridLines*: bool
       ## When true, draw layout grid/debug guides.
     showDebugPanel*: bool = false
@@ -1206,13 +1219,12 @@ template toOpenArray*(s: UiString): openArray[char] =
   ## borrowed strings, the external backing storage are alive. Must be passed
   ## directly to an `openArray` parameter (it cannot be stored in a variable).
   block:
-    let tmpCopy = s
-    if tmpCopy.viewData != nil:
-      toOpenArray(tmpCopy.viewData, 0, tmpCopy.viewLen - 1)
-    elif tmpCopy.value.len > 0:
-      tmpCopy.value.toOpenArray(0, tmpCopy.value.high)
+    if s.viewData != nil:
+      toOpenArray(s.viewData, 0, s.viewLen - 1)
+    elif s.value.len > 0:
+      s.value.toOpenArray(0, s.value.high)
     else:
-      tmpCopy.value.toOpenArray(0, -1)
+      s.value.toOpenArray(0, -1)
 
 func value*(s: UiString): string =
   ## Owned string content. Copies borrowed views (allocates); use
@@ -1300,7 +1312,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
 proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect])
 proc absoluteNodePos*(b: UiBuilder, idx: int): Vec2
 proc contentSize*(b: var UiBuilder, n: ptr UiNode): Vec2 {.raises: [].}
-proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int)
+proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int, sizeOnly: bool = false)
 proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
 proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.}
 proc buildDragUi(b: var UiBuilder)
@@ -1313,8 +1325,8 @@ proc deferPostProcess*(b: var UiBuilder): var UiBuilder {.discardable.}
 proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId)
   ## Prevent node storage from being garbage-collected this frame.
 
-proc makeTextArrangementKey(text: UiString, fontSize: float32, fontId: UiFontId, maxWidth: float32 = -1): uint64 {.inline, raises: [].} =
-  let a = !$(text.valueHash !& nui_hash.hash(fontSize) !& nui_hash.hash(maxWidth) !& nui_hash.hash(fontId))
+proc makeTextArrangementKey(text: UiString, fontSize: float32, fontId: UiFontId, maxWidth: float32 = -1, textFlags: UiTextFlags = {}): uint64 {.inline, raises: [].} =
+  let a = !$(text.valueHash !& nui_hash.hash(fontSize) !& nui_hash.hash(maxWidth) !& nui_hash.hash(fontId) !& nui_hash.hash(textFlagBits(textFlags)))
   uint64(a)
 
 proc evictOldestTextArrangement(b: var UiBuilder) {.raises: [].} =
@@ -1347,25 +1359,27 @@ proc buildTextArrangement(b: UiBuilder, text: ptr UiNodeText, key: uint64, maxWi
   prof("buildTextArrangement")
   result = UiTextArrangementCacheEntry()
   if b.measureText != nil:
-    result.arrangement = b.measureText(text.text.toOpenArray, text.fontId, text.fontSize * b.fontScale, maxWidth)
+    result.arrangement = b.measureText(text.text.toOpenArray, text.fontId, text.fontSize * b.fontScale, maxWidth, text.textFlags)
   result.arrangement.fontSize = text.fontSize * b.fontScale
+  result.arrangement.textFlags = text.textFlags
   result.key = key
   # Cache entries outlive the frame, so borrowed views must be copied into
   # the owned string here (the only allocation on this path).
   result.text = text.text.toOwned
   result.fontSize = text.fontSize
   result.fontId = text.fontId
+  result.textFlags = text.textFlags
   result.maxWidth = maxWidth
 
 proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32 = -1): ptr UiTextArrangement {.raises: [].} =
   prof("getTextArrangement")
-  let key = makeTextArrangementKey(text.text, text.fontSize * b.fontScale, text.fontId, maxWidth)
+  let key = makeTextArrangementKey(text.text, text.fontSize * b.fontScale, text.fontId, maxWidth, text.textFlags)
   inc b.textArrangementTick
 
   let idx = onRaiseQuit(b.textArrangementLookup.getOrDefault(key, -1))
   if idx >= 0 and idx < b.textArrangementEntries.len:
     let entry = b.textArrangementEntries[idx].addr
-    if entry.key == key and entry.text == text.text and entry.fontSize == text.fontSize and entry.fontId == text.fontId and entry.maxWidth == maxWidth:
+    if entry.key == key and entry.text == text.text and entry.fontSize == text.fontSize and entry.fontId == text.fontId and entry.textFlags == text.textFlags and entry.maxWidth == maxWidth:
       entry.lastUsedTick = b.textArrangementTick
       return entry.arrangement.addr
 
@@ -1386,22 +1400,22 @@ proc getTextArrangement*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float
   b.textArrangementEntries[newIdx].arrangement.addr
 
 proc getTextArrangement*(b: var UiBuilder, text: openArray[char], fontId: UiFontId,
-    fontSize: float32, maxWidth: float32 = -1): ptr UiTextArrangement {.raises: [].} =
+    fontSize: float32, maxWidth: float32 = -1, textFlags: UiTextFlags = {}): ptr UiTextArrangement {.raises: [].} =
   ## Borrowed-view arrangement lookup without allocating. The caller must keep
   ## `text` alive until the call returns; cache inserts copy into an owned string.
   prof("getTextArrangementView")
   let borrowed = uiString(text)
-  let key = makeTextArrangementKey(borrowed, fontSize * b.fontScale, fontId, maxWidth)
+  let key = makeTextArrangementKey(borrowed, fontSize * b.fontScale, fontId, maxWidth, textFlags)
   inc b.textArrangementTick
 
   let idx = onRaiseQuit(b.textArrangementLookup.getOrDefault(key, -1))
   if idx >= 0 and idx < b.textArrangementEntries.len:
     let entry = b.textArrangementEntries[idx].addr
     if entry.key == key and entry.text == borrowed and entry.fontSize == fontSize and
-        entry.fontId == fontId and entry.maxWidth == maxWidth:
+        entry.fontId == fontId and entry.textFlags == textFlags and entry.maxWidth == maxWidth:
       entry.lastUsedTick = b.textArrangementTick
       return entry.arrangement.addr
-    var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId)
+    var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId, textFlags: textFlags)
     entry[] = b.buildTextArrangement(tmp.addr, key, maxWidth)
     entry.lastUsedTick = b.textArrangementTick
     return entry.arrangement.addr
@@ -1412,7 +1426,7 @@ proc getTextArrangement*(b: var UiBuilder, text: openArray[char], fontId: UiFont
   if b.textArrangementEntries.len >= b.textArrangementCacheCapacity:
     b.evictOldestTextArrangement()
 
-  var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId)
+  var tmp = UiNodeText(text: borrowed, fontSize: fontSize, fontId: fontId, textFlags: textFlags)
   let newIdx = b.textArrangementEntries.len
   b.textArrangementEntries.add(b.buildTextArrangement(tmp.addr, key, maxWidth))
   b.textArrangementEntries[newIdx].lastUsedTick = b.textArrangementTick
@@ -1542,7 +1556,7 @@ proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inlin
     return b.frame.texts[^1]
   if node.textIndex == 0:
     node.textIndex = (b.frame.texts.len + 1).uint16
-    b.frame.texts.add(UiNodeText(measuredTextDirty: true, fontSize: b.defaultText.fontSize, fontId: b.defaultText.fontId, textColor: b.defaultText.textColor))
+    b.frame.texts.add(UiNodeText(measuredTextDirty: true, fontSize: b.defaultText.fontSize, fontId: b.defaultText.fontId, textColor: b.defaultText.textColor, underlineColor: b.defaultText.underlineColor, underlineThickness: b.defaultText.underlineThickness, textFlags: b.defaultText.textFlags))
     return b.frame.texts[^1]
   b.frame.texts[node.textIndex - 1]
 
@@ -2966,6 +2980,27 @@ proc requestFocus*(b: var UiBuilder, nodeId: UiNodeId): bool =
     return true
   false
 
+proc isFocusWithin*(b: UiBuilder, scopeId: UiNodeId): bool =
+  ## Whether keyboard focus is on this scope or on its remembered descendant path.
+  if scopeId == noneNodeId():
+    return false
+  var childId = scopeId
+  var remaining = b.nodeStorage.len + 1
+  while remaining > 0:
+    if childId == b.focusedNode:
+      return true
+    if not b.nodeStorage.hasKey(childId.uint64):
+      return false
+    childId = b.nodeStorage.getOrQuit(childId.uint64).rememberedFocusChild
+    if childId == noneNodeId():
+      return false
+    dec remaining
+  false
+
+proc isFocusWithin*(b: UiBuilder): bool {.inline.} =
+  ## Whether keyboard focus is within the current focus scope.
+  b.focusScopeStack.len > 0 and b.isFocusWithin(b.focusScopeStack[^1])
+
 proc isFocused*(b: UiBuilder): bool {.inline.} =
   ## Whether the current node owns keyboard focus.
   b.stack.len > 0 and b.focusedNode == b.currentNode.id
@@ -2973,6 +3008,18 @@ proc isFocused*(b: UiBuilder): bool {.inline.} =
 proc clearFocus*(b: var UiBuilder) {.inline.} =
   ## Clear keyboard focus.
   b.focusedNode = noneNodeId()
+
+proc enqueueNextFrame*(b: var UiBuilder, action: UiNextFrameAction) =
+  ## Run action at the start of the next frame, before pointer and keyboard interaction.
+  if action != nil:
+    b.nextFrameActions.add action
+
+proc flushNextFrameActions*(b: var UiBuilder) =
+  ## Run all queued next-frame actions. Actions enqueued while flushing wait for the next flush.
+  let nextFrameActions = b.nextFrameActions
+  b.nextFrameActions = @[]
+  for action in nextFrameActions:
+    action()
 
 proc wasFocusNavigationHandled*(b: UiBuilder): bool {.inline.} =
   ## Whether this frame's directional input followed an explicit focus edge.
@@ -3204,23 +3251,33 @@ proc computeFrameInteraction(b: var UiBuilder, input: UiInputSnapshot) =
     b.frameOutput.draggedId = b.previousOutput.draggedId
     b.frameOutput.draggedIndex = b.currentNodeIndex(b.previousOutput.draggedId)
 
+  let leftReleaseTarget =
+    if MouseLeft in input.mousePressed: b.frameOutput.pressedId
+    else: b.previousOutput.heldId
   if MouseLeft in input.mouseReleased and
       not (hover == noneNodeId()) and
-      hover == b.previousOutput.heldId:
+      hover == leftReleaseTarget:
     b.frameOutput.clickedId = hover
     b.frameOutput.clickedIndex = hoverIndex
   else:
     b.frameOutput.clickedId = noneNodeId()
     b.frameOutput.clickedIndex = -1
 
+  let rightReleaseTarget =
+    if MouseRight in input.mousePressed: b.frameOutput.rightPressedId
+    else: b.previousOutput.rightPressedId
   if MouseRight in input.mouseReleased and
       not (hover == noneNodeId()) and
-      hover == b.previousOutput.rightPressedId:
+      hover == rightReleaseTarget:
     b.frameOutput.rightClickedId = hover
     b.frameOutput.rightClickedIndex = hoverIndex
   else:
     b.frameOutput.rightClickedId = noneNodeId()
     b.frameOutput.rightClickedIndex = -1
+
+  if MouseLeft in input.mouseReleased and MouseLeft notin input.mouseDown:
+    b.frameOutput.heldId = noneNodeId()
+    b.frameOutput.heldIndex = -1
 
 proc focusItemAvailable(item: UiFocusItem): bool {.inline.} =
   FocusDisabled notin item.flags
@@ -3323,6 +3380,7 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
 proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.discardable.} =
   ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
   prof("beginUiFrame")
+  b.flushNextFrameActions()
   b.computeFrameInteraction(ctx.input)
   b.focusNavigationHandled = false
   b.focusChangedByKeyboard = false
@@ -4107,6 +4165,25 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
           imageId: 1.UiImageId,
           samplerMode: TextureSamplerMode.Linear,
         ), clipStack)
+    if UiTextFlag.Underline in nodeText.textFlags and arrangement.size.x > 0.0'f32:
+      let thickness = max(1.0'f32, round(if nodeText.underlineThickness > 0.0'f32:
+        nodeText.underlineThickness else: arrangement.fontSize / 14.0'f32))
+      let y = min(max(0.0'f32, arrangement.size.y - thickness),
+        arrangement.ascent + max(1.0'f32, arrangement.fontSize * 0.05'f32))
+      let underlineColor = if nodeText.underlineColor.a > 0.0'f32:
+        nodeText.underlineColor else: nodeText.textColor
+      let (vertexData, vertexCount) = buildRectFillVertices(b.frame.arena,
+        contentOrigin + vec2(0.0'f32, y), vec2(arrangement.size.x, thickness),
+        underlineColor, 0.0'f32)
+      if vertexData != nil and vertexCount > 0:
+        for vertexIndex in 0 ..< vertexCount:
+          vertexData[vertexIndex].pos = transform * vertexData[vertexIndex].pos
+        b.pushRenderCommand(layerIndex, UiRenderCommand(
+          kind: CmdRawVertices,
+          nodeIndex: idx.int32,
+          vertexData: vertexData,
+          vertexCount: vertexCount.int32,
+        ), clipStack)
 
   for cmd in b.nodeCustomCommands(n)[]:
     var outCmd = cmd
@@ -4136,6 +4213,9 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
   if masksChildren:
     if clipStack.len > 0:
       discard clipStack.pop()
+    let nodeText = b.nodeText(idx)
+    let maxWidth = if WrapText in n.flags: contentSize.x else: -1.0'f32
+    let arrangement = b.getTextArrangement(nodeText, maxWidth)
     b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdClipPop,
       nodeIndex: idx.int32,
@@ -4217,6 +4297,9 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     ), clipStack)
 
   if DrawText in n.flags and n.textIndex > 0:
+    let nodeText = b.nodeText(idx)
+    let maxWidth = if WrapText in n.flags: contentSize.x else: -1.0'f32
+    let arrangement = b.getTextArrangement(nodeText, maxWidth)
     b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdText,
       nodeIndex: idx.int32,
@@ -4224,7 +4307,20 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
       pos: contentOrigin,
       size: vec2(0.0'f32, 0.0'f32),
     ), clipStack)
-
+    if UiTextFlag.Underline in nodeText.textFlags and arrangement.size.x > 0.0'f32:
+      let thickness = max(1.0'f32, round(if nodeText.underlineThickness > 0.0'f32:
+        nodeText.underlineThickness else: arrangement.fontSize / 14.0'f32))
+      let y = min(max(0.0'f32, arrangement.size.y - thickness),
+        arrangement.ascent + max(1.0'f32, arrangement.fontSize * 0.05'f32))
+      let underlineColor = if nodeText.underlineColor.a > 0.0'f32:
+        nodeText.underlineColor else: nodeText.textColor
+      b.pushRenderCommand(layerIndex, UiRenderCommand(
+        kind: CmdRectFill,
+        nodeIndex: idx.int32,
+        color: underlineColor,
+        pos: contentOrigin + vec2(0.0'f32, y),
+        size: vec2(arrangement.size.x, thickness),
+      ), clipStack)
   for cmd in b.nodeCustomCommands(n)[]:
     var outCmd = cmd
     if outCmd.nodeIndex < 0:
@@ -4623,12 +4719,13 @@ proc absoluteNodePosPrev*(b: var UiBuilder, nodeId: UiNodeId, indexHint: int = -
           result += vec2(b.previousFrame.styles[si].paddingX, b.previousFrame.styles[si].paddingY)
     current = parentIdx
 
-proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int) =
+proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int, sizeOnly: bool = false) =
   prof("applyDeferredAnimationTracks")
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
     return
 
   var node = b.frame.nodes[nodeIdx].addr
+  b.traceEvent(node.id, "applyDeferredAnimationTracks ")
   let oldSize = node.size
   let animIdx = b.findAnimationIndex(node.id)
   if animIdx < 0:
@@ -4643,35 +4740,36 @@ proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int) =
   # Detect parent change and compute recalculation for position fields.
   var parentChanged = false
   var newParentLocalOffset = vec2(0.0'f32, 0.0'f32)
-  let prevParentIdx = int(b.previousFrame.nodes[prevIdx].parent)
-  if node.parent >= 0 and prevParentIdx >= 0 and
-      node.parent < b.frame.nodes.len and prevParentIdx < b.previousFrame.nodes.len:
-    let curParentId = b.frame.nodes[node.parent].id
-    let prevParentId = b.previousFrame.nodes[prevParentIdx].id
-    if curParentId != prevParentId:
-      parentChanged = true
-      # Compute absolute position of node in previous frame.
-      let nodeAbsPrev = b.absoluteNodePosPrev(node.id, nodeIdx)
-      # Find new parent in the previous frame to compute its absolute position.
-      let newParentPrevIdx = b.previousNodeIndex(curParentId)
-      if newParentPrevIdx >= 0:
-        let newParentAbsPrev = b.absoluteNodePosPrev(curParentId, newParentPrevIdx)
-        # local = absolute(node) - absolute(newParent) - newParent.padding
-        let newParentPrevNode = b.previousFrame.nodes[newParentPrevIdx].addr
-        var newParentPadX = 0.0'f32
-        var newParentPadY = 0.0'f32
-        if newParentPrevNode.styleIndex > 0:
-          let si = int(newParentPrevNode.styleIndex) - 1
-          if si < b.previousFrame.styles.len:
-            newParentPadX = b.previousFrame.styles[si].paddingX
-            newParentPadY = b.previousFrame.styles[si].paddingY
-        newParentLocalOffset = vec2(
-          nodeAbsPrev.x - newParentAbsPrev.x - newParentPadX,
-          nodeAbsPrev.y - newParentAbsPrev.y - newParentPadY,
-        )
-      else:
-        # New parent didn't exist in previous frame; skip animation for pos fields.
-        parentChanged = false
+  if not sizeOnly:
+    let prevParentIdx = int(b.previousFrame.nodes[prevIdx].parent)
+    if node.parent >= 0 and prevParentIdx >= 0 and
+        node.parent < b.frame.nodes.len and prevParentIdx < b.previousFrame.nodes.len:
+      let curParentId = b.frame.nodes[node.parent].id
+      let prevParentId = b.previousFrame.nodes[prevParentIdx].id
+      if curParentId != prevParentId:
+        parentChanged = true
+        # Compute absolute position of node in previous frame.
+        let nodeAbsPrev = b.absoluteNodePosPrev(node.id, nodeIdx)
+        # Find new parent in the previous frame to compute its absolute position.
+        let newParentPrevIdx = b.previousNodeIndex(curParentId)
+        if newParentPrevIdx >= 0:
+          let newParentAbsPrev = b.absoluteNodePosPrev(curParentId, newParentPrevIdx)
+          # local = absolute(node) - absolute(newParent) - newParent.padding
+          let newParentPrevNode = b.previousFrame.nodes[newParentPrevIdx].addr
+          var newParentPadX = 0.0'f32
+          var newParentPadY = 0.0'f32
+          if newParentPrevNode.styleIndex > 0:
+            let si = int(newParentPrevNode.styleIndex) - 1
+            if si < b.previousFrame.styles.len:
+              newParentPadX = b.previousFrame.styles[si].paddingX
+              newParentPadY = b.previousFrame.styles[si].paddingY
+          newParentLocalOffset = vec2(
+            nodeAbsPrev.x - newParentAbsPrev.x - newParentPadX,
+            nodeAbsPrev.y - newParentAbsPrev.y - newParentPadY,
+          )
+        else:
+          # New parent didn't exist in previous frame; skip animation for pos fields.
+          parentChanged = false
 
   var hasActiveField = false
   let animationTick = max(0.0'f32, b.frameCtx.animationTick)
@@ -4679,6 +4777,8 @@ proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int) =
   let currentFrame = b.frameCtx.input.frameIndex
   for i in 0 ..< anim.fields.len:
     let field = anim.fields[i].addr
+    if sizeOnly and field.fieldOffset != UiNodeFieldSizeX and field.fieldOffset != UiNodeFieldSizeY:
+      continue
     let nodeValue = getAnimatedFieldValue(b.frame, node[], field.fieldOffset)
     if field.touchedFrame != currentFrame:
       field.currentValue = nodeValue
@@ -4706,12 +4806,13 @@ proc applyDeferredAnimationTracks(b: var UiBuilder, nodeIdx: int) =
   if hasActiveField:
     anim[].unchangedFrames = 0
   b.clampNodeSize(node)
-  if oldSize != node.size:
+  if not sizeOnly and oldSize != node.size:
     discard b.postProcessChildren(nodeIdx)
 
 proc deferredAnimationBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let _ = userData
-  b.applyDeferredAnimationTracks(nodeIdx)
+  if AnimateDelayed in b.nodes[nodeIdx].flags:
+    b.applyDeferredAnimationTracks(nodeIdx)
 
 proc deferredPostProcessBuildProc(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let _ = userData
@@ -5274,6 +5375,7 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
           discard
 
     let oldContentSize = n.contentExtent
+    n.contentExtent = vec2(0.0'f32, 0.0'f32)
     var childSizeChanged = false
     for childIdx in b.children(idx):
       let child = b.frame.nodes[childIdx].addr
@@ -5293,12 +5395,36 @@ proc postProcessChildren*(b: var UiBuilder, idx: int): var UiBuilder {.discardab
     if oldContentSize != n.contentExtent or (WrapText in n.flags and SizeXKnown in n.flags):
       let oldSize = n.size
       b.updateNodeFit(n)
+      if FitX in n.flags and FillX notin n.flags:
+        n.flags.incl SizeXKnown
+      if FitY in n.flags and FillY notin n.flags:
+        n.flags.incl SizeYKnown
       if oldSize != n.size:
         let parentIdx = n.parent
         if parentIdx >= 0:
           let parent = b.frame.nodes[parentIdx].addr
           if IsPostProcessing in parent.flags:
             parent.flags.incl PostProcessChildren
+
+  var flagsBits = 0'u64
+  for flag in low(UiFlag) .. high(UiFlag):
+    if flag in n.flags:
+      flagsBits = flagsBits or (1'u64 shl ord(flag))
+  # b.traceEvent(n.id, "postProcessChildren " & $flagsBits)
+  if {AnimateDelayed, SizeXKnown, SizeYKnown} * n.flags == {AnimateDelayed, SizeXKnown, SizeYKnown}:
+    b.traceEvent(n.id, "postProcessChildren animate")
+    try:
+      let oldSize = n.size
+      b.applyDeferredAnimationTracks(idx, sizeOnly = true)
+      n.flags.excl AnimateDelayed
+      if oldSize != n.size:
+        let parentIdx = n.parent
+        if parentIdx >= 0:
+          let parent = b.frame.nodes[parentIdx].addr
+          if IsPostProcessing in parent.flags:
+            parent.flags.incl PostProcessChildren
+    except:
+      discard
 
   n.flags.excl IsPostProcessing
   b
@@ -5611,6 +5737,15 @@ proc textColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.}
   b.ensureNodeText(b.currentNode).textColor = value
   b
 
+proc underlineColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
+  ## Set the current node's underline color.
+  b.ensureNodeText(b.currentNode).underlineColor = value
+  b
+
+proc underlineThickness*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
+  b.ensureNodeText(b.currentNode).underlineThickness = max(0.0'f32, value)
+  b
+
 proc textColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
   ## Animated version of textColor. Smoothly transitions the text color.
   let idx = b.stack[^1]
@@ -5766,6 +5901,17 @@ proc fontId*(b: var UiBuilder, fontId: UiFontId): var UiBuilder {.discardable.} 
   var t = addr(b.ensureNodeText(b.currentNode))
   if t.fontId != fontId:
     t.fontId = fontId
+    t.measuredTextDirty = true
+    b.updateNodeFit(b.currentNode)
+  b
+
+proc textFlags*(b: var UiBuilder, flags: UiTextFlags): var UiBuilder {.discardable.} =
+  ## Set the current node's text style flags (bold, italic, underline,
+  ## strikethrough). Triggers text measurement and size-to-content recalculation.
+  b.currentNode.flags.incl DrawText
+  var t = addr(b.ensureNodeText(b.currentNode))
+  if t.textFlags != flags:
+    t.textFlags = flags
     t.measuredTextDirty = true
     b.updateNodeFit(b.currentNode)
   b
@@ -6493,11 +6639,11 @@ proc measuredTextSize*(b: var UiBuilder, text: ptr UiNodeText, maxWidth: float32
   return arrangement.size
 
 proc measuredTextSize*(b: var UiBuilder, text: openArray[char], fontId: UiFontId,
-    fontSize: float32, maxWidth: float32 = -1): Vec2 =
+    fontSize: float32, maxWidth: float32 = -1, textFlags: UiTextFlags = {}): Vec2 =
   ## Measure a borrowed char slice without allocating. Cache inserts still copy.
   if text.len == 0:
     return vec2(0.0'f32, 0.0'f32)
-  let arrangement = b.getTextArrangement(text, fontId, fontSize, maxWidth)
+  let arrangement = b.getTextArrangement(text, fontId, fontSize, maxWidth, textFlags)
   return arrangement.size
 
 proc cachedMeasuredTextSize*(b: var UiBuilder, node: ptr UiNode): Vec2 {.raises: [].} =
@@ -6816,7 +6962,8 @@ when defined(nuiDebug):
     if textIndex >= 0 and textIndex < b.previousFrame.texts.len:
       let nodeText = b.previousFrame.texts[textIndex]
       details.add("\ntext=\"" & nodeText.text.value & "\"" &
-        " font=" & $nodeText.fontId & " size=" & fmt2(nodeText.fontSize))
+        " font=" & $nodeText.fontId & " size=" & fmt2(nodeText.fontSize) &
+        " flags=" & $nodeText.textFlags)
 
     let styleIndex = int(hovered.styleIndex) - 1
     if styleIndex >= 0 and styleIndex < b.previousFrame.styles.len:
