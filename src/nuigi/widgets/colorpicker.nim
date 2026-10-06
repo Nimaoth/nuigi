@@ -3,6 +3,8 @@
 ## The picker combines saturation/value, hue, and alpha controls rendered as
 ## custom meshes. `ColorPickerStorage` persists both HSV state and popup state
 ## under the widget's stable node ID, while the public value remains `UiColor`.
+## Passing the same storage to multiple swatches shares one popup; `ownerId`
+## identifies the swatch currently editing that storage.
 
 import std/math
 import nuigi, nuigi/core/[array_view, arena, vecmath], nuigi/debug/profiler
@@ -17,8 +19,9 @@ type ColorPickerStorage* = ref object of UiNodeStorageData
   svIdx*, hueIdx*, alphaIdx*: int
   open*: bool
   openPrev*: bool
+  ownerId*: UiNodeId
 
-proc getOrCreateColorPickerStorage(b: var UiBuilder, node: ptr UiNode): ColorPickerStorage =
+proc getOrCreateColorPickerStorage*(b: var UiBuilder, node: ptr UiNode): ColorPickerStorage =
   let existing = nodeStorageGet(b, node)
   if existing != nil:
     return cast[ColorPickerStorage](existing)
@@ -126,7 +129,7 @@ proc cpBuildSv(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let cBL = hsvToRgb(hsvH, 0.0'f32, 0.0'f32)
   let cBR = hsvToRgb(hsvH, 1.0'f32, 0.0'f32)
 
-  let vcount = 6 + 12 + 12
+  let vcount = 6 + 12 * 3 + 12 * 3
   let vbuf = cast[nil ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
   var vi = 0
   cpPushQuad(vbuf, vi, x0, y0, x1, y1, cTL, cTR, cBL, cBR)
@@ -211,40 +214,64 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
 
   cpSetCommands(b, nodeIdx, vbuf, vi)
 
-proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
+proc colorPicker*(b: var UiBuilder, value: var UiColor, storage: nil ColorPickerStorage = nil): bool =
   prof("colorPicker")
   var changed = false
 
   var swatchIdx = -1
   var swatchId = noneNodeId()
   var pickerIdx = -1
-  var storage: nil ColorPickerStorage = nil
+  var storage: nil ColorPickerStorage = storage
 
   b.node:
     b.debugName("color-picker")
     pickerIdx = b.stack[^1]
     discard b.size(
       if b.backendType == UiBackendType.Terminal: 2.0'f32 else: 38.0'f32,
-      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 18.0'f32)
+      if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 25.0'f32)
 
     swatchIdx = b.stack[^1]
     swatchId = b.currentNode.id
-    storage = getOrCreateColorPickerStorage(b, b.currentNode)
+    if not storage.isNil:
+      nodeStorage(b, b.currentNode, storage)
+    else:
+      storage = getOrCreateColorPickerStorage(b, b.currentNode)
+    if storage.open and storage.ownerId == noneNodeId():
+      storage.ownerId = swatchId
+    var activationId = b.previousOutput.clickedId
+    if KeyEnter in b.frameCtx.input.keysPressed or KeySpace in b.frameCtx.input.keysPressed:
+      activationId = b.focusedNode
+    if storage.open and activationId != noneNodeId() and activationId != storage.ownerId:
+      let activatedIndex = findNodeIndexById(b.previousFrame.nodes, activationId)
+      if activatedIndex >= 0 and nodeStorageGet(b, b.previousFrame.nodes[activatedIndex].addr) == storage:
+        storage.open = false
+        storage.openPrev = false
     discard b.focusable({FocusTabStop, FocusActivatable})
     if b.previousOutput.clickedId == swatchId:
       b.requestFocus()
-      storage.open = not storage.open
+      if storage.ownerId != swatchId:
+        storage.open = true
+        storage.openPrev = false
+        storage.ownerId = swatchId
+      else:
+        storage.open = not storage.open
     elif b.wasFocusActivated():
-      storage.open = not storage.open
+      if storage.ownerId != swatchId:
+        storage.open = true
+        storage.openPrev = false
+        storage.ownerId = swatchId
+      else:
+        storage.open = not storage.open
     let swatchHovered = b.wasHovered(b.stack[^1], includeChildren = true)
     discard b.fillBackground()
     discard b.backgroundColor(value)
-    discard b.borderWidth(if storage.open or swatchHovered: 2.0'f32 else: 1.0'f32)
-    discard b.borderColor(if storage.open or swatchHovered: b.themeStyle(UiStyleIndexButtonHover)[].borderColor
+    let swatchOpen = storage.open and storage.ownerId == swatchId
+    discard b.borderWidth(if swatchOpen or swatchHovered: 2.0'f32 else: 1.0'f32)
+    discard b.borderColor(if swatchOpen or swatchHovered: b.themeStyle(UiStyleIndexButtonHover)[].borderColor
                           else: b.themeStyle(UiStyleIndexButton)[].borderColor)
     discard b.focusHighlight()
 
-  let pickerOpen = storage.open
+  let pickerOpen = storage.open and storage.ownerId == swatchId
 
   if pickerOpen and not storage.openPrev:
     let (h, s, v) = rgbToHsv(value)
@@ -259,7 +286,8 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
     let swatchNode = b.nodes[swatchIdx].addr
 
     b.withParent(b.overlays):
-      b.node("color-picker-popup"):
+      b.node(swatchId.uint64):
+        b.debugName("color-picker-popup")
         popupIdx = b.stack[^1]
         discard b.position(swatchAbsPos.x, swatchAbsPos.y + swatchNode.size.y + 4.0'f32)
         discard b.layout(LayoutVertical)
@@ -350,5 +378,6 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor): bool =
     if not swatchHovered and not popupHovered and not b.wasHovered(pickerIdx, includeChildren = true):
       storage.open = false
 
-  storage.openPrev = storage.open
+  if storage.ownerId == swatchId:
+    storage.openPrev = storage.open
   changed
