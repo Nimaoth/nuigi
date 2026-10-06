@@ -99,19 +99,11 @@ proc dynamicListStorageNodeIndex(b: var UiBuilder): int =
       return i
   return -1
 
-proc dynamicListThumbId(b: UiBuilder): UiNodeId =
-  let listIndex = b.firstChildIndex(0)
-  if listIndex < 0:
+proc dynamicListThumbId(b: var UiBuilder): UiNodeId =
+  let storage = b.dynamicListStorage()
+  if storage == nil or storage.scrollbarThumbIndex < 0:
     return noneNodeId()
-  var scrollbarIndex = -1
-  for childIndex in b.children(listIndex):
-    scrollbarIndex = childIndex
-  if scrollbarIndex < 0:
-    return noneNodeId()
-  let thumbIndex = b.firstChildIndex(scrollbarIndex)
-  if thumbIndex < 0:
-    return noneNodeId()
-  b.frame.nodes[thumbIndex].id
+  b.frame.nodes[storage.scrollbarThumbIndex].id
 
 proc testOnlyVisibleItemsAreBuiltAndMeasured() =
   var b = newBuilder(fixedMeasureText)
@@ -149,6 +141,9 @@ proc testWheelScrollContinuesWithMomentum() =
   var b = newBuilder(fixedMeasureText)
   var context = TestListContext(changedItemIndex: -1)
   b.buildFrame(context)
+  let storage = b.dynamicListStorage()
+  storage.scrollSpeed = 20.0'f32
+  storage.scrollFrequency = 50.0'f32
 
   let wheelInput = UiInputSnapshot(
     frameIndex: 1,
@@ -156,7 +151,6 @@ proc testWheelScrollContinuesWithMomentum() =
     wheel: vec2(0.0'f32, -1.0'f32),
   )
   b.buildFrame(context, wheelInput)
-  let storage = b.dynamicListStorage()
   let offsetAfterWheel = storage.scrollOffsetY
   require(offsetAfterWheel > 0.0'f32 and offsetAfterWheel < 20.0'f32,
     "wheel distance should be animated rather than applied as a one-frame jump")
@@ -204,8 +198,9 @@ proc testScrollFrequencyIsConfigurable() =
   fast.buildScrollFrame()
   let slowStorage = slow.dynamicListStorage()
   let fastStorage = fast.dynamicListStorage()
-  require(fastStorage.scrollFrequency == 50.0'f32,
-    "new list storage should default to a scroll frequency of 50")
+  slowStorage.scrollSpeed = 20.0'f32
+  fastStorage.scrollSpeed = 20.0'f32
+  fastStorage.scrollFrequency = 50.0'f32
   slowStorage.scrollFrequency = 30.0'f32
   slow.buildScrollFrame(-1.0'f32)
   fast.buildScrollFrame(-1.0'f32)
@@ -213,6 +208,8 @@ proc testScrollFrequencyIsConfigurable() =
     "higher storage frequency should reach the wheel target faster")
   require(slowStorage.scrollFrequency == 30.0'f32,
     "rebuilding the list must preserve its configured frequency")
+  require(slowStorage.scrollSpeed == 20.0'f32 and fastStorage.scrollSpeed == 20.0'f32,
+    "rebuilding the list must preserve its configured wheel distance")
   for frame in 0 ..< 120:
     slow.buildScrollFrame()
     fast.buildScrollFrame()
@@ -221,11 +218,13 @@ proc testScrollFrequencyIsConfigurable() =
     "frequency should change response time, not total scroll distance")
 
 proc testIrregularWheelEventsAreFrameRateIndependent() =
-  var reference: seq[float32]
+  var reference: seq[float32] = @[]
   for frameRate in [30, 60, 120, 240]:
     var b = newBuilder(fixedMeasureText)
     b.buildScrollFrame()
     let storage = b.dynamicListStorage()
+    storage.scrollSpeed = 20.0'f32
+    storage.scrollFrequency = 50.0'f32
     let frameTime = 1.0'f32 / frameRate.float32
     let eventStride = frameRate div 10
     let amounts = [-1.0'f32, -3.0'f32, -0.5'f32, -2.0'f32, -1.25'f32]
@@ -260,6 +259,8 @@ proc testWheelTimingAndDirectionChanges() =
   var b = newBuilder(fixedMeasureText)
   b.buildScrollFrame()
   let storage = b.dynamicListStorage()
+  storage.scrollSpeed = 20.0'f32
+  storage.scrollFrequency = 50.0'f32
   b.buildScrollFrame(-0.25'f32, 0.0'f32)
   require(storage.scrollOffsetY == 0.0'f32 and b.anythingAnimating,
     "a zero-time input frame should queue distance without an impulse or division by zero")
@@ -283,6 +284,8 @@ proc testDirectScrollingCancelsWheelAnimation() =
     var b = newBuilder(fixedMeasureText)
     b.buildScrollFrame()
     let storage = b.dynamicListStorage()
+    storage.scrollSpeed = 20.0'f32
+    storage.scrollFrequency = 50.0'f32
     storage.scrollOffsetY = 100.0'f32
     b.buildScrollFrame(-3.0'f32)
     case action
@@ -303,6 +306,8 @@ proc testWheelStopsAtScrollBoundaries() =
   var b = newBuilder(fixedMeasureText)
   b.buildScrollFrame()
   let storage = b.dynamicListStorage()
+  storage.scrollSpeed = 20.0'f32
+  storage.scrollFrequency = 50.0'f32
   storage.scrollOffsetY = 19895.0'f32
   b.buildScrollFrame(-10.0'f32)
   for frame in 0 ..< 60:
@@ -323,6 +328,7 @@ proc testTerminalWheelScrollsOneRow() =
   var b = newBuilder(fixedMeasureText, backendType = UiBackendType.Terminal)
   var context = TestListContext(changedItemIndex: -1)
   b.buildFrame(context)
+  b.dynamicListStorage().scrollSpeed = 1.0'f32
 
   b.buildFrame(context, UiInputSnapshot(
     frameIndex: 1,
@@ -669,6 +675,7 @@ proc testHorizontalInputAndDisable() =
   var context = TestListContext(wideItemIndex: 0, wideItemWidth: 600.0'f32)
   b.buildHorizontalFrame(context)
   let storage = b.dynamicListStorage()
+  storage.scrollSpeed = 80.0'f32
   b.buildHorizontalFrame(context, UiInputSnapshot(frameIndex: 1,
     mouse: vec2(10.0'f32, 10.0'f32), wheel: vec2(-1.0'f32, 0.0'f32)))
   require(storage.scrollOffsetX == 80.0'f32, "horizontal wheel should move horizontal offset")
@@ -797,7 +804,193 @@ proc testAnchorSurvivesHeightCacheInvalidation() =
           "row geometry must agree with corrected measured offsets")
         inc renderedIndex
 
+proc buildSlightHeightItem(b: var UiBuilder, itemIndex, userData: int) =
+  discard b.height(if itemIndex mod 2 == 0: 29.5'f32 else: 30.5'f32)
+
+proc buildTransientHeightItem(b: var UiBuilder, itemIndex, userData: int) =
+  let context = cast[ptr TestListContext](userData)
+  context.builtIndices.add(itemIndex)
+  discard b.height(context.changedItemHeight)
+
+proc layoutTransientHeightItems(b: var UiBuilder, nodeIdx, userData: int) {.raises: [].} =
+  let context = cast[ptr TestListContext](userData)
+  for rowIdx in b.children(nodeIdx):
+    b.frame.nodes[rowIdx].size.y = context.changedItemHeight
+
+proc testTransientHeightsFillViewport() =
+  for mode in 0..<4:
+    let customLayout = mode mod 2 == 1
+    let invalidateCache = mode >= 2
+    var b = newBuilder(fixedMeasureText)
+    var context = TestListContext(changedItemHeight: 40,
+      postLayoutChangedItemIndex: -1)
+    var storage: UiDynamicVirtualListStorage
+    for frame in 0..<6:
+      context.builtIndices.setLen(0)
+      context.changedItemHeight = if frame mod 2 == 0: 40 else: 10
+      discard b.beginUiFrame(200, 100)
+      storage = b.dynamicVirtualList(100, 30, buildTransientHeightItem,
+        cast[int](context.addr),
+        if customLayout: layoutTransientHeightItems else: nil,
+        cast[int](context.addr))
+      if frame == 1:
+        storage.scrollOffsetY = storage.itemTop(2) - 20
+      if frame > 0:
+        let pixelOffset = storage.itemTop(2) - storage.scrollOffsetY
+        if invalidateCache:
+          storage.clearMeasuredHeights()
+          storage.shiftScrollOffset(storage.itemTop(2) - pixelOffset - storage.scrollOffsetY)
+        storage.preserveItemAnchorAfterMeasurement(2)
+      b.endUiFrame(buildRenderCommands = false)
+      let visible = storage.visibleItemRange()
+      require(context.builtIndices[^1] >= visible.last,
+        "every measured-visible row must be built on the shrink/grow frame")
+      let last = context.builtIndices[^1]
+      require(storage.itemTop(last) + storage.itemHeight(last) -
+        storage.scrollOffsetY >= storage.viewportHeight,
+        "rendered rows must reach the viewport bottom on the same frame")
+      for i in 1..<context.builtIndices.len:
+        require(context.builtIndices[i] == context.builtIndices[i - 1] + 1,
+          "completion must append consecutive rows without rebuilding them")
+      var rendered = 0
+      for rowIdx in b.children(b.dynamicListStorageNodeIndex()):
+        require(abs(b.nodes[rowIdx].pos.y -
+          (storage.itemTop(context.builtIndices[rendered]) - storage.scrollOffsetY)) < 0.001,
+          "completed rows must use final anchored positions")
+        inc rendered
+
+proc testMeasuredCursorVisibilityAfterInvalidation() =
+  var b = newBuilder(fixedMeasureText)
+  var storage: UiDynamicVirtualListStorage
+  for edit in 0 ..< 8:
+    discard b.beginUiFrame(200, 100)
+    storage = b.dynamicVirtualList(100, 30, buildSlightHeightItem)
+    storage.clearMeasuredHeights()
+    storage.shiftScrollOffset(storage.itemTop(8) - 63 - storage.scrollOffsetY)
+    storage.preserveItemAnchorAfterMeasurement(8)
+    discard storage.scrollToItem(8, 100, 7.5, false, false)
+    b.endUiFrame(buildRenderCommands = false)
+    require(abs(storage.itemTop(8) - storage.scrollOffsetY - 63) < 0.001,
+      "small height differences must not trigger cursor-margin scroll after invalidation")
+  discard b.beginUiFrame(200, 100)
+  storage = b.dynamicVirtualList(100, 30, buildSlightHeightItem)
+  storage.clearMeasuredHeights()
+  storage.shiftScrollOffset(storage.itemTop(8) - 70 - storage.scrollOffsetY)
+  storage.preserveItemAnchorAfterMeasurement(8)
+  discard storage.scrollToItem(8, 100, 7.5, false, false)
+  b.endUiFrame(buildRenderCommands = false)
+  require(abs(storage.itemTop(8) - storage.scrollOffsetY - 63) < 0.001,
+    "cursor rows outside the margin must still scroll using their measured height")
+  discard b.beginUiFrame(200, 100)
+  storage = b.dynamicVirtualList(100, 30, buildSlightHeightItem)
+  storage.clearMeasuredHeights()
+  storage.shiftScrollOffset(storage.itemTop(8) - 63 - storage.scrollOffsetY)
+  storage.preserveItemAnchorAfterMeasurement(8)
+  discard storage.scrollToItem(8, 100, 7.5, true, false)
+  b.endUiFrame(buildRenderCommands = false)
+  require(abs(storage.itemTop(8) - storage.scrollOffsetY - 35.25) < 0.001,
+    "explicit centering must use measured height after invalidation")
+  for target in [40, 2]:
+    discard b.beginUiFrame(200, 100)
+    storage = b.dynamicVirtualList(100, 30, buildSlightHeightItem)
+    storage.clearMeasuredHeights()
+    storage.shiftScrollOffset(storage.itemTop(8) - 63 - storage.scrollOffsetY)
+    storage.preserveItemAnchorAfterMeasurement(8)
+    discard storage.scrollToItem(target, 100, 7.5, false, target == 2)
+    b.endUiFrame(buildRenderCommands = false)
+    let pixelOffset = storage.itemTop(target) - storage.scrollOffsetY
+    require(pixelOffset >= 7.499 and pixelOffset <= 63.001,
+      "navigation to another row must take precedence over the old measurement anchor")
+    if target == 2:
+      require(abs(pixelOffset - 35.25) < 0.001,
+        "offscreen centering of another row must use its measured height")
+
+proc buildSynchronizedItem(b: var UiBuilder, itemIndex, userData: int) =
+  let context = cast[ptr TestListContext](userData)
+  context.builtIndices.add(itemIndex)
+  b.node:
+    discard b.size(context.wideItemWidth,
+      if itemIndex == context.changedItemIndex: context.changedItemHeight else: 20.0'f32)
+  discard b.fillX().fitY()
+
+proc testSynchronizedLists() =
+  var b = newBuilder(fixedMeasureText)
+  var leader: UiDynamicVirtualListStorage
+  var follower: UiDynamicVirtualListStorage
+  var leaderViewport, followerViewport: int
+  var current = TestListContext(wideItemWidth: 600, changedItemIndex: 1,
+    changedItemHeight: 50)
+  var old = TestListContext(wideItemWidth: 50, changedItemIndex: 2,
+    changedItemHeight: 40)
+  template frame(input: UiInputSnapshot = default(UiInputSnapshot), fit: bool = false) =
+    current.builtIndices.setLen(0)
+    old.builtIndices.setLen(0)
+    discard b.beginUiFrame(200, 100, input)
+    b.node("pair"):
+      discard b.fillX()
+      if fit: discard b.fitY()
+      else: discard b.fillY()
+      b.node("current"):
+        discard b.anchorsX(0.5, 1).finishAnchors()
+        if fit: discard b.fitY()
+        else: discard b.fillY()
+        let root = b.nodes.len
+        leader = b.dynamicVirtualList(if fit: 4 else: 100, 20,
+          buildSynchronizedItem, cast[int](current.addr),
+          horizontalScroll = true, synchronized = true)
+        leaderViewport = b.firstChildIndex(root)
+      b.node("old"):
+        discard b.anchorsX(0, 0.5).finishAnchors()
+        if fit: discard b.fitY()
+        else: discard b.fillY()
+        let root = b.nodes.len
+        follower = b.dynamicVirtualList(if fit: 4 else: 100, 20,
+          buildSynchronizedItem, cast[int](old.addr),
+          horizontalScroll = true, synchronizeWith = leader)
+        followerViewport = b.firstChildIndex(root)
+    b.endUiFrame(buildRenderCommands = false)
+    require(leader != follower, "panes must have separate storage")
+    require(current.builtIndices == old.builtIndices, "both panes must build the same visible rows")
+    require(leader.heights == follower.heights, "measured paired-row heights must match")
+    require(leader.scrollOffsetX == follower.scrollOffsetX and
+      leader.scrollOffsetY == follower.scrollOffsetY, "both scroll offsets must match")
+    require(leader.viewportHeight == follower.viewportHeight, "viewport heights must match")
+    var leaderRows: seq[int] = @[]
+    var followerRows: seq[int] = @[]
+    for row in b.children(leaderViewport): leaderRows.add row
+    for row in b.children(followerViewport): followerRows.add row
+    for i in 0..<leaderRows.len:
+      require(b.nodes[leaderRows[i]].pos == b.nodes[followerRows[i]].pos and
+        b.nodes[leaderRows[i]].size.y == b.nodes[followerRows[i]].size.y,
+        "paired rows must be aligned after measurement")
+  frame()
+  require(leader.itemHeight(1) == 50 and leader.itemHeight(2) == 40,
+    "each paired height must be the maximum of both panes")
+  require(follower.maxItemWidth == 600, "shorter pane must follow the wider pane")
+  for x in [25.0'f32, 125.0'f32]:
+    frame(UiInputSnapshot(mouse: vec2(x, 10)))
+    let beforeX = leader.scrollOffsetX
+    frame(UiInputSnapshot(mouse: vec2(x, 10), wheel: vec2(-1, 0)))
+    require(leader.scrollOffsetX > beforeX, "horizontal wheel on either pane must scroll both")
+    let beforeY = leader.scrollOffsetY
+    frame(UiInputSnapshot(mouse: vec2(x, 10), wheel: vec2(0, -1)))
+    require(leader.scrollOffsetY > beforeY, "vertical wheel on either pane must scroll both immediately")
+    for tick in 0..<30: frame()
+  current.changedItemHeight = 20
+  old.changedItemHeight = 20
+  discard leader.scrollToItemAtOffset(0, 0, 90)
+  frame()
+  require(leader.itemHeight(1) == 20 and leader.itemHeight(2) == 20,
+    "paired measurements must shrink when content shrinks")
+  frame(fit = true)
+  require(leader.viewportHeight == 80, "fit pairs must resolve their measured content height")
+  require(b.nodes[int(b.nodes[leaderViewport].parent)].size.y == 90,
+    "fit pairs must reserve the shared horizontal scrollbar")
+
 proc runTests() =
+  testSynchronizedLists()
+  testTransientHeightsFillViewport()
+  testMeasuredCursorVisibilityAfterInvalidation()
   testAnchorSurvivesHeightCacheInvalidation()
   testHorizontalWidthPersistsUntilReset()
   testHorizontalInputAndDisable()
@@ -824,6 +1017,9 @@ proc runTests() =
 
 when isMainModule:
   when defined(nuiHorizontalScrollTests):
+    testSynchronizedLists()
+    testTransientHeightsFillViewport()
+    testMeasuredCursorVisibilityAfterInvalidation()
     testAnchorSurvivesHeightCacheInvalidation()
     testHorizontalWidthPersistsUntilReset()
     testHorizontalInputAndDisable()

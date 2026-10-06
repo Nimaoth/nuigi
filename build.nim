@@ -377,6 +377,22 @@ proc buildTerminalTest(compiler: NimCompiler) =
   else:
     echo "not implemented"
 
+proc buildCoreTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      &"nim c -r -o:bin/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+      "ui-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+      "ui-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
 proc buildUiTestNim2() =
   echo "buildUiTestNim2"
   let passthroughArgs = passthroughArgs.join(" ")
@@ -393,10 +409,7 @@ proc buildUiTestNim2() =
     &"nim c -r -o:bin/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
     "ui-dynamic-virtualist-test-nim2"
   )
-  shellCapture(
-    &"nim c -r -o:bin/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
-    "ui-test-nim2"
-  )
+  buildCoreTest(Nim2)
   shellCapture(
     &"nim c -r -o:bin/ui-tree-table-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
     "ui-tree-table-seek-test-nim2"
@@ -471,10 +484,7 @@ proc buildUiTestNimony() =
     &"nimony c -r -o:bin/ui-dynamic-virtualist-test-nimony.exe --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
     "ui-dynamic-virtualist-test-nimony"
   )
-  shellCapture(
-    &"nimony c -r -o:bin/ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
-    "ui-test-nimony"
-  )
+  buildCoreTest(Nimony)
   shellCapture(
     &"nimony c -r -o:bin/ui-tree-table-seek-test-nimony.exe --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
     "ui-tree-table-seek-test-nimony"
@@ -665,6 +675,9 @@ proc main() =
 
   of "focus-test":
     buildFocusTest(compiler)
+
+  of "core-test":
+    buildCoreTest(compiler)
 
   of "tree-table-refresh-bench":
     buildTreeTableRefreshBench(compiler)

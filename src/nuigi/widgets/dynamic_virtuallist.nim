@@ -12,6 +12,11 @@ import std/math
 import nuigi
 import nuigi/debug/profiler
 
+include nuigi/util/compat2
+
+when defined(nimony):
+  import std/assertions
+
 type UiDynamicVirtualListItemProc* = proc(b: var UiBuilder, itemIndex: int, userData: int) {.nimcall, gcsafe, raises: [].}
 
 type UiDynamicVirtualListHeight* = object
@@ -43,6 +48,7 @@ type UiDynamicVirtualListStorage* = ref object of UiNodeStorageData
   pendingHorizontalRange: bool
   horizontalRangeStart: float32
   horizontalRangeEnd: float32
+  scrollSpeed*: float32 ## Distance per wheel unit on either axis.
   scrollFrequency*: float32 ## Positive spring response rate; higher values settle faster.
   scrollVelocityY: float32
   scrollRemainingY: float32
@@ -65,6 +71,15 @@ type UiDynamicVirtualListStorage* = ref object of UiNodeStorageData
   scrollbarThumbIndex*: int
   scrollbarMarkers*: seq[UiScrollbarMarker]
   scrollbarMarkerCommands: seq[UiRenderCommand]
+  synchronized: bool
+  synchronizedPeers: seq[tuple[storage: UiDynamicVirtualListStorage, viewportIndex: int]]
+
+proc copyScrollState(source, target: UiDynamicVirtualListStorage) =
+  target.scrollOffsetY = source.scrollOffsetY
+  target.scrollOffsetX = source.scrollOffsetX
+  target.scrollVelocityY = source.scrollVelocityY
+  target.scrollRemainingY = source.scrollRemainingY
+  target.scrollAnimationOffsetY = source.scrollAnimationOffsetY
 
 proc cancelScrollAnimation(storage: UiDynamicVirtualListStorage) =
   storage.scrollVelocityY = 0.0'f32
@@ -91,6 +106,7 @@ proc getOrCreateDynamicVirtualListStorage*(b: var UiBuilder, node: ptr UiNode): 
     return cast[UiDynamicVirtualListStorage](existing)
   var storage = UiDynamicVirtualListStorage(
     previousFirstVisibleItem: -1, scrollFrequency: 40.0'f32,
+    scrollSpeed: (if b.backendType == UiBackendType.Terminal: 2.0'f32 else: 80.0'f32),
     horizontalScrollbarTrackIndex: -1, horizontalScrollbarThumbIndex: -1)
   b.nodeStorage(node, storage)
   return storage
@@ -562,6 +578,7 @@ proc dynamicVirtualListBuild(b: var UiBuilder, nodeIdx: int, propagateFitSizes: 
   let resolvedMeasurementAnchor = storage.pendingMeasurementAnchor
   var measurementAnchorTop = storage.measurementAnchorTop
   var resolveMeasuredScrollTo = storage.pendingMeasuredScrollTo
+  var peerRows: seq[int] = @[]
 
   while true:
     var measurementScrollAdjustment = 0.0'f32
@@ -572,10 +589,31 @@ proc dynamicVirtualListBuild(b: var UiBuilder, nodeIdx: int, propagateFitSizes: 
         break
       let itemNodeIndex = b.nodes.len
       storage.renderedItemIndexes.add(itemIndex)
+      peerRows.setLen(0)
       b.node(itemIndex.uint64):
         discard b.position(0.0'f32, itemTop - storage.scrollOffsetY).fillX()
         storage.buildItem(b, itemIndex, storage.buildItemUserData)
       discard b.postProcessChildren(itemNodeIndex)
+      var sharedHeight = b.nodes[itemNodeIndex].size.y
+      for peer in storage.synchronizedPeers:
+        storage.copyScrollState(peer.storage)
+        peer.storage.heights = storage.heights
+        peer.storage.measuredHeightTotal = storage.measuredHeightTotal
+        peer.storage.renderedItemIndexes.add(itemIndex)
+        let peerRow = b.nodes.len
+        b.withParent(peer.viewportIndex):
+          b.node(itemIndex.uint64):
+            discard b.position(0.0'f32, itemTop - storage.scrollOffsetY).fillX()
+            peer.storage.buildItem(b, itemIndex, peer.storage.buildItemUserData)
+        discard b.postProcessChildren(peerRow)
+        sharedHeight = max(sharedHeight, b.nodes[peerRow].size.y)
+        peerRows.add(peerRow)
+      if peerRows.len > 0:
+        b.withParent(itemNodeIndex):
+          discard b.fitY(false).height(sharedHeight)
+        for peerRow in peerRows:
+          b.withParent(peerRow):
+            discard b.fitY(false).height(sharedHeight)
       if storage.customRowLayout == nil:
         let previousHeight = storage.estimatedItemHeight(itemIndex, heightHint)
         let measuredHeight = max(1.0'f32, b.nodes[itemNodeIndex].size.y)
@@ -624,6 +662,9 @@ proc dynamicVirtualListBuild(b: var UiBuilder, nodeIdx: int, propagateFitSizes: 
     if storage.horizontalScroll:
       for rowIdx in b.children(nodeIdx):
         storage.maxItemWidth = max(storage.maxItemWidth, b.renderedRowWidth(rowIdx))
+      for peer in storage.synchronizedPeers:
+        for rowIdx in b.children(peer.viewportIndex):
+          storage.maxItemWidth = max(storage.maxItemWidth, b.renderedRowWidth(rowIdx))
 
     if fitParentY:
       # Reconcile with the measured rows: shrink to the exact rows height when
@@ -741,10 +782,62 @@ proc dynamicVirtualListBuild(b: var UiBuilder, nodeIdx: int, propagateFitSizes: 
     viewportHeight = storage.viewportHeight
   storage.previousFirstVisibleItem = firstRenderedItem
   storage.scrollAnimationOffsetY = storage.scrollOffsetY
+  for peer in storage.synchronizedPeers:
+    let target = peer.storage
+    storage.copyScrollState(target)
+    target.heights = storage.heights
+    target.measuredHeightTotal = storage.measuredHeightTotal
+    target.maxItemWidth = storage.maxItemWidth
+    target.previousFirstVisibleItem = firstRenderedItem
+    target.viewportHeight = storage.viewportHeight
+    let peerViewport = b.frame.nodes[peer.viewportIndex].addr
+    let peerRootIndex = int(peerViewport.parent)
+    let peerRoot = b.frame.nodes[peerRootIndex].addr
+    let peerStyle = b.nodeStyle(peerViewport)
+    let rootStyle = b.nodeStyle(peerRoot)
+    if FitY in peerRoot.flags:
+      b.applyFitListSizes(peer.viewportIndex, peerRootIndex,
+        target.scrollbarTrackIndex, storage.viewportHeight,
+        peerStyle.paddingY * 2.0'f32, rootStyle.paddingY * 2.0'f32,
+        max(0.0'f32, peerRoot.size.x - rootStyle.paddingX * 2.0'f32),
+        if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32,
+        totalHeight > storage.viewportHeight,
+        b.horizontalScrollbarHeight(target, peerViewport.size.x))
+    else:
+      peerViewport.size.y = b.frame.nodes[nodeIdx].size.y
+      b.ensureNodeAnchor(peerViewport).bottomRightOffset.y =
+        b.ensureNodeAnchor(b.frame.nodes[nodeIdx].addr).bottomRightOffset.y
+      if target.scrollbarTrackIndex >= 0:
+        b.frame.nodes[target.scrollbarTrackIndex].size.y = peerViewport.size.y
+        b.ensureNodeAnchor(b.frame.nodes[target.scrollbarTrackIndex].addr).bottomRightOffset.y =
+          b.ensureNodeAnchor(peerViewport).bottomRightOffset.y
+    var rowIndex = 0
+    for rowIdx in b.children(peer.viewportIndex):
+      b.frame.nodes[rowIdx].pos.y =
+        storage.itemTop(target.renderedItemIndexes[rowIndex]) - storage.scrollOffsetY
+      inc rowIndex
+    b.updateHorizontalScrollbar(peer.viewportIndex, target)
+    if target.scrollbarThumbIndex >= 0:
+      let thumb = b.frame.nodes[target.scrollbarThumbIndex].addr
+      if storage.scrollbarThumbIndex >= 0:
+        thumb.size.y = b.frame.nodes[storage.scrollbarThumbIndex].size.y
+        thumb.pos.y = b.frame.nodes[storage.scrollbarThumbIndex].pos.y
+    if propagateFitSizes and FitY in peerRoot.flags:
+      var parentIndex = peerRootIndex
+      while parentIndex >= 0:
+        discard b.postProcessChildren(parentIndex)
+        parentIndex = int(b.frame.nodes[parentIndex].parent)
+        if parentIndex < 0 or FitY notin b.frame.nodes[parentIndex].flags:
+          break
 
 proc dynamicVirtualListDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) {.gcsafe, raises: [].} =
   prof("dynamicVirtualListDeferredBuild")
   let _ = rawData
+  let storage = b.getOrCreateDynamicVirtualListStorage(b.frame.nodes[nodeIdx].addr)
+  if storage.synchronized:
+    storage.animateScroll(max(0.0'f32, b.frameCtx.animationTick))
+    if storage.scrollRemainingY != 0.0'f32 or storage.scrollVelocityY != 0.0'f32:
+      b.anythingAnimating = true
   b.dynamicVirtualListBuild(nodeIdx, true)
 
 proc dynamicVirtualListScrollbarMarkersBuild(b: var UiBuilder, nodeIdx: int, rawData: int) {.gcsafe, raises: [].} =
@@ -752,7 +845,7 @@ proc dynamicVirtualListScrollbarMarkersBuild(b: var UiBuilder, nodeIdx: int, raw
   ## Runs deferred so the track size is resolved; rects are node-local, like the
   ## highlight layer's CmdRectFill commands. Markers live on the viewport's list
   ## storage (bg -> track -> list root -> first child viewport).
-  {.cast(gcsafe).}:
+  gcsafeb:
     prof("dynamicVirtualListScrollbarMarkersBuild")
     try:
       let _ = rawData
@@ -804,10 +897,13 @@ proc dynamicVirtualList*(b: var UiBuilder,
   inItemUserData: int = 0,
   inCustomRowLayout: nil UiCustomLayoutProc = nil,
   inCustomRowLayoutUserData: int = 0,
-  horizontalScroll: bool = false): UiDynamicVirtualListStorage {.discardable.} =
+  horizontalScroll: bool = false,
+  synchronized: bool = false,
+  synchronizeWith: nil UiDynamicVirtualListStorage = nil): UiDynamicVirtualListStorage {.discardable.} =
+  ## A synchronized leader defers even in fitY mode. Followers must be built
+  ## later in the same frame, with identical counts/hints and no custom layout.
+  ## Both axes, measured row heights and content widths are shared.
   prof("dynamicVirtualList")
-  let scrollSpeed =
-    if b.backendType == UiBackendType.Terminal: 2.0'f32 else: 80.0'f32
   let scrollbarWidth =
     if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 10.0'f32
   let thumbMinHeight =
@@ -834,6 +930,19 @@ proc dynamicVirtualList*(b: var UiBuilder,
       discard b.maskChildren()
       b.currentNode.flags.incl Scrollable
       storage = b.getOrCreateDynamicVirtualListStorage(b.currentNode)
+      storage.synchronized = synchronized
+      storage.synchronizedPeers.setLen(0)
+      if synchronizeWith != nil:
+        assert synchronizeWith.synchronized
+        assert synchronizeWith.itemCount == itemCount
+        assert synchronizeWith.heightHint == heightHint
+        assert synchronizeWith.customRowLayout == nil and inCustomRowLayout == nil
+        assert synchronizeWith.horizontalScroll == horizontalScroll
+        synchronizeWith.copyScrollState(storage)
+        storage.heights = synchronizeWith.heights
+        storage.measuredHeightTotal = synchronizeWith.measuredHeightTotal
+        storage.maxItemWidth = synchronizeWith.maxItemWidth
+        storage.renderedItemIndexes.setLen(0)
       storage.trimHeights(itemCount)
       storage.itemCount = itemCount
       storage.heightHint = heightHint
@@ -859,7 +968,7 @@ proc dynamicVirtualList*(b: var UiBuilder,
       let shiftWheel = horizontalScroll and ModShift in input.modsDown
       let wheelY = if shiftWheel: 0.0'f32 else: input.wheel.y
       if b.previousOutput.scrolledId == b.currentNode.id and abs(wheelY) > 0.0001'f32:
-        let wheelDelta = -wheelY * scrollSpeed
+        let wheelDelta = -wheelY * storage.scrollSpeed
         if b.backendType == UiBackendType.Terminal:
           storage.scrollOffsetY += wheelDelta
           storage.cancelScrollAnimation()
@@ -874,7 +983,7 @@ proc dynamicVirtualList*(b: var UiBuilder,
         storage.cancelScrollAnimation()
       if horizontalScroll and b.previousOutput.scrolledId == b.currentNode.id:
         let wheelX = input.wheel.x + (if shiftWheel: input.wheel.y else: 0.0'f32)
-        storage.scrollByX(-wheelX * scrollSpeed + b.middleDragScroll.x)
+        storage.scrollByX(-wheelX * storage.scrollSpeed + b.middleDragScroll.x)
 
       if storage.viewportHeight > 0.0'f32:
         let scrollRange = max(0.0'f32,
@@ -882,17 +991,18 @@ proc dynamicVirtualList*(b: var UiBuilder,
         storage.scrollRemainingY = clamp(
           storage.scrollOffsetY + storage.scrollRemainingY, 0.0'f32, scrollRange) -
           storage.scrollOffsetY
-      storage.animateScroll(frameTime)
+      if synchronizeWith == nil and not synchronized:
+        storage.animateScroll(frameTime)
       if storage.scrollRemainingY != 0.0'f32 or storage.scrollVelocityY != 0.0'f32:
         b.anythingAnimating = true
 
-      if fitSizing:
+      if fitSizing and not synchronized and synchronizeWith == nil:
         # The scrollbar track does not exist yet; the build skips it and the
         # scrollbar block below sizes it from the resolved rows instead.
         storage.scrollbarTrackIndex = -1
         storage.scrollbarThumbIndex = -1
         b.dynamicVirtualListBuild(viewportIndex, false)
-      else:
+      elif synchronizeWith == nil:
         discard b.deferBuild(dynamicVirtualListDeferredBuild)
 
     b.node("dynamic-virtual-list-scrollbar"):
@@ -951,7 +1061,8 @@ proc dynamicVirtualList*(b: var UiBuilder,
           0.0'f32, 1.0'f32)
         storage.scrollOffsetY = pointerNorm * scrollRange
 
-    if fitSizing and viewportIndex >= 0 and viewportIndex < b.nodes.len:
+    if fitSizing and not synchronized and synchronizeWith == nil and
+        viewportIndex >= 0 and viewportIndex < b.nodes.len:
       # Rows were built above, so the scrollbar nodes created by the previous
       # block can be sized from the resolved rows right away: collapse the
       # track when everything fits, otherwise keep the capped height.
@@ -1022,4 +1133,7 @@ proc dynamicVirtualList*(b: var UiBuilder,
           b.updateHorizontalScrollbar(viewportIndex, storage)
 
     storage.scrollAnimationOffsetY = storage.scrollOffsetY
+    if synchronizeWith != nil:
+      storage.copyScrollState(synchronizeWith)
+      synchronizeWith.synchronizedPeers.add((storage, viewportIndex))
     result = storage

@@ -956,6 +956,7 @@ proc testButtonHoverAndPressed() =
   require(secondFill.r < 0.96'f32 + 0.0001'f32, "button hover fill should remain below click highlight color")
 
 proc buildMouseClickTargets(b: var UiBuilder): tuple[first, second: UiNodeId] =
+  result = (first: noneNodeId(), second: noneNodeId())
   b.node(1'u64):
     discard b.position(0, 0).size(40, 40)
     result.first = b.currentNode.id

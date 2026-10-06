@@ -232,7 +232,7 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor, storage: nil ColorPicker
 
     swatchIdx = b.stack[^1]
     swatchId = b.currentNode.id
-    if not storage.isNil:
+    if storage != nil:
       nodeStorage(b, b.currentNode, storage)
     else:
       storage = getOrCreateColorPickerStorage(b, b.currentNode)
@@ -243,7 +243,8 @@ proc colorPicker*(b: var UiBuilder, value: var UiColor, storage: nil ColorPicker
       activationId = b.focusedNode
     if storage.open and activationId != noneNodeId() and activationId != storage.ownerId:
       let activatedIndex = findNodeIndexById(b.previousFrame.nodes, activationId)
-      if activatedIndex >= 0 and nodeStorageGet(b, b.previousFrame.nodes[activatedIndex].addr) == storage:
+      if activatedIndex >= 0 and
+          nodeStorageGet(b, b.previousFrame.nodes[activatedIndex].addr) == UiNodeStorageData(storage):
         storage.open = false
         storage.openPrev = false
     discard b.focusable({FocusTabStop, FocusActivatable})

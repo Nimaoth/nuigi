@@ -21,8 +21,11 @@ It is not ready for usage yet.
 - Optional per widget storage, auto garbage collected
 - Virtual lists for big ui
 - Debug panel and event tracing
+- ANSI true-color terminal backend with Unicode cell-aware text
 
 ## Examples
+
+Build the SDL demo with `./build.exe demo`, or the terminal demo with `./build.exe terminal-demo`.
 
 ### Setup
 
@@ -30,7 +33,7 @@ It is not ready for usage yet.
 import nuigi
 # create the builder once, at startup
 # (arrangeText / buildTextMesh are supplied by your font + text layer)
-proc arrangeText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32): UiTextArrangement {.gcsafe, raises: [].} =
+proc arrangeText(text: openArray[char], fontId: int16, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
   discard # implemented by you, but you can use fonts.nim if you want
 proc buildTextMesh(arrangement: UiTextArrangement, pos, screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
   discard # implemented by you, but you can use fonts.nim if you want
