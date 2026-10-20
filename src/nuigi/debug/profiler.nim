@@ -4,11 +4,27 @@
 ## events and rolling frame statistics in global buffers for `profiler_ui`.
 ## Without that define, or under Nimony, the public timing hooks collapse to
 ## inexpensive no-ops so instrumented call sites need no conditional code.
+##
+## With `-d:nuigiPerfProfiler -d:perfProfiler`, `prof` and `profd` also write
+## their scopes to a `.perfprof` file through the Memory Profiler's
+## `perf_profiler` library, which must be on the search path (for example
+## `--path:../memory-profiler/lib`). The application starts and stops the
+## recording with `startProfiling` and `stopProfiling`, and calls
+## `profilerFrameStart` before each frame's scopes. This works with or without
+## `-d:nuigiProfiler`. Without `-d:nuigiPerfProfiler` these procs are always
+## available and do nothing.
 
 import std/[tables, assertions, strutils]
 import nuigi/core/timer
 
 include nuigi/util/compat2
+
+const nuigiPerfFileProfiler = defined(nuigiPerfProfiler) and not defined(nimony)
+
+when nuigiPerfFileProfiler:
+  when not defined(perfProfiler):
+    {.error: "-d:nuigiPerfProfiler also requires -d:perfProfiler".}
+  from perf_profiler import nil
 
 when defined(nuigiProfiler) and not defined(nimony):
   import nuigi/core/vecmath
@@ -16,8 +32,37 @@ when defined(nuigiProfiler) and not defined(nimony):
 proc profNow*(): uint64 =
   when defined(nuigiProfiler) and not defined(nimony):
     return timer.getTicksNS()
+  elif nuigiPerfFileProfiler:
+    return perf_profiler.profNow()
   else:
     return 0
+
+proc startProfiling*(path: string, flushIntervalMs = 50): bool =
+  ## Starts recording scopes into the `.perfprof` file at `path`. Returns
+  ## false if recording could not start, or always when
+  ## `-d:nuigiPerfProfiler` is not defined.
+  when nuigiPerfFileProfiler:
+    perf_profiler.startProfiling(path, flushIntervalMs)
+  else:
+    false
+
+proc stopProfiling*() =
+  ## Finishes and closes the `.perfprof` file; a no-op when not recording.
+  when nuigiPerfFileProfiler:
+    perf_profiler.stopProfiling()
+
+proc isProfiling*(): bool =
+  ## Whether scopes are currently being written to a `.perfprof` file.
+  when nuigiPerfFileProfiler:
+    perf_profiler.isProfiling()
+  else:
+    false
+
+proc profilerFrameStart*() {.inline.} =
+  ## Marks the start of a frame in the `.perfprof` file. Call it before the
+  ## frame's first scope; a no-op unless `-d:nuigiPerfProfiler` is defined.
+  when nuigiPerfFileProfiler:
+    perf_profiler.profilerBeginFrame()
 
 when defined(nuigiProfiler) and not defined(nimony):
 
@@ -68,6 +113,8 @@ when defined(nuigiProfiler) and not defined(nimony):
 when defined(nuigiProfiler) and not defined(nimony):
   template prof*(tag: string) =
     # todo: make this smaller
+    when nuigiPerfFileProfiler:
+      perf_profiler.prof(tag)
     when defined(nimony) or defined(nlvm):
       let location = (tag, "", 0.uint32, 0.uint32)
     else:
@@ -93,10 +140,15 @@ when defined(nuigiProfiler) and not defined(nimony):
     discard
 else:
   template prof*(tag: string) =
-    discard
+    when nuigiPerfFileProfiler:
+      perf_profiler.prof(tag)
+    else:
+      discard
 
 when defined(nuigiProfiler) and not defined(nimony):
   template profd*(tag: string) =
+    when nuigiPerfFileProfiler:
+      perf_profiler.prof(tag)
     when defined(nimony) or defined(nlvm):
       let location = (tag, "", 0.uint32, 0.uint32)
     else:
@@ -122,7 +174,10 @@ when defined(nuigiProfiler) and not defined(nimony):
     discard
 else:
   template profd*(tag: string) =
-    discard
+    when nuigiPerfFileProfiler:
+      perf_profiler.prof(tag)
+    else:
+      discard
 
 when defined(nuigiProfiler) and not defined(nimony):
   proc lastEventTimestamp*(tag: string, frameIndex: int): uint64 =

@@ -37,6 +37,12 @@ proc windowSpaceStorage(b: var UiBuilder): nil WindowSpaceStorage =
     return cast[WindowSpaceStorage](stored)
   nil
 
+proc requiredWindowSpaceStorage(b: var UiBuilder): WindowSpaceStorage =
+  let stored = b.windowSpaceStorage()
+  if stored == nil:
+    assert false, "window space storage is unavailable"
+  return stored
+
 proc windowStorage(b: var UiBuilder, windowId: UiNodeId): nil WindowStorage =
   let windowIndex = b.currentNodeIndex(windowId)
   if windowIndex < 0:
@@ -220,6 +226,12 @@ proc testDockLayoutSerializationRoundTrip() =
   var untouched = initDockLayout()
   require(not parseDockLayout("garbage", untouched) and untouched.isEmpty,
     "malformed text should be rejected")
+  for malformed in [
+      "nuigi-dock-layout 1\nsplit x invalid\nempty\nempty\n",
+      "nuigi-dock-layout 1\ntabs 0 invalid\nwindow A\n",
+      "nuigi-dock-layout 1\nempty\nfloating invalid 0 1 1 0 Tool\n"]:
+    require(not parseDockLayout(malformed, untouched) and untouched.isEmpty,
+      "malformed numeric values should be rejected without modifying the layout")
 
   parsed.removeWindow("Sessions list")
   require(not parsed.isDocked("Sessions list") and parsed.isDocked("Session"),
@@ -318,7 +330,7 @@ proc testShiftDragKeepsWindowFloating() =
   var input = holdAt(3, target, target - titlePos)
   input.modsDown = {ModShift}
   b.buildDockFrame(dock, input)
-  require(b.windowSpaceStorage().dockAreasId == noneNodeId(), "Shift should hide drop guides")
+  require(b.requiredWindowSpaceStorage().dockAreasId == noneNodeId(), "Shift should hide drop guides")
   var release = releaseAt(4, target)
   release.modsDown = {ModShift}
   b.buildDockFrame(dock, release)
@@ -340,12 +352,12 @@ proc checkDockDrop(target: Vec2, docks: bool, side = DockCenter,
   dock.layout.floatWindow("C", start, size)
   b.buildDockFrame(dock, viewport = viewport)
   b.buildDockFrame(dock, UiInputSnapshot(frameIndex: 1), viewport)
-  require(b.windowSpaceStorage().dockAreasId == noneNodeId(), "idle windows should not show drop guides")
+  require(b.requiredWindowSpaceStorage().dockAreasId == noneNodeId(), "idle windows should not show drop guides")
   let grab = start + vec2(10.0'f32, 5.0'f32)
   b.buildDockFrame(dock, pressAt(2, grab), viewport)
   b.buildDockFrame(dock, holdAt(3, target, target - grab), viewport)
   require(dock.isDragging, "drop test should start a window drag")
-  let areasId = b.windowSpaceStorage().dockAreasId
+  let areasId = b.requiredWindowSpaceStorage().dockAreasId
   require(areasId != noneNodeId(), "hovering a pane should show the available drop areas")
   require((b.windowOrder()[^1] != areasId) == docks,
     "only valid drop areas should show a bright result preview at " & $target)
@@ -364,7 +376,7 @@ proc checkDockDrop(target: Vec2, docks: bool, side = DockCenter,
     inc areaCount
   require(areaCount == (if empty: 1 else: 5), "show only the available drop areas")
   b.buildDockFrame(dock, releaseAt(4, target), viewport)
-  require(b.windowSpaceStorage().dockAreasId == noneNodeId(), "release should hide the drop guides")
+  require(b.requiredWindowSpaceStorage().dockAreasId == noneNodeId(), "release should hide the drop guides")
   b.buildDockFrame(dock, UiInputSnapshot(frameIndex: 5), viewport)
   require(dock.layout.isDocked("C") == docks,
     "drop result should match the preview at " & $target)
@@ -449,7 +461,7 @@ proc testDraggingTabIntoGapKeepsItFloating() =
   b.buildDockFrame(dock, pressAt(2, grab))
   b.buildDockFrame(dock, holdAt(3, gap, gap - grab))
   require(dock.isDragging and not dock.layout.isDocked("B"), "tab should undock during the drag")
-  require(b.windowOrder()[^1] == b.windowSpaceStorage().dockAreasId,
+  require(b.windowOrder()[^1] == b.requiredWindowSpaceStorage().dockAreasId,
     "floating gap should show drop guides but no bright result preview")
   b.buildDockFrame(dock, releaseAt(4, gap))
   b.buildDockFrame(dock, UiInputSnapshot(frameIndex: 5))
@@ -473,7 +485,7 @@ proc testDraggingTabUndocksWindow() =
   require(dock.layout.root >= 0 and dock.layout.nodes[dock.layout.root].windows == @["A"],
     "the remaining window should take the whole dock space")
   b.buildDockFrame(dock, releaseAt(4, vec2(-10.0'f32)))
-  require(b.windowSpaceStorage().dockAreasId == noneNodeId(), "outside release should hide drop guides")
+  require(b.requiredWindowSpaceStorage().dockAreasId == noneNodeId(), "outside release should hide drop guides")
   b.buildDockFrame(dock, UiInputSnapshot(frameIndex: 5))
   require(b.windowRect("A") == (vec2(0.0'f32), vec2(800.0'f32, 600.0'f32)),
     "remaining docked window should fill the dock space")

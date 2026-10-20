@@ -975,7 +975,7 @@ proc redrawUiFrame(dt: float64, tickStart: float32) =
       gRender2D.endRender()
     block:
       prof("vsync")
-      gRender2D.presentToSwapchain(gWindow)
+      discard gRender2D.presentToSwapchain(gWindow)
 
 proc redrawOnWindowExposed(userdata: pointer, event: ptr Event): bool {.cdecl.} =
   result = true
@@ -1008,6 +1008,7 @@ proc mainLoop() {.cdecl.} =
 
     when defined(nuigiProfiler) and not defined(nimony):
       gprof.frameStart = eventHistoryIndex
+    profilerFrameStart()
     prof("frame")
     when defined(nuigiProfiler) and not defined(nimony):
       profilerBeginFrame(false)
@@ -1186,4 +1187,3 @@ when not defined(wasm) and not defined(nimony):
     of cmdEnd: assert(false) # cannot happen
 
 main(quitImmediately)
-

@@ -274,6 +274,18 @@ proc buildFreetypeStatic() =
   else:
     copyBuiltLibrary(buildDir, "libfreetype.a", "libfreetype.a")
 
+proc buildFreetypeStaticNimony() =
+  echo "buildFreetypeStaticNimony"
+  createDir("vendor")
+  if not dirExists("vendor/freetype"):
+    shell("git clone https://gitlab.freedesktop.org/freetype/freetype.git", "vendor")
+
+  requireProgram("cmake", "Install CMake to build FreeType.")
+  requireProgram("ninja", "Install Ninja to build FreeType for Nimony.")
+  let buildDir = "build/freetype_nimony_static"
+  shell &"cmake -S vendor/freetype -B {buildDir} -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DBUILD_SHARED_LIBS=OFF -DFT_DISABLE_HARFBUZZ=TRUE -DFT_DISABLE_BROTLI=TRUE -DFT_DISABLE_BZIP2=TRUE -DFT_DISABLE_PNG=TRUE -DFT_DISABLE_ZLIB=TRUE"
+  shell &"cmake --build {buildDir} --config Release --parallel"
+
 proc buildHarfbuzz() =
   echo "buildHarfbuzz"
   createDir("vendor")
@@ -382,7 +394,11 @@ proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
   of Nim2Ic:
     shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
   of Nimony:
-    shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
+    when defined(windows):
+      buildFreetypeStaticNimony()
+      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 --passL:-Lbuild/freetype_nimony_static {sdlLink} {passthroughArgs} examples/demo.nim"
+    else:
+      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
     shell &"nimony l -d:llvm {outFlag} -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:

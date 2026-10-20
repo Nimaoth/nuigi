@@ -6,7 +6,7 @@
 ## geometry. Nodes are stored in a flat array and reference each other by
 ## index; removed nodes become `DockNodeFree` and are reused.
 
-import std/strutils
+import std/[parseutils, strutils]
 import nuigi/core/vecmath
 
 type
@@ -49,6 +49,27 @@ type
     floating*: seq[DockFloatingWindow]
 
 const dockLayoutHeader = "nuigi-dock-layout 1"
+
+proc parseDockInt(value: string, parsed: var int): bool =
+  if value.len == 0:
+    return false
+  var number: BiggestInt = 0
+  let consumed = parseutils.parseBiggestInt(value.toOpenArray(0, value.high), number)
+  if consumed != value.len or number < BiggestInt(low(int)) or
+      number > BiggestInt(high(int)):
+    return false
+  parsed = int(number)
+  true
+
+proc parseDockFloat(value: string, parsed: var float32): bool =
+  if value.len == 0:
+    return false
+  var number: BiggestFloat = 0.0
+  let consumed = parseutils.parseBiggestFloat(value.toOpenArray(0, value.high), number)
+  if consumed != value.len:
+    return false
+  parsed = float32(number)
+  true
 
 proc initDockLayout*(): DockLayout =
   DockLayout(root: -1)
@@ -225,47 +246,50 @@ proc parseNode(layout: var DockLayout, lines: seq[string], line: var int,
     return (false, -1)
   let parts = lines[line].split(' ', maxsplit = 3)
   inc line
-  try:
-    case parts[0]
-    of "empty":
-      return (true, -1)
-    of "split":
-      if parts.len < 3 or parts[1] notin ["x", "y"]:
-        return (false, -1)
-      let index = layout.addNode(DockNode(kind: DockNodeSplit, parent: parent,
-        axis: if parts[1] == "x": DockAxisX else: DockAxisY,
-        ratio: clamp(parseFloat(parts[2]).float32, 0.0'f32, 1.0'f32),
-        children: [-1, -1]))
-      for slot in 0 .. 1:
-        let child = layout.parseNode(lines, line, index)
-        if not child.ok or child.index < 0:
-          return (false, -1)
-        layout.nodes[index].children[slot] = child.index
-      return (true, index)
-    of "tabs":
-      if parts.len < 3:
-        return (false, -1)
-      let count = parseInt(parts[2])
-      var node = DockNode(kind: DockNodeTabs, parent: parent,
-        activeTab: parseInt(parts[1]), children: [-1, -1])
-      for _ in 0 ..< count:
-        if line >= lines.len or not lines[line].startsWith("window "):
-          return (false, -1)
-        node.windows.add lines[line]["window ".len .. ^1]
-        inc line
-      if node.windows.len == 0:
-        return (false, -1)
-      node.activeTab = clamp(node.activeTab, 0, node.windows.high)
-      return (true, layout.addNode(node))
-    else:
+  case parts[0]
+  of "empty":
+    return (true, -1)
+  of "split":
+    if parts.len < 3 or parts[1] notin ["x", "y"]:
       return (false, -1)
-  except ValueError:
+    var ratio = 0.0'f32
+    if not parseDockFloat(parts[2], ratio):
+      return (false, -1)
+    let index = layout.addNode(DockNode(kind: DockNodeSplit, parent: parent,
+      axis: if parts[1] == "x": DockAxisX else: DockAxisY,
+      ratio: clamp(ratio, 0.0'f32, 1.0'f32),
+      children: [-1, -1]))
+    for slot in 0 .. 1:
+      let child = layout.parseNode(lines, line, index)
+      if not child.ok or child.index < 0:
+        return (false, -1)
+      layout.nodes[index].children[slot] = child.index
+    return (true, index)
+  of "tabs":
+    if parts.len < 3:
+      return (false, -1)
+    var count = 0
+    var activeTab = 0
+    if not parseDockInt(parts[1], activeTab) or not parseDockInt(parts[2], count):
+      return (false, -1)
+    var node = DockNode(kind: DockNodeTabs, parent: parent,
+      activeTab: activeTab, children: [-1, -1])
+    for _ in 0 ..< count:
+      if line >= lines.len or not lines[line].startsWith("window "):
+        return (false, -1)
+      node.windows.add lines[line]["window ".len .. ^1]
+      inc line
+    if node.windows.len == 0:
+      return (false, -1)
+    node.activeTab = clamp(node.activeTab, 0, node.windows.high)
+    return (true, layout.addNode(node))
+  else:
     return (false, -1)
 
 proc parseDockLayout*(text: string, layout: var DockLayout): bool =
   ## Parse a layout produced by `serialize`. Returns false and leaves
   ## `layout` untouched when the text is malformed.
-  var lines: seq[string]
+  var lines: seq[string] = @[]
   for line in text.splitLines():
     if line.len > 0:
       lines.add line
@@ -282,12 +306,12 @@ proc parseDockLayout*(text: string, layout: var DockLayout): bool =
     inc line
     if parts.len < 7 or parts[0] != "floating":
       return false
-    try:
-      parsed.floating.add DockFloatingWindow(title: parts[6],
-        pos: vec2(parseFloat(parts[1]).float32, parseFloat(parts[2]).float32),
-        size: vec2(parseFloat(parts[3]).float32, parseFloat(parts[4]).float32),
-        collapsed: parts[5] == "1")
-    except ValueError:
+    var x, y, width, height = 0.0'f32
+    if not parseDockFloat(parts[1], x) or not parseDockFloat(parts[2], y) or
+        not parseDockFloat(parts[3], width) or not parseDockFloat(parts[4], height):
       return false
+    parsed.floating.add DockFloatingWindow(title: parts[6],
+      pos: vec2(x, y), size: vec2(width, height),
+      collapsed: parts[5] == "1")
   layout = parsed
   true

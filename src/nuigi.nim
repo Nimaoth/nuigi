@@ -4088,7 +4088,7 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
         # because appending to `commandData`/`commandVertices` can reallocate them.
         let cmdStart = result.commandData.len
         if slot < frame.customCommands.len:
-          let cmds = frame.customCommands[slot]
+          var cmds = frame.customCommands[slot]
           for i in 0 ..< cmds.len:
             result.commandData.add cmds[i]
         commandRanges.add (start: cmdStart, count: result.commandData.len - cmdStart)

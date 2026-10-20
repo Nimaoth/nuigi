@@ -21,11 +21,16 @@ type
     fillTopColor*: UiColor
     fillBottomColor*: UiColor
 
+when defined(nimony):
+  type NullablePlotXTransformFn = nil PlotXTransformFn
+else:
+  type NullablePlotXTransformFn = PlotXTransformFn
+
 proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     xRange, yRange: Vec2, series: openArray[PlotSeries],
     resolution: int = 256, lineThickness: float32 = 2.0'f32,
     mousePos: Vec2 = vec2(-1.0'f32, -1.0'f32),
-    showHoverX: bool = true, transformHoverX: PlotXTransformFn = nil
+    showHoverX: bool = true, transformHoverX: NullablePlotXTransformFn = nil
   ): ArrayView[UiRenderCommand] {.gcsafe, raises: [].} =
   ## Hover labels include X by default. `transformHoverX` maps plot-space X to
   ## a displayed value only; sampling and geometry retain the original X range.

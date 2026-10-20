@@ -75,6 +75,11 @@ type
     tabPressOffset: Vec2
     dropTarget: DockDropTarget
 
+when defined(nimony):
+  type NullableDockSpace = nil DockSpace
+else:
+  type NullableDockSpace = DockSpace
+
 type WindowSpaceStorage* = ref object of UiNodeStorageData
   windows*: seq[WindowActivity]
   activationCounter*: uint64
@@ -167,9 +172,11 @@ proc windowSpaceStorageAt(b: var UiBuilder, nodeIdx: int): WindowSpaceStorage =
     return nil
   cast[WindowSpaceStorage](stored)
 
-proc currentDockSpace(b: var UiBuilder): DockSpace =
+proc currentDockSpace(b: var UiBuilder): NullableDockSpace =
   let storage = b.windowSpaceStorageAt(b.currentNodeIndex(b.windows))
-  if storage == nil: nil else: storage.dock
+  if storage == nil:
+    return nil
+  return storage.dock
 
 proc sameTitles(a, b: seq[string]): bool =
   if a.len != b.len:
@@ -210,7 +217,9 @@ proc windowSpaceDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
       storage.windowLastActive(b.nodes[childIdx].id))
     var insertAt = orderedWindows.len
     while insertAt > 0:
-      if orderKeys[insertAt - 1] <= childKey:
+      let previousKey = orderKeys[insertAt - 1]
+      if previousKey[0] < childKey[0] or
+          (previousKey[0] == childKey[0] and previousKey[1] <= childKey[1]):
         break
       dec insertAt
     orderedWindows.insert([childIdx], insertAt)
@@ -327,7 +336,9 @@ proc relativeDropSide(local, size: Vec2, terminal: bool, side: var DockSide): bo
     return true
   let edge = dockEdgeSize(size, terminal)
   let distances = [local.x, size.x - local.x, local.y, size.y - local.y]
-  let nearest = min(distances)
+  var nearest = distances[0]
+  for i in 1 ..< distances.len:
+    nearest = min(nearest, distances[i])
   if nearest >= edge:
     return false
   if nearest == distances[0]:
@@ -342,6 +353,7 @@ proc relativeDropSide(local, size: Vec2, terminal: bool, side: var DockSide): bo
 
 proc computeDropTarget(dock: DockSpace, mouse: Vec2, terminal: bool): DockDropTarget =
   ## Drop target for `dock.dragWindow` at `mouse` (window space coordinates).
+  result = DockDropTarget()
   if mouse.x < 0 or mouse.y < 0 or mouse.x >= dock.bounds.x or mouse.y >= dock.bounds.y:
     return
   if not dock.isVisibleDockNode(dock.layout.root):
@@ -371,7 +383,7 @@ proc computeDropTarget(dock: DockSpace, mouse: Vec2, terminal: bool): DockDropTa
     let target = dock.visibleActiveWindow(index)
     if target.len == 0:
       continue
-    var side: DockSide
+    var side = DockCenter
     if relativeDropSide(local, rect.size, terminal, side):
       return makeDropTarget(target, side, 0.5'f32, rect.pos, rect.size)
     return
@@ -531,7 +543,7 @@ proc buildDockAreas(b: var UiBuilder, dock: DockSpace, storage: WindowSpaceStora
   b.node("dock-drop-areas"):
     storage.dockAreasId = b.currentNode.id
     discard b.fill().noHover().noChildHover()
-    for side in DockSide:
+    for side in [DockCenter, DockLeft, DockRight, DockTop, DockBottom]:
       if empty and side != DockCenter:
         continue
       let (pos, size) =
@@ -587,7 +599,7 @@ proc updateDockSpace(b: var UiBuilder, dock: DockSpace, storage: WindowSpaceStor
   b.buildDockAreas(dock, storage)
   b.buildDockPreview(dock, storage)
 
-proc windowSpace*(b: var UiBuilder, dock: DockSpace = nil) =
+proc windowSpace*(b: var UiBuilder, dock: NullableDockSpace = nil) =
   ## Create the window space that hosts `window`s. When `dock` is given, its
   ## layout decides which windows are docked and which are floating.
   b.node("windows"):
@@ -737,7 +749,7 @@ proc updateWindowSpaceActivity(b: var UiBuilder, windowNodeIndex: int) =
   b.withParent(windowSpaceIndex):
     discard b.deferBuild(windowSpaceDeferredBuild)
 
-proc resolveWindowPlacement(b: var UiBuilder, dock: DockSpace, title: string,
+proc resolveWindowPlacement(b: var UiBuilder, dock: NullableDockSpace, title: string,
     storage: WindowStorage, metrics: WindowMetrics): WindowPlacement =
   ## Decide where the window goes this frame. In a dock space the layout is
   ## the source of truth, including the geometry of floating windows.
@@ -846,7 +858,7 @@ proc buildDockTabBar(b: var UiBuilder, dock: DockSpace, title: string) =
         discard b.fitX().fitY().fillBackground()
         discard b.text(tabTitle)
 
-proc finishWindow(b: var UiBuilder, dock: DockSpace, title: string,
+proc finishWindow(b: var UiBuilder, dock: NullableDockSpace, title: string,
     storage: WindowStorage, placement: WindowPlacement, windowNodeIndex: int,
     titleBarId: UiNodeId, metrics: WindowMetrics) =
   if placement == WindowFloating:
@@ -876,8 +888,9 @@ proc finishWindow(b: var UiBuilder, dock: DockSpace, title: string,
         dock.layout.floating[floating].size = storage.size
         dock.layout.floating[floating].collapsed = storage.collapsed
 
-  if dock != nil and title notin dock.submitted:
-    dock.submitted.add title
+  if dock != nil:
+    if title notin dock.submitted:
+      dock.submitted.add title
   b.updateWindowSpaceActivity(windowNodeIndex)
 
 template window*(b: var UiBuilder, title: string, inX, inY, width, height: float32, body: untyped): untyped =
@@ -927,6 +940,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
             discard b.fill()
 
           if placement == WindowDocked:
+            if windowDock == nil:
+              quit "docked placement requires a dock space"
             b.buildDockTabBar(windowDock, title)
           else:
             titleBarId = b.buildWindowTitleBar(title, windowStorage, windowCornerRadii)
