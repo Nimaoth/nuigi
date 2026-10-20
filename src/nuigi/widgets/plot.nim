@@ -11,6 +11,7 @@ import nuigi/debug/profiler, nuigi, nuigi/rendering/mesh
 
 type
   PlotPointFn* = proc (x: float32, userData: int): float32 {.gcsafe, raises: [].}
+  PlotXTransformFn* = proc (x: float32): float32 {.gcsafe, raises: [].}
 
   PlotSeries* = object
     fn*: PlotPointFn
@@ -23,8 +24,11 @@ type
 proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     xRange, yRange: Vec2, series: openArray[PlotSeries],
     resolution: int = 256, lineThickness: float32 = 2.0'f32,
-    mousePos: Vec2 = vec2(-1.0'f32, -1.0'f32)
+    mousePos: Vec2 = vec2(-1.0'f32, -1.0'f32),
+    showHoverX: bool = true, transformHoverX: PlotXTransformFn = nil
   ): ArrayView[UiRenderCommand] {.gcsafe, raises: [].} =
+  ## Hover labels include X by default. `transformHoverX` maps plot-space X to
+  ## a displayed value only; sampling and geometry retain the original X range.
   if b.frame.arena == nil or series.len == 0 or resolution < 2:
     return default(ArrayView[UiRenderCommand])
   prof("buildPlotVertices")
@@ -150,11 +154,15 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     let plotStyle = b.nodeStyle(plotNode)
     let plotTopLeft = b.absoluteNodePos(plotNodeIdx)
     let plotContentOrigin = plotTopLeft + vec2(plotStyle.paddingX, plotStyle.paddingY)
+    let dataXm = xRange.x + (mousePos.x - pos.x) / size.x * (xRange.y - xRange.x)
+    var xLabel = ""
+    if showHoverX:
+      let displayX = if transformHoverX == nil: dataXm else: transformHoverX(dataXm)
+      xLabel = " (x: " & formatFloat(displayX, ffDecimal, 2) & ")"
 
     for s in 0 ..< series.len:
       let fnm = series[s].fn
       let udm = series[s].userData
-      let dataXm = xRange.x + (mousePos.x - pos.x) / size.x * (xRange.y - xRange.x)
       let avgRadius = 10
       var dataYm = 0.0'f32
       var sampleCnt = 0
@@ -176,10 +184,11 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
         data[vertexIndex] = UiVertex(pos: p0, color: c); inc vertexIndex
         data[vertexIndex] = UiVertex(pos: p1, color: c); inc vertexIndex
 
-      let labelText = if series[s].label.value.len > 0:
+      let yLabel = if series[s].label.value.len > 0:
         series[s].label.value & ": " & formatFloat(dataYm, ffDecimal, 2)
       else:
         formatFloat(dataYm, ffDecimal, 2)
+      let labelText = yLabel & xLabel
       b.frame.texts.add(UiNodeText(
         text: uiString(labelText),
         fontSize: 12.0'f32,

@@ -1,8 +1,9 @@
-import std/os
+import std/[os, math]
 when defined(nimony):
   import std/dirs
 import nuigi, nuigi/widgets, nuigi/layout/[flex, grid], nuigi/core/[vecmath, arena, array_view]
 import nuigi/widgets/[tree_table, file_system_cursor]
+import nuigi/widgets/plot
 import nuigi/styling/theme
 
 include nuigi/util/compat2
@@ -167,6 +168,43 @@ proc expectedTreeNames(maxDepth, childrenPerNode: int): seq[string] =
   result = @[]
   result.add("root")
   expectedTreeNamesRec(result, @[], 1, maxDepth, childrenPerNode)
+
+var plotTransformCalls = 0
+
+proc plotTestValue(x: float32, userData: int): float32 {.gcsafe, raises: [].} =
+  x + userData.float32
+
+proc plotTestTransform(x: float32): float32 {.gcsafe, raises: [].} =
+  inc plotTransformCalls
+  100.0'f32 * pow(100.0'f32, x)
+
+proc testPlotHoverLabels() =
+  let series = [
+    PlotSeries(fn: plotTestValue, label: uiString("Tone")),
+    PlotSeries(fn: plotTestValue, userData: 1)]
+  for mode in 0 .. 3:
+    var b = newTestBuilder()
+    plotTransformCalls = 0
+    let before = b.frame.texts.len
+    let mouse = if mode == 3: vec2(-1.0'f32, -1.0'f32) else: vec2(50.0'f32, 50.0'f32)
+    let callback = if mode == 0: PlotXTransformFn(nil) else: plotTestTransform
+    let commands = b.buildPlotVertices(vec2(0.0'f32, 0.0'f32),
+      vec2(100.0'f32, 100.0'f32), vec2(0.0'f32, 1.0'f32),
+      vec2(0.0'f32, 2.0'f32), series, resolution = 16, mousePos = mouse,
+      showHoverX = mode != 2, transformHoverX = callback)
+    require(commands.len > 0, "plot should produce geometry")
+    if mode == 3:
+      require(b.frame.texts.len == before, "unhovered plot should not produce labels")
+    else:
+      require(b.frame.texts.len == before + 2, "each series should have a hover label")
+      let suffix = if mode == 0: " (x: 0.50)"
+        elif mode == 1: " (x: 1000.00)" else: ""
+      require(b.frame.texts[before].text.value == "Tone: 0.50" & suffix,
+        "named series should display hovered values")
+      require(b.frame.texts[before + 1].text.value == "1.50" & suffix,
+        "unnamed series should display hovered values")
+    require(plotTransformCalls == (if mode == 1: 1 else: 0),
+      "X transform should run once only when enabled and hovered")
 
 proc testFlagsAndMutators() =
   var b = newTestBuilder()
@@ -2272,6 +2310,7 @@ proc testTerminalTreeTableExpandSymbols() =
 
 proc runTests() =
   testFlagsAndMutators()
+  testPlotHoverLabels()
   testHighlightedText()
   testTextWrappingUsesNodeWidthOnlyWhenEnabled()
   testPositionAndSizeScalars()
