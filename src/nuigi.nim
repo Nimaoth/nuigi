@@ -935,6 +935,10 @@ type
       ## Nodes whose child-building is deferred to `flushDeferredNodes`.
     virtualNodes*: seq[UiVirtualTree]
       ## Buffered virtual subtrees to splice in at `endUiFrame`.
+    retiredVirtualNodes: seq[UiVirtualTree]
+    retiredVirtualNodesPrev: seq[UiVirtualTree]
+      ## Virtual subtrees removed during the current and the previous frame. They
+      ## are kept alive because those frames still reference their command data.
     virtualNodeAnimations*: Table[uint64, seq[UiFieldAnimation]]
       ## Per virtualized node ID, the animations to attach to its virtual node.
 
@@ -3966,6 +3970,7 @@ proc insertVirtualTrees*(b: var UiBuilder) =
   if finishedIndices.len > 0:
     for di in countdown(finishedIndices.high, 0):
       let idx = finishedIndices[di]
+      b.retiredVirtualNodes.add move(b.virtualNodes[idx])
       for k in idx ..< b.virtualNodes.len - 1:
         b.virtualNodes[k] = move(b.virtualNodes[k + 1])
       b.virtualNodes.setLen(b.virtualNodes.len - 1)
@@ -4026,6 +4031,7 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
     transformMap = initTable[int, int]()
     commandMap = initTable[int, int]()
     layoutMap = initTable[int, int]()
+    commandRanges: seq[tuple[start, count: int]]
   for i in 0 ..< result.nodes.len:
     var n = addr result.nodes[i]
     if n.textIndex != 0'u16:
@@ -4077,39 +4083,16 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
       let slot = int(n.commandsIndex) - 1
       if not commandMap.hasKey(slot):
         commandMap[slot] = result.customCommands.len
+        # Deep-copy the command structs into persistent virtual-node storage. The
+        # views and vertex pointers are created after every slot has been copied,
+        # because appending to `commandData`/`commandVertices` can reallocate them.
+        let cmdStart = result.commandData.len
         if slot < frame.customCommands.len:
-          var cmds = frame.customCommands[slot]
-          let cmdCount = cmds.len
-          # Deep-copy the command structs into persistent virtual-node storage, then
-          # repoint each command's vertex data into the virtual node's own vertex buffer
-          # so the commands stay valid after the source frame arena is reset.
-          let cmdStart = result.commandData.len
-          for i in 0 ..< cmdCount:
-            let c = cmds[i]
-            result.commandData.add c
-          # Copy all referenced vertex data first so the seq cannot reallocate out
-          # from under already-stored pointers, then patch the pointers afterwards.
-          var vtxBase = result.commandVertices.len
-          for i in 0 ..< cmdCount:
-            let vc = int(result.commandData[cmdStart + i].vertexCount)
-            if result.commandData[cmdStart + i].vertexData != nil and vc > 0:
-              for v in 0 ..< vc:
-                result.commandVertices.add result.commandData[cmdStart + i].vertexData[v]
-          for i in 0 ..< cmdCount:
-            let vc = int(result.commandData[cmdStart + i].vertexCount)
-            if result.commandData[cmdStart + i].vertexData != nil and vc > 0:
-              result.commandData[cmdStart + i].vertexData =
-                cast[nil ptr UncheckedArray[UiVertex]](addr result.commandVertices[vtxBase])
-              vtxBase += vc
-          if result.commandData.len > cmdStart:
-            let av = initArrayView(
-              cast[ptr UncheckedArray[UiRenderCommand]](addr result.commandData[cmdStart]),
-              result.commandData.len - cmdStart)
-            result.customCommands.add av
-          else:
-            result.customCommands.add default(ArrayView[UiRenderCommand])
-        else:
-          result.customCommands.add default(ArrayView[UiRenderCommand])
+          let cmds = frame.customCommands[slot]
+          for i in 0 ..< cmds.len:
+            result.commandData.add cmds[i]
+        commandRanges.add (start: cmdStart, count: result.commandData.len - cmdStart)
+        result.customCommands.add default(ArrayView[UiRenderCommand])
       n.commandsIndex = uint16(commandMap.getOrQuit(slot) + 1)
     if n.customLayoutIndex != 0'u16:
       let slot = int(n.customLayoutIndex) - 1
@@ -4129,6 +4112,26 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
         else:
           result.customLayouts.add default(UiNodeCustomLayout)
       n.customChildLayoutIndex = uint16(layoutMap.getOrQuit(slot) + 1)
+
+  # Copy the referenced vertex data and only then take pointers, now that neither
+  # persistent buffer grows any further; the copies outlive the frame arena.
+  var vertexOffsets = newSeq[int](result.commandData.len)
+  for i in 0 ..< result.commandData.len:
+    vertexOffsets[i] = -1
+    let vc = int(result.commandData[i].vertexCount)
+    if result.commandData[i].vertexData != nil and vc > 0:
+      vertexOffsets[i] = result.commandVertices.len
+      for v in 0 ..< vc:
+        result.commandVertices.add result.commandData[i].vertexData[v]
+  for i in 0 ..< result.commandData.len:
+    if vertexOffsets[i] >= 0:
+      result.commandData[i].vertexData =
+        cast[nil ptr UncheckedArray[UiVertex]](addr result.commandVertices[vertexOffsets[i]])
+  for index, commandRange in commandRanges:
+    if commandRange.count > 0:
+      result.customCommands[index] = initArrayView(
+        cast[ptr UncheckedArray[UiRenderCommand]](addr result.commandData[commandRange.start]),
+        commandRange.count)
 
 proc virtualNodeFromNode*(b: var UiBuilder, nodeIdx: int): UiVirtualTree =
   ## Convenience wrapper around `extractVirtualTree` operating on the current frame.
@@ -4163,6 +4166,11 @@ proc collectGarbage*(b: var UiBuilder) =
       b.nodeStorage.del(id)
 
 proc updateVirtualTrees(b: var UiBuilder) =
+  # Free subtrees retired two frames ago; neither the current nor the previous
+  # frame references their command data anymore.
+  b.retiredVirtualNodesPrev = move(b.retiredVirtualNodes)
+  b.retiredVirtualNodes = @[]
+
   # Promote previous-frame nodes flagged VirtualizeNode that did not survive into the
   # current frame into persistent virtual nodes, so they keep being rendered.
   var virtualizedIds = initTable[uint64, int]()
@@ -4192,6 +4200,7 @@ proc updateVirtualTrees(b: var UiBuilder) =
   if liveVirtualIndices.len > 0:
     for di in countdown(liveVirtualIndices.high, 0):
       let idx = liveVirtualIndices[di]
+      b.retiredVirtualNodes.add move(b.virtualNodes[idx])
       for k in idx ..< b.virtualNodes.len - 1:
         b.virtualNodes[k] = move(b.virtualNodes[k + 1])
       b.virtualNodes.setLen(b.virtualNodes.len - 1)
