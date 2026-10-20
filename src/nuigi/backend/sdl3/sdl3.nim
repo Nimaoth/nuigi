@@ -4331,15 +4331,25 @@ type
   TrayMenu* = ptr object
   TrayEntry* = ptr object
   TrayEntryFlags* = uint32
-  TrayCallback* = proc (userdata: pointer; entry: ptr TrayEntry) {.cdecl.}
+  TrayCallback* = proc (userdata: pointer; entry: TrayEntry) {.cdecl.}
+  TrayClickCallback* = proc (userdata: pointer; tray: Tray): bool {.cdecl.}
+    ## Return true to show the tray menu after the click.
 
-const TRAYENTRY_BUTTON*   = 0x00000001'u # Make the entry a simple button. Required.
-const TRAYENTRY_CHECKBOX* = 0x00000002'u # Make the entry a checkbox. Required.
-const TRAYENTRY_SUBMENU*  = 0x00000004'u # Prepare the entry to have a submenu. Required
-const TRAYENTRY_DISABLED* = 0x80000000'u # Make the entry disabled. Optional.
-const TRAYENTRY_CHECKED*  = 0x40000000'u # Make the entry checked. This is valid only for checkboxes. Optional.
+const TRAYENTRY_BUTTON*   = 0x00000001'u32 # Make the entry a simple button. Required.
+const TRAYENTRY_CHECKBOX* = 0x00000002'u32 # Make the entry a checkbox. Required.
+const TRAYENTRY_SUBMENU*  = 0x00000004'u32 # Prepare the entry to have a submenu. Required
+const TRAYENTRY_DISABLED* = 0x80000000'u32 # Make the entry disabled. Optional.
+const TRAYENTRY_CHECKED*  = 0x40000000'u32 # Make the entry checked. This is valid only for checkboxes. Optional.
 
-proc createTray*(icon: Surface, tooltip: cstring): Tray {.importc: "SDL_CreateTray".}
+const PROP_TRAY_CREATE_ICON_POINTER*                 = "SDL.tray.create.icon"
+const PROP_TRAY_CREATE_TOOLTIP_STRING*               = "SDL.tray.create.tooltip"
+const PROP_TRAY_CREATE_USERDATA_POINTER*             = "SDL.tray.create.userdata"
+const PROP_TRAY_CREATE_LEFTCLICK_CALLBACK_POINTER*   = "SDL.tray.create.leftclick_callback"
+const PROP_TRAY_CREATE_RIGHTCLICK_CALLBACK_POINTER*  = "SDL.tray.create.rightclick_callback"
+const PROP_TRAY_CREATE_MIDDLECLICK_CALLBACK_POINTER* = "SDL.tray.create.middleclick_callback"
+
+proc createTray*(icon: ptr Surface, tooltip: cstring): Tray {.importc: "SDL_CreateTray".}
+proc createTrayWithProperties*(props: PropertiesID): Tray {.importc: "SDL_CreateTrayWithProperties".}
 proc setTrayIcon*(tray: Tray, icon: ptr Surface) {.importc: "SDL_SetTrayIcon".}
 proc setTrayTooltip*(tray: Tray, tooltip: cstring) {.importc: "SDL_SetTrayTooltip".}
 proc createTrayMenu*(tray: Tray): TrayMenu {.importc: "SDL_CreateTrayMenu".}

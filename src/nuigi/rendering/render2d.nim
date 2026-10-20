@@ -123,10 +123,12 @@ type
     state: GPUState
     sample_count*: GPUSampleCount
     fontRender*: ptr FontRender
+    shaderDirectory: string
 
 proc deinitRender2D*(r: var Render2D)
 
-proc initRender2D*(r: var Render2D, fontRender: ptr FontRender, device: GPUDevice, targetFormat: GPUTextureFormat = render2DTargetFormat): bool
+proc initRender2D*(r: var Render2D, fontRender: ptr FontRender, device: GPUDevice, targetFormat: GPUTextureFormat = render2DTargetFormat,
+    shaderDirectory = "./assets"): bool
 
 proc cancelRender2DCommandBuffer(r: var Render2D) =
   if r.device != nil and r.commandBuffer != nil:
@@ -615,12 +617,12 @@ proc releaseShaders*(r: var Render2D) =
 proc loadBasicShaders(r: var Render2D): bool =
   prof("Render2D.loadBasicShaders")
   if r.vertexShader == nil:
-    r.vertexShader = loadShaderFromFile(r.device, basicVertShaderPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
+    r.vertexShader = loadShaderFromFile(r.device, r.shaderDirectory / extractFilename(basicVertShaderPath), GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
   if r.vertexShader == nil:
     return false
 
   if r.fragmentShader == nil:
-    r.fragmentShader = loadShaderFromFile(r.device, basicFragShaderPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
+    r.fragmentShader = loadShaderFromFile(r.device, r.shaderDirectory / extractFilename(basicFragShaderPath), GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
   if r.fragmentShader == nil:
     return false
 
@@ -630,23 +632,25 @@ proc reloadShaders(r: var Render2D): bool =
   prof("Render2D.reloadShaders")
   r.releaseShaders()
 
-  r.vertexShader = loadShaderFromFile(r.device, basicVertShaderPath, GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
+  r.vertexShader = loadShaderFromFile(r.device, r.shaderDirectory / extractFilename(basicVertShaderPath), GPU_SHADERSTAGE_VERTEX, 0, 1, "VSMain")
   if r.vertexShader == nil:
     return false
 
-  r.fragmentShader = loadShaderFromFile(r.device, basicFragShaderPath, GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
+  r.fragmentShader = loadShaderFromFile(r.device, r.shaderDirectory / extractFilename(basicFragShaderPath), GPU_SHADERSTAGE_FRAGMENT, 3, 0, "PSMain")
   if r.fragmentShader == nil:
     return false
 
   return true
 
-proc initRender2D*(r: var Render2D, fontRender: ptr FontRender, device: GPUDevice, targetFormat: GPUTextureFormat = render2DTargetFormat): bool =
+proc initRender2D*(r: var Render2D, fontRender: ptr FontRender, device: GPUDevice, targetFormat: GPUTextureFormat = render2DTargetFormat,
+    shaderDirectory = "./assets"): bool =
   prof("Render2D.initRender2D")
   if device == nil:
     return false
 
   r.device = device
   r.fontRender = fontRender
+  r.shaderDirectory = shaderDirectory
   r.state.loadOp = GPU_LOADOP_LOAD
   r.defaultMaterialId = 0
   r.lastBoundMaterial = 0
@@ -1476,19 +1480,27 @@ proc present*(r: var Render2D, renderer: Renderer): bool =
   var dstRect = FRect(x: 0, y: 0, w: r.targetWidth.float32, h: r.targetHeight.float32)
   return renderer.renderTexture(targetTexture, cast[ptr FRect](nil), dstRect.addr)
 
-proc presentToSwapchain*(r: var Render2D, window: Window) =
+proc presentToSwapchain*(r: var Render2D, window: Window): bool {.discardable.} =
   let commandBuffer = r.device.acquireGPUCommandBuffer()
+  if commandBuffer == nil:
+    return false
   var swapchainTexture: nil GPUTexture = nil
   var swapchainWidth: uint32 = 0
   var swapchainHeight: uint32 = 0
-  discard commandBuffer.waitAndAcquireGPUSwapchainTexture(window, swapchainTexture, swapchainWidth, swapchainHeight)
+  if not commandBuffer.waitAndAcquireGPUSwapchainTexture(window, swapchainTexture, swapchainWidth, swapchainHeight):
+    discard cancelGPUCommandBuffer(commandBuffer)
+    return false
   if swapchainTexture != nil:
     let copyPass = commandBuffer.beginGPUCopyPass()
+    if copyPass == nil:
+      discard cancelGPUCommandBuffer(commandBuffer)
+      return false
     var source = GPUTextureLocation(texture: r.target)
     var destination = GPUTextureLocation(texture: swapchainTexture)
-    copyPass.copyGPUTextureToTexture(source.addr, destination.addr, r.targetWidth, r.targetHeight, 1, false)
+    copyPass.copyGPUTextureToTexture(source.addr, destination.addr,
+      min(r.targetWidth, swapchainWidth), min(r.targetHeight, swapchainHeight), 1, false)
     copyPass.endGPUCopyPass()
-    discard submitGPUCommandBuffer(commandBuffer)
+  submitGPUCommandBuffer(commandBuffer)
 
 proc copyTargetToPreviousFrame(r: var Render2D): bool =
   if r.commandBuffer == nil or r.target == nil or r.previousTarget == nil:
@@ -1527,21 +1539,25 @@ proc resetFontAtlasAfterFrame(r: var Render2D) =
   if oldTexture != nil:
     releaseGPUTexture(r.device, oldTexture)
 
-proc endRender*(r: var Render2D) =
+proc endRender*(r: var Render2D): bool {.discardable.} =
   prof("Render2D.endRender")
-  discard r.flush()
+  let flushed = r.flush()
   let pass = r.renderPass
   if pass != nil:
     endGPURenderPass(pass)
     r.state.loadOp = GPU_LOADOP_LOAD
   r.renderPass = nil
+  if not flushed:
+    r.cancelRender2DCommandBuffer()
+    r.clearBatch()
+    return false
 
   let copiedPreviousFrame = r.copyTargetToPreviousFrame()
 
   if not submitGPUCommandBuffer(r.commandBuffer):
     r.commandBuffer = nil
     r.clearBatch()
-    return
+    return false
 
   r.commandBuffer = nil
   if copiedPreviousFrame:
@@ -1549,3 +1565,4 @@ proc endRender*(r: var Render2D) =
 
   r.clearBatch()
   r.resetFontAtlasAfterFrame()
+  true
