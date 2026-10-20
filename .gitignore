@@ -24,13 +24,13 @@ stdtags
 lldb_nim.py
 imgui.ini
 atlas.cache.json
-#vendor
+vendor
 vendor/SDL3
 vendor/SDL_Mixer2
 vendor/harfbuzzy
 vendor/nimfreetype
 temp
-# deps
+deps
 savegames
 src/grayscale.frag.hlsl
 nimony_compiler_bugs/
@@ -48,3 +48,4 @@ vendor/accesskit-c-0.22.3
 vendor2
 scratch
 fs-demo
+docs

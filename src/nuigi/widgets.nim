@@ -879,7 +879,8 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
   prof("dropdown")
   var changed = false
 
-  b.node("dropdown"):
+  b.node:
+    b.debugName("dropdown")
     discard b.fitX().fitY()
     let dropdownNode = b.currentNode
     let dropdownId = dropdownNode.id

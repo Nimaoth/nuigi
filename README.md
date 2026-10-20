@@ -82,3 +82,48 @@ ui.window("Settings", 100, 100, 400, 300):
       echo "ok"
 ui.endUiFrame()
 ```
+
+#### Docking
+
+Pass a `DockSpace` to `windowSpace` to let windows dock. The `window` calls
+stay the same; the dock layout decides whether each window floats or is docked.
+Windows that are not in the layout float at the geometry given to `window`.
+
+```nim
+var layout = initDockLayout()
+layout.dockWindow("Scene")                          # fills the space
+layout.dockWindow("Outline", "", DockLeft, 0.25)    # left quarter of the space
+layout.dockWindow("Log", "Scene", DockBottom, 0.3)  # split below Scene
+layout.dockWindow("Console", "Log", DockCenter)     # tab next to Log
+let dock = newDockSpace(layout)
+
+# every frame
+ui.windowSpace(dock)
+ui.window("Scene", 0, 0, 400, 300):
+  ui.label("docked")
+```
+
+Users can rearrange the layout:
+
+- Drag the gap between docked windows to resize them.
+- Click a tab to switch to it, and drag a tab out to make its window float.
+- Drag a floating window by its title bar. A highlight previews the drop:
+  a 100-pixel square at another window's center adds a tab, and bands extending
+  100 pixels inward from its edges create splits. The gap around the center
+  square is not a drop target: release there to leave the window floating,
+  including when dragging a tab out. On small panes these zones shrink to
+  preserve the gap; terminal backends use cell-sized zones.
+  While dragging over a pane, dark accent guides show its available drop areas,
+  leaving the floating gap clear. The brighter highlight previews the selected
+  docking result. Guides disappear on release, outside the dock space, or while
+  holding Shift.
+  The outer 32-pixel edge of the window space docks along that side (two cells
+  in terminals, shrinking for small spaces). An empty dock space accepts a drop
+  only in its center square.
+  Hold shift to keep the window floating anywhere.
+
+Docked windows in inactive tabs are hidden, and windows that are not
+submitted in a frame give their space to the rest of the layout. `dock.layout`
+is plain data keyed by window title. Save it with `serialize` and restore it
+with `parseDockLayout(text, layout)`, which returns false for malformed text.
+With `Sdl3App`, assign `app.dockSpace` before `run`.
