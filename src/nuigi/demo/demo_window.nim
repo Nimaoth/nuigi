@@ -2104,7 +2104,8 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
               let fileCursor = FileSystemCursor(cursor)
               if b.beginDrop():
                 let userData = b.dragData.userData
-                let canDrop = FileDragUserData(userData).cursor.canDropOn(fileCursor)
+                let canDrop = userData != nil and userData of FileDragUserData and
+                  FileDragUserData(userData).cursor.canDropOn(fileCursor)
                 if canDrop:
                   discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexAccent)[].fillColor)
                 if b.endDrop(canDrop):
@@ -2140,6 +2141,7 @@ proc buildFileSystemTreeExample(b: var UiBuilder) =
 # ---------------------------------------------------------------------------
 
 var dragDropLocation = 0 # 0 = left container, 1 = right container
+var externalDropItems: seq[string]
 
 proc buildDragDropTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall.} =
   let _ = userData
@@ -2151,6 +2153,38 @@ proc buildDragDropTooltip(b: var UiBuilder, userData: UiDragUserData, canDrop: b
   b.demoTerminalBorderPadding()
   discard b.text(if canDrop: "Drop allowed" else: "Cannot drop here").fit()
   discard b.textColor(rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
+
+proc acceptExternalDrop(b: var UiBuilder) =
+  let external = b.externalDragData()
+  if external == nil:
+    discard b.endDrop(false)
+    return
+  discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0)).borderWidth(2)
+  if b.endDrop(true):
+    externalDropItems.setLen(0)
+    for file in external.files: externalDropItems.add("File: " & file)
+    for text in external.texts: externalDropItems.add("Text: " & text)
+
+proc buildExternalDropZone(b: var UiBuilder) =
+  b.layoutVertical("dnd-external"):
+    discard b.fillX().fitY()
+      .paddingRelative(8.0'f32 / demoBaseFontSize)
+      .gapRelative(4.0'f32 / demoBaseFontSize)
+    discard b.fillBackground().backgroundColor(b.themeStyle(UiStyleIndexStage)[].fillColor)
+    discard b.borderWidth(1).borderColor(b.themeStyle(UiStyleIndexPanel)[].borderColor).cornerRadius(6)
+    b.demoTerminalBorderPadding()
+
+    if b.beginDrop():
+      b.acceptExternalDrop()
+
+    if externalDropItems.len == 0:
+      b.label("Drop here"):
+        discard b.fontSize(13).textColor(b.themeTextStyle(UiStyleIndexMutedText)[].textColor)
+    for i in 0 ..< externalDropItems.len:
+      discard b.pushId(i.uint64)
+      b.labelWrapped(externalDropItems[i]):
+        discard b.fillX().fontSize(13)
+      discard b.popId()
 
 proc buildDragDropExample*(b: var UiBuilder) =
   b.layoutVertical("drag-drop-demo"):
@@ -2180,7 +2214,7 @@ proc buildDragDropExample*(b: var UiBuilder) =
         b.demoTerminalBorderPadding()
 
         let hoverDrop = b.beginDrop()
-        let canDrop = dragDropLocation != 0
+        let canDrop = dragDropLocation != 0 and not b.isExternalDrag()
 
         if hoverDrop:
           if canDrop:
@@ -2226,7 +2260,7 @@ proc buildDragDropExample*(b: var UiBuilder) =
         b.demoTerminalBorderPadding()
 
         let hoverDrop = b.beginDrop()
-        let canDrop = dragDropLocation != 1
+        let canDrop = dragDropLocation != 1 and not b.isExternalDrag()
 
         if hoverDrop:
           if canDrop:
@@ -2267,6 +2301,10 @@ proc buildDragDropExample*(b: var UiBuilder) =
       dragDropLocation = 0
       b.dragData.nodeId = noneNodeId()
       b.dragData.userData = nil
+
+    b.label("External drop — drag files or text from another application"):
+      discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
+    b.buildExternalDropZone()
 
 proc buildAllExamples(b: var UiBuilder)
 

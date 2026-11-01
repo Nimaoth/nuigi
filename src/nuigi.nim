@@ -376,6 +376,17 @@ type
       ## Logical controller/D-pad navigation pressed this frame.
     textInput*: string
       ## Committed text typed this frame (for text fields).
+    externalDragActive*: bool
+      ## An OS drag-and-drop operation from another application is over the
+      ## window. Its payload is unknown until it is dropped. `mouse` should
+      ## follow the drag position while this is set.
+    externalDropped*: bool
+      ## The OS drag was released over the window this frame; its payload is in
+      ## `droppedFiles` / `droppedTexts`.
+    droppedFiles*: seq[string]
+      ## File paths dropped this frame (valid when `externalDropped`).
+    droppedTexts*: seq[string]
+      ## Text items dropped this frame (valid when `externalDropped`).
 
   UiStyle* = object
     ## Visual style for a node: padding, border, corner radius, fill/border colors,
@@ -457,6 +468,14 @@ type
 
   UiDragUserData* = ref object of RootObj
     ## Base type for application-defined drag payloads.
+
+  UiExternalDragUserData* = ref object of UiDragUserData
+    ## Payload of a drag coming from outside the application (OS drag and drop).
+    ## `files` / `texts` are only filled once `dropped` is true, since platforms
+    ## only deliver the payload on release.
+    files*: seq[string]
+    texts*: seq[string]
+    dropped*: bool
 
   UiDragUiCallback* = proc(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall, raises: [].}
     ## Callback that builds the contents of the tooltip shown during a drag.
@@ -827,6 +846,9 @@ type
       ## Whether the drop target processed most recently this frame accepts the drag.
     uiCallback*: UiDragUiCallback
       ## Callback that builds the drag tooltip contents.
+    external*: bool
+      ## True when the drag comes from outside the application. `nodeId` is then
+      ## `externalDragNodeId()` and `userData` a `UiExternalDragUserData`.
 
   UiBuilder* = object
     ## The central UI object. Owns the current and previous frames, the node stack,
@@ -1496,6 +1518,10 @@ proc getTextArrangement*(b: var UiBuilder, text: openArray[char], fontId: UiFont
 func noneNodeId*(): UiNodeId {.inline.} =
   ## Returns the sentinel "no node" ID (value 0).
   UiNodeId(0'u64)
+
+func externalDragNodeId*(): UiNodeId {.inline.} =
+  ## Sentinel `DragData.nodeId` used while a drag from outside the application is active.
+  UiNodeId(high(uint64))
 
 func `==`*(a, b: UiNodeId): bool {.borrow.}
 
@@ -3581,6 +3607,38 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
       b.focusChangedByKeyboard = b.focusedNode != previousFocusedNode
       return
 
+proc syncExternalDrag(b: var UiBuilder, input: UiInputSnapshot) =
+  ## Mirror an OS drag-and-drop operation into `dragData` so drop targets can
+  ## treat it like an in-app drag. In-app drags take precedence.
+  if not input.externalDragActive and not input.externalDropped:
+    if b.dragData.external:
+      b.dragData = DragData(nodeId: noneNodeId())
+    return
+  if b.dragData.nodeId == noneNodeId():
+    b.dragData = DragData(nodeId: externalDragNodeId(), external: true,
+      userData: UiExternalDragUserData())
+  if not b.dragData.external or not input.externalDropped:
+    return
+  let userData = b.dragData.userData
+  if userData != nil and userData of UiExternalDragUserData:
+    let data = UiExternalDragUserData(userData)
+    data.files = input.droppedFiles
+    data.texts = input.droppedTexts
+    data.dropped = true
+
+proc isExternalDrag*(b: UiBuilder): bool =
+  ## True while the active drag comes from outside the application.
+  b.dragData.nodeId != noneNodeId() and b.dragData.external
+
+proc dragReleased*(b: UiBuilder): bool =
+  ## True on the frame the active drag is released (mouse up for in-app drags,
+  ## OS drop for external drags).
+  if b.dragData.nodeId == noneNodeId():
+    return false
+  if b.dragData.external:
+    return b.frameCtx.input.externalDropped
+  return MouseLeft in b.frameCtx.input.mouseReleased
+
 proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.discardable.} =
   ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
   prof("beginUiFrame")
@@ -3591,6 +3649,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   b.textInputRequest = default(UiTextInputRequest)
   b.processKeyboardFocus(ctx.input)
   b.dragData.canDrop = false
+  b.syncExternalDrag(ctx.input)
 
   for i in 0 ..< b.animations.len:
     inc b.animations[i].unchangedFrames
@@ -4223,7 +4282,10 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
   b.removeStaleAnimations()
   b.updateVirtualTrees()
 
-  if MouseLeft in b.frameCtx.input.mouseReleased:
+  if b.dragData.external:
+    if not b.frameCtx.input.externalDragActive:
+      b.dragData = DragData(nodeId: noneNodeId())
+  elif MouseLeft in b.frameCtx.input.mouseReleased:
     b.dragData = DragData(nodeId: noneNodeId())
 
   b.frameOutput.clearFrameOutput()
@@ -7129,9 +7191,20 @@ proc beginDrop*(b: var UiBuilder, includeChildren = true): bool =
   return b.wasHovered(includeChildren)
 
 proc endDrop*(b: var UiBuilder, canDrop: bool): bool =
-  ## Store target acceptance even while dragging, and report a successful release.
+  ## Store target acceptance even while dragging, and report a successful release
+  ## (left-button release for in-app drags, OS drop for external drags).
   b.dragData.canDrop = canDrop
-  return canDrop and MouseLeft in b.frameCtx.input.mouseReleased
+  return canDrop and b.dragReleased()
+
+proc externalDragData*(b: UiBuilder): nil UiExternalDragUserData =
+  ## Payload of the active external (OS) drag, or nil when the active drag is
+  ## not external.
+  if not b.isExternalDrag():
+    return nil
+  let userData = b.dragData.userData
+  if userData != nil and userData of UiExternalDragUserData:
+    return UiExternalDragUserData(userData)
+  return nil
 
 proc buildDragUi(b: var UiBuilder) =
   if b.dragData.nodeId == noneNodeId():

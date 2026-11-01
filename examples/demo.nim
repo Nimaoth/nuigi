@@ -270,6 +270,10 @@ type SdlInputAccum = object
   keysRepeated: UiKeys
   modsDown: UiModifiers
   textInput: string
+  externalDragActive: bool
+  externalDropped: bool
+  droppedFiles: seq[string]
+  droppedTexts: seq[string]
 
 var gInputAccum: SdlInputAccum
 var gGamepadInput: DemoGamepadInput
@@ -331,6 +335,28 @@ proc accumulateSdlInput(ev: var Event) =
   of EVENT_TEXT_INPUT:
     if ev.text.text != nil:
       gInputAccum.textInput.add($ev.text.text)
+  of EVENT_DROP_BEGIN:
+    # OS drag and drop: BEGIN, POSITION*, then (FILE | TEXT)* and COMPLETE on
+    # drop, or a bare COMPLETE when the drag leaves the window or is cancelled.
+    gInputAccum.externalDragActive = true
+    gInputAccum.externalDropped = false
+    gInputAccum.droppedFiles.setLen(0)
+    gInputAccum.droppedTexts.setLen(0)
+  of EVENT_DROP_POSITION:
+    gInputAccum.externalDragActive = true
+    let pos = vec2(ev.drop.x, ev.drop.y)
+    gInputAccum.mouseDelta += pos - gInputAccum.mouse
+    gInputAccum.mouse = pos
+  of EVENT_DROP_FILE:
+    if ev.drop.data != nil:
+      gInputAccum.droppedFiles.add($ev.drop.data)
+  of EVENT_DROP_TEXT:
+    if ev.drop.data != nil:
+      gInputAccum.droppedTexts.add($ev.drop.data)
+  of EVENT_DROP_COMPLETE:
+    gInputAccum.externalDragActive = false
+    gInputAccum.externalDropped = gInputAccum.droppedFiles.len > 0 or
+      gInputAccum.droppedTexts.len > 0
   else:
     discard
 
@@ -386,6 +412,10 @@ proc beginInputFrame() =
   gInputAccum.keysRepeated = {}
   gGamepadInput.beginFrame()
   gInputAccum.textInput.setLen(0)
+  if gInputAccum.externalDropped:
+    gInputAccum.externalDropped = false
+    gInputAccum.droppedFiles.setLen(0)
+    gInputAccum.droppedTexts.setLen(0)
   gHadInputThisFrame = false
 
 proc makeInputSnapshot(): UiInputSnapshot =
@@ -404,6 +434,10 @@ proc makeInputSnapshot(): UiInputSnapshot =
     keysRepeated: gInputAccum.keysRepeated,
     modsDown: gInputAccum.modsDown,
     textInput: gInputAccum.textInput,
+    externalDragActive: gInputAccum.externalDragActive,
+    externalDropped: gInputAccum.externalDropped,
+    droppedFiles: gInputAccum.droppedFiles,
+    droppedTexts: gInputAccum.droppedTexts,
   )
   gGamepadInput.applyToSnapshot(result)
 

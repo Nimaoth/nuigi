@@ -1356,6 +1356,67 @@ proc testDragUiCallbackAndDropState() =
   require(b.dragData.nodeId == noneNodeId(), "drag data should clear after release-frame UI is built")
   require(b.dragData.uiCallback == nil, "drag UI callback should clear with released drag data")
 
+proc buildExternalDropTarget(b: var UiBuilder): tuple[hovered: bool, dropped: bool] =
+  result = (false, false)
+  b.node:
+    discard b.size(100.0, 50.0)
+    result.hovered = b.beginDrop()
+    if result.hovered:
+      result.dropped = b.endDrop(b.externalDragData() != nil)
+
+proc testExternalDragAndDrop() =
+  var b = newBuilder(fixedMeasureText)
+
+  discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(10)))
+  discard buildExternalDropTarget(b)
+  b.endUiFrame(buildRenderCommands = false)
+  require(not b.isExternalDrag(), "no external drag without OS drag input")
+
+  discard b.beginUiFrame(220.0, 120.0,
+    input = UiInputSnapshot(mouse: vec2(10), externalDragActive: true))
+  require(b.isExternalDrag(), "OS drag should create external drag data")
+  require(b.dragData.nodeId == externalDragNodeId(), "external drag uses sentinel node id")
+  let pending = b.externalDragData()
+  require(pending != nil, "external drag should expose its payload")
+  if pending != nil:
+    require(not pending.dropped, "payload should be pending before drop")
+  let (beginDragActive, beginDragStarted) = b.beginDrag()
+  require(not beginDragActive and not beginDragStarted, "in-app drag must not start during external drag")
+  let hoverFrame = buildExternalDropTarget(b)
+  require(hoverFrame.hovered and not hoverFrame.dropped, "target should be hovered but not dropped")
+  b.endUiFrame(buildRenderCommands = false)
+  require(b.isExternalDrag(), "external drag should persist while active")
+
+  discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(10),
+    externalDropped: true, droppedFiles: @["C:/a.txt"], droppedTexts: @["hello"]))
+  let dropped = b.externalDragData()
+  require(dropped != nil, "external drop should expose its payload")
+  if dropped != nil:
+    require(dropped.dropped, "payload should be marked dropped")
+    require(dropped.files == @["C:/a.txt"] and dropped.texts == @["hello"], "payload mismatch")
+  let dropFrame = buildExternalDropTarget(b)
+  require(dropFrame.dropped, "accepting target should receive the external drop")
+  b.endUiFrame(buildRenderCommands = false)
+  require(b.dragData.nodeId == noneNodeId(), "external drag should clear after drop")
+
+  # Leaving the window without dropping cancels the drag.
+  discard b.beginUiFrame(220.0, 120.0,
+    input = UiInputSnapshot(mouse: vec2(10), externalDragActive: true))
+  b.endUiFrame(buildRenderCommands = false)
+  discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(10)))
+  require(not b.isExternalDrag(), "cancelled external drag should clear")
+  let cancelFrame = buildExternalDropTarget(b)
+  require(not cancelFrame.hovered, "no drop hover after external drag cancelled")
+  b.endUiFrame(buildRenderCommands = false)
+
+  # A mouse release must not end an external drag.
+  discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(10),
+    externalDragActive: true, mouseReleased: {MouseLeft}))
+  let releaseFrame = buildExternalDropTarget(b)
+  require(not releaseFrame.dropped, "mouse release should not drop an external drag")
+  b.endUiFrame(buildRenderCommands = false)
+  require(b.isExternalDrag(), "external drag should survive mouse release")
+
 proc testFileSystemCursorDragAndDrop() =
   let root = getTempDir() / "nuigi-file-drag-test"
   if dirExists(root):
@@ -2354,6 +2415,7 @@ proc runTests() =
   testTerminalDropdownPopupAnchorsBelowButton()
   testPreviousNodesAndIndicesDoubleBuffered()
   testDragUiCallbackAndDropState()
+  testExternalDragAndDrop()
   testFileSystemCursorDragAndDrop()
   testReverseVerticalLayoutAllCombinations()
   testReverseHorizontalLayoutAllCombinations()

@@ -199,6 +199,10 @@ proc beginInputFrame*(input: var UiInputSnapshot) =
   input.keysRepeated = {}
   input.navigationPressed = {}
   input.textInput.setLen(0)
+  if input.externalDropped:
+    input.externalDropped = false
+    input.droppedFiles.setLen(0)
+    input.droppedTexts.setLen(0)
 
 proc accumulateSdlInput*(input: var UiInputSnapshot, event: Event) =
   case event.`type`
@@ -236,6 +240,25 @@ proc accumulateSdlInput*(input: var UiInputSnapshot, event: Event) =
     input.modsDown = toUiModifiers(event.key.`mod`)
   of EVENT_TEXT_INPUT:
     if event.text.text != nil: input.textInput.add($event.text.text)
+  of EVENT_DROP_BEGIN:
+    # OS drag and drop: BEGIN, POSITION*, then (FILE | TEXT)* and COMPLETE on
+    # drop, or a bare COMPLETE when the drag leaves the window or is cancelled.
+    input.externalDragActive = true
+    input.externalDropped = false
+    input.droppedFiles.setLen(0)
+    input.droppedTexts.setLen(0)
+  of EVENT_DROP_POSITION:
+    input.externalDragActive = true
+    let pos = vec2(event.drop.x, event.drop.y)
+    input.mouseDelta += pos - input.mouse
+    input.mouse = pos
+  of EVENT_DROP_FILE:
+    if event.drop.data != nil: input.droppedFiles.add($event.drop.data)
+  of EVENT_DROP_TEXT:
+    if event.drop.data != nil: input.droppedTexts.add($event.drop.data)
+  of EVENT_DROP_COMPLETE:
+    input.externalDragActive = false
+    input.externalDropped = input.droppedFiles.len > 0 or input.droppedTexts.len > 0
   of EVENT_WINDOW_FOCUS_LOST:
     input.keysReleased = input.keysReleased + input.keysDown
     input.mouseReleased = input.mouseReleased + input.mouseDown
