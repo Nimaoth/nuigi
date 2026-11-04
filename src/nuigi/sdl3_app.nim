@@ -446,6 +446,20 @@ proc createIconSurface(app: var Sdl3App, config: Sdl3AppConfig) =
     copyMem(app.trayIcon.pixels[y * app.trayIcon.pitch].addr,
       pixels[y * size * 4].addr, size * 4)
 
+proc setTrayIconPixels*(app: var Sdl3App, pixels: openArray[uint8], size: int) =
+  ## Replaces the tray icon with `size` x `size` RGBA32 pixels. No-op without a tray.
+  if app.tray == nil: return
+  if size <= 0 or pixels.len != size * size * 4:
+    raise newException(ValueError,
+      "pixels must contain size x size RGBA32 pixels")
+  let surface = createSurface(size.cint, size.cint, PIXELFORMAT_RGBA32)
+  if surface == nil: sdlFailure("Could not create icon surface")
+  for y in 0 ..< size:
+    copyMem(surface.pixels[y * surface.pitch].addr,
+      pixels[y * size * 4].unsafeAddr, size * 4)
+  setTrayIcon(app.tray, surface)
+  destroySurface(surface)
+
 proc initTray(app: var Sdl3App, tooltip: string) =
   ## Tray failures are reported through `trayError` rather than aborting, as
   ## some desktops have no tray; the window then closes normally.
