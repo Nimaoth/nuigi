@@ -1,8 +1,8 @@
 ## Compile-time optional frame and scoped-event profiler.
 ##
-## With `-d:nuigiProfiler` under Nim 2, instrumentation records timestamped begin/end
+## With `-d:nuigiProfiler`, instrumentation records timestamped begin/end
 ## events and rolling frame statistics in global buffers for `profiler_ui`.
-## Without that define, or under Nimony, the public timing hooks collapse to
+## Without that define, the public timing hooks collapse to
 ## inexpensive no-ops so instrumented call sites need no conditional code.
 ##
 ## With `-d:nuigiPerfProfiler -d:perfProfiler`, `prof` and `profd` also write
@@ -19,18 +19,20 @@ import nuigi/core/timer
 
 include nuigi/util/compat2
 
-const nuigiPerfFileProfiler = defined(nuigiPerfProfiler) and not defined(nimony)
+const nuigiPerfFileProfiler = defined(nuigiPerfProfiler)
+
+template profilerAccess*(body: untyped) =
+  gcsafeb:
+    assumeSyncBlock:
+      body
 
 when nuigiPerfFileProfiler:
   when not defined(perfProfiler):
     {.error: "-d:nuigiPerfProfiler also requires -d:perfProfiler".}
   from perf_profiler import nil
 
-when defined(nuigiProfiler) and not defined(nimony):
-  import nuigi/core/vecmath
-
 proc profNow*(): uint64 =
-  when defined(nuigiProfiler) and not defined(nimony):
+  when defined(nuigiProfiler):
     return timer.getTicksNS()
   elif nuigiPerfFileProfiler:
     return perf_profiler.profNow()
@@ -64,7 +66,7 @@ proc profilerFrameStart*() {.inline.} =
   when nuigiPerfFileProfiler:
     perf_profiler.profilerBeginFrame()
 
-when defined(nuigiProfiler) and not defined(nimony):
+when defined(nuigiProfiler):
 
   let TimestampEndBit*: uint64 = 1'u64 shl 63
   let TimestampEndMask*: uint64 = uint64.high shr 1
@@ -91,7 +93,7 @@ when defined(nuigiProfiler) and not defined(nimony):
     timeHistory*: seq[array[512, float32]] # i'th entry is ms history for i'th plottedStat
     frameStart*: int
 
-  var eventHistory* = array[1024 * 1024, ProfEvent].default
+  var eventHistory*: array[1024 * 1024, ProfEvent]
   var eventHistoryIndex*: int = 0
   var frameTimeIndex* = 0
   var plottedStatsCsvBuf*: array[1024, char]
@@ -106,11 +108,23 @@ when defined(nuigiProfiler) and not defined(nimony):
     frameStart: 0,
   )
 
-  proc getProfiler*(): var Profiler {.gcsafe, inline.} =
-    {.gcsafe.}:
-      return gprof
+  when defined(nimony):
+    template getProfiler*(): untyped = gprof
+  else:
+    proc getProfiler*(): var Profiler {.gcsafe, inline.} =
+      {.gcsafe.}:
+        return gprof
 
-when defined(nuigiProfiler) and not defined(nimony):
+  proc recordProfilerEvent*(record: bool, location: tuple[tag: string, file: string, line: uint32, col: uint32], isEnd = false) {.gcsafe.} =
+    profilerAccess:
+      if record:
+        let timestamp = profNow() or (if isEnd: TimestampEndBit else: 0'u64)
+        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: timestamp, location: location)
+        inc eventHistoryIndex
+        if eventHistoryIndex >= eventHistory.len:
+          eventHistoryIndex = 0
+
+when defined(nuigiProfiler):
   template prof*(tag: string) =
     # todo: make this smaller
     when nuigiPerfFileProfiler:
@@ -121,21 +135,12 @@ when defined(nuigiProfiler) and not defined(nimony):
       const info = instantiationInfo()
       const location = (tag, info.filename, info.line.uint32, info.column.uint32)
 
-    {.gcsafe.}:
+    profilerAccess:
       let record = gprof.record
-      if record:
-        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
-        inc eventHistoryIndex
-        if eventHistoryIndex >= eventHistory.len:
-          eventHistoryIndex = 0
+    recordProfilerEvent(record, location)
 
     defer:
-      {.gcsafe.}:
-        if record:
-          eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
-          inc eventHistoryIndex
-          if eventHistoryIndex >= eventHistory.len:
-            eventHistoryIndex = 0
+      recordProfilerEvent(record, location, true)
 
     discard
 else:
@@ -145,7 +150,7 @@ else:
     else:
       discard
 
-when defined(nuigiProfiler) and not defined(nimony):
+when defined(nuigiProfiler):
   template profd*(tag: string) =
     when nuigiPerfFileProfiler:
       perf_profiler.prof(tag)
@@ -155,21 +160,12 @@ when defined(nuigiProfiler) and not defined(nimony):
       const info = instantiationInfo()
       let location = (tag, info.filename, info.line.uint32, info.column.uint32)
 
-    {.gcsafe.}:
+    profilerAccess:
       let record = gprof.record
-      if record:
-        eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow(), location: location)
-        inc eventHistoryIndex
-        if eventHistoryIndex >= eventHistory.len:
-          eventHistoryIndex = 0
+    recordProfilerEvent(record, location)
 
     defer:
-      {.gcsafe.}:
-        if record:
-          eventHistory[eventHistoryIndex] = ProfEvent(timestamp: profNow() or TimestampEndBit, location: location)
-          inc eventHistoryIndex
-          if eventHistoryIndex >= eventHistory.len:
-            eventHistoryIndex = 0
+      recordProfilerEvent(record, location, true)
 
     discard
 else:
@@ -179,10 +175,10 @@ else:
     else:
       discard
 
-when defined(nuigiProfiler) and not defined(nimony):
+when defined(nuigiProfiler):
   proc lastEventTimestamp*(tag: string, frameIndex: int): uint64 =
-    {.gcsafe.}:
-      when defined(nuigiProfiler) and not defined(nimony):
+    profilerAccess:
+      when defined(nuigiProfiler):
         var i = gprof.frameStart - 1
         if i < 0:
           i = eventHistory.high
@@ -206,8 +202,8 @@ when defined(nuigiProfiler) and not defined(nimony):
         return 0
 
   iterator profileFrames*(): (int, int, ProfFrame) {.sideEffect.} =
-    {.gcsafe.}:
-      var stack = newSeq[ProfEvent](0)
+    profilerAccess:
+      var stack: seq[ProfEvent] = @[]
       var i = gprof.frameStart - 1
       if i < 0:
         i = eventHistory.high
@@ -267,7 +263,7 @@ when defined(nuigiProfiler) and not defined(nimony):
         result.add(tag)
 
   proc profilerBeginFrame*(setFrameStart = true) =
-    {.gcsafe.}:
+    profilerAccess:
       proc toMs(ticks: uint64): float64 =
         return ticks.float64 / 1000000
       if gprof.record:
@@ -301,5 +297,5 @@ when defined(nuigiProfiler) and not defined(nimony):
                 gprof.timeHistory[i][frameTimeIndex] += toMs(frame.last - frame.first).float32
 
         inc frameTimeIndex
-        if frameTimeIndex == gprof.timeHistory[0].len:
+        if frameTimeIndex == 512:
           frameTimeIndex = 0

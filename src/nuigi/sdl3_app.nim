@@ -836,11 +836,11 @@ proc tick*(app: var Sdl3App): bool =
   let started = sdl3.getTicksNS()
   # The profiler UI derives frame times from the "frame" scope and plots the
   # "frame" and "tick" scopes by default.
-  when defined(nuigiProfiler) and not defined(nimony):
+  when defined(nuigiProfiler):
     gprof.frameStart = eventHistoryIndex
   profilerFrameStart()
   prof("frame")
-  when defined(nuigiProfiler) and not defined(nimony):
+  when defined(nuigiProfiler):
     profilerBeginFrame(false)
   let dt = (started - app.lastTick).float64 / 1_000_000_000.0
   app.lastTick = started
