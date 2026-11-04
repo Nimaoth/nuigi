@@ -109,6 +109,10 @@ else:
 
 when defined(emscripten):
   {.push callConv: cdecl.}
+elif defined(nimNativeBackend):
+  {.push callConv: cdecl, dynlib: LibName.}
+elif defined(nimony):
+  {.push callConv: cdecl.}
 else:
   {.push callConv: cdecl, dynlib: LibName.}
 
