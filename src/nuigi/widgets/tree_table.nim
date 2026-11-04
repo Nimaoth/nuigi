@@ -127,7 +127,7 @@ type
     ## Mirrors `TreeTableOptions` but stores columns as an arena pointer for the layout pass.
     columnGap*: float32
     columnCount*: int
-    columns*: nil ptr UncheckedArray[TableColumn]
+    columns*: ptr UncheckedArray[TableColumn]
     showColumnLines*: bool
     columnLineThickness*: float32
     columnLineColor*: UiColor
@@ -220,18 +220,34 @@ proc initTreeTableOptions*(
   result.hoverColor = hoverColor
   result.hasCustomHoverColor = hasCustomHoverColor or hoverColor.a > 0.001'f32
 
+proc emptyTreeCursor(): TreeCursor =
+  new(result)
+
+proc emptyTreeTableRowRenderer(b: var UiBuilder, cursor: TreeCursor, index: int)
+    {.nimcall, gcsafe, raises: [].} =
+  discard
+
+proc newTreeTable*(cursor: TreeCursor): TreeTable =
+  ## Creates tree-table storage with its required cursors and row renderer initialized.
+  result = TreeTable(
+    cursor: cursor,
+    walkCursor: emptyTreeCursor(),
+    rowRenderer: emptyTreeTableRowRenderer,
+    listStorage: nil,
+  )
+
 proc getOrCreateStorage(b: var UiBuilder, node: ptr UiNode): TreeTable =
   ## Returns the editor state attached to `node`, creating it on first use.
   let existing = nodeStorageGet(b, node)
   if existing != nil:
     return cast[TreeTable](existing)
-  var storage = TreeTable()
+  var storage = newTreeTable(emptyTreeCursor())
   nodeStorage(b, node, storage)
   return storage
 
 method clone*(c: TreeCursor): TreeCursor {.base, gcsafe, raises: [].} =
   ## Copies a cursor so callers can navigate without mutating the original.
-  result = TreeCursor()
+  new(result)
   result.fieldName = c.fieldName
   result.index = c.index
   result.path = c.path

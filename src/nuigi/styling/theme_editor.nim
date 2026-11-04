@@ -30,8 +30,8 @@ type
     primaryColor*: UiColor
     cornerRadiusDisabled*: bool
     listStorage: UiDynamicVirtualListStorage
-    listFonts*: nil ListFontsFun
-    resolveFont*: nil ResolveFontFun
+    listFonts*: ListFontsFun
+    resolveFont*: ResolveFontFun
 
 func themeStyleName(styleIndex: int): string =
   if styleIndex <= 0 or styleIndex > UiThemeStyleSlotCount:

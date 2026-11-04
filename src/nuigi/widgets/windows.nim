@@ -10,7 +10,7 @@
 ## declared with the same `window` template; dragging a floating window over a
 ## docked one previews and performs docking, and dragging a tab undocks it.
 
-import std/[math, sequtils]
+import std/[math, sequtils, assertions]
 import nuigi
 import nuigi/core/vecmath
 import nuigi/debug/profiler
@@ -75,10 +75,6 @@ type
     tabPressOffset: Vec2
     dropTarget: DockDropTarget
 
-when defined(nimony):
-  type NullableDockSpace = nil DockSpace
-else:
-  type NullableDockSpace = DockSpace
 
 type WindowSpaceStorage* = ref object of UiNodeStorageData
   windows*: seq[WindowActivity]
@@ -172,7 +168,7 @@ proc windowSpaceStorageAt(b: var UiBuilder, nodeIdx: int): WindowSpaceStorage =
     return nil
   cast[WindowSpaceStorage](stored)
 
-proc currentDockSpace(b: var UiBuilder): NullableDockSpace =
+proc currentDockSpace(b: var UiBuilder): DockSpace =
   let storage = b.windowSpaceStorageAt(b.currentNodeIndex(b.windows))
   if storage == nil:
     return nil
@@ -601,7 +597,7 @@ proc updateDockSpace(b: var UiBuilder, dock: DockSpace, storage: WindowSpaceStor
   b.buildDockAreas(dock, storage)
   b.buildDockPreview(dock, storage)
 
-proc windowSpace*(b: var UiBuilder, dock: NullableDockSpace = nil) =
+proc windowSpace*(b: var UiBuilder, dock: DockSpace = nil) =
   ## Create the window space that hosts `window`s. When `dock` is given, its
   ## layout decides which windows are docked and which are floating.
   let dockSpace = dock
@@ -752,7 +748,7 @@ proc updateWindowSpaceActivity(b: var UiBuilder, windowNodeIndex: int) =
   b.withParent(windowSpaceIndex):
     discard b.deferBuild(windowSpaceDeferredBuild)
 
-proc resolveWindowPlacement(b: var UiBuilder, dock: NullableDockSpace, title: string,
+proc resolveWindowPlacement(b: var UiBuilder, dock: DockSpace, title: string,
     storage: WindowStorage, metrics: WindowMetrics): WindowPlacement =
   ## Decide where the window goes this frame. In a dock space the layout is
   ## the source of truth, including the geometry of floating windows.
@@ -861,7 +857,7 @@ proc buildDockTabBar(b: var UiBuilder, dock: DockSpace, title: string) =
         discard b.fitX().fitY().fillBackground()
         discard b.text(tabTitle)
 
-proc finishWindow(b: var UiBuilder, dock: NullableDockSpace, title: string,
+proc finishWindow(b: var UiBuilder, dock: DockSpace, title: string,
     storage: WindowStorage, placement: WindowPlacement, windowNodeIndex: int,
     titleBarId: UiNodeId, metrics: WindowMetrics) =
   if placement == WindowFloating:

@@ -11,16 +11,22 @@ import nuigi/core/timer
 
 include nuigi/util/compat2
 
+when defined(nimony):
+  {.feature: "assumeSync".}
 
-var b: UiBuilder
+when defined(emscripten):
+  const defaultAntialiasMeshWidth = 1.0'f32
+else:
+  const defaultAntialiasMeshWidth = 0.0'f32
+
 var gUiExampleInitialized = false
 var gShowDemoWindow = true
 var gShowSettingsWindow = true
 var gShowGamepadWindow = true
-var gRender2D: Render2D
-var gFontRender: FontRender
+var gRender2D = defaultRender2D()
+var gFontRender = defaultFontRender()
 when defined(wasm):
-  var gFontAtlasTexture: nil Texture = nil
+  var gFontAtlasTexture: Texture = nil
 var gCustomMaterial: MaterialId = 0
 var testFont = 0'i16
 var debugPanelState: DebugPanel = DebugPanel()
@@ -35,11 +41,6 @@ var gTick = 0.0
 var gRenderOnDemand = true
 var gHadInputThisFrame = false
 var gRedrawingUi = false
-
-when defined(emscripten):
-  const defaultAntialiasMeshWidth = 1.0'f32
-else:
-  const defaultAntialiasMeshWidth = 0.0'f32
 
 # --- per-frame plot history for the settings window graphs ----------------------
 const PlotHistoryLen = 256
@@ -83,7 +84,7 @@ proc pushPlotHistory() =
 var running = true
 var last = 0.0
 var fps = 60.0
-var gWindow: Window
+var gWindow: Window = nil
 
 type
   UiImageKind* = enum
@@ -101,7 +102,7 @@ func imageIdKind*(id: UiImageId): UiImageKind =
   of 0b01: imageTexture
   else: imageGpuTexture
 
-func textureToImageId*(texture: nil Texture): UiImageId =
+func textureToImageId*(texture: Texture): UiImageId =
   if texture == nil:
     return UiImageId(0'u64)
   UiImageId(cast[uint64](texture) or uiImageTextureTag)
@@ -111,13 +112,13 @@ func gpuTextureToImageId*(texture: GPUTexture): UiImageId =
     return UiImageId(0'u64)
   UiImageId(cast[uint64](texture) and uiImageDataMask)
 
-func imageIdToTexture*(id: UiImageId): nil Texture =
+func imageIdToTexture*(id: UiImageId): Texture =
   cast[Texture](cast[uint64](id) and uiImageDataMask)
 
 func imageIdToGpuTexture*(id: UiImageId): GPUTexture =
   cast[GPUTexture](cast[uint64](id) and uiImageDataMask)
 
-proc textureToGpuTexture*(texture: nil Texture): GPUTexture =
+proc textureToGpuTexture*(texture: Texture): GPUTexture =
   if texture == nil:
     return nil
   let props = getTextureProperties(texture)
@@ -131,10 +132,15 @@ proc uiSdlArrangeText(text: openArray[char], fontId: FontId, fontSize: float32, 
     gFontRender.arrangeText(text, fontSize, fontId, maxWidth, textFlags)
 
 proc uiSdlBuildTextMesh(arrangement: UiTextArrangement, pos, screenOffset: Vec2,
-    color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.gcsafe.} =
+    color: UiColor, transform: UiAffine2): tuple[data: ptr UncheckedArray[UiVertex], count: int] {.gcsafe.} =
   gcsafeb:
     let mesh = gFontRender.buildTextMesh(arrangement, pos, screenOffset, color, transform)
-    return (cast[nil ptr UncheckedArray[UiVertex]](mesh.data), mesh.count)
+    return (cast[ptr UncheckedArray[UiVertex]](mesh.data), mesh.count)
+
+var b = newBuilder(
+  uiSdlArrangeText,
+  uiSdlBuildTextMesh,
+  antialiasMeshWidth = defaultAntialiasMeshWidth)
 
 proc themeEditorListFonts(): seq[(string, UiFontId)] {.raises: [], gcsafe.} =
   gcsafeb:
@@ -225,8 +231,6 @@ proc ensureUiExampleInitialized() =
     var textCopy = text
     sdl3.setClipboardText(toCString(textCopy))
 
-  b = newBuilder(uiSdlArrangeText, uiSdlBuildTextMesh,
-    antialiasMeshWidth = defaultAntialiasMeshWidth)
   b.openUrlFn = openUrl
   b.readClipboardFn = readClipboard
   b.writeClipboardFn = writeClipboard
@@ -442,6 +446,9 @@ proc makeInputSnapshot(): UiInputSnapshot =
   gGamepadInput.applyToSnapshot(result)
 
 proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY: float32, precision: int) =
+  if precision < -1 or precision > 32:
+    assert false, "metric precision must be between -1 and 32"
+    return
   b.layoutHorizontal:
     discard b.fit().gap(8).padding(2)
     let display = prefix & ": " & formatFloat(plotMetricAvg(metric, 50).float64, ffDecimal, precision)
@@ -455,15 +462,14 @@ proc buildSettingsMetricRow(b: var UiBuilder, prefix: string, metric: int, maxY:
       let contentSize = plotSize - vec2(style.paddingX * 2.0'f32, style.paddingY * 2.0'f32)
       if contentSize.x > 0 and contentSize.y > 0:
         let count = max(1, gPlotHistoryCount)
-        var series = array[1, PlotSeries].default
-        series[0] = PlotSeries(
+        let series = [PlotSeries(
           fn: plotHistoryFn,
           userData: metric,
           label: uiString(prefix),
           lineColor: rgba(0.35'f32, 0.55'f32, 0.95'f32, 1.0'f32),
           fillTopColor: rgba(0.35'f32, 0.55'f32, 0.95'f32, 0.25'f32),
           fillBottomColor: rgba(0.0'f32, 0.0'f32, 0.0'f32, 0.0'f32),
-        )
+        )]
         let commands = buildPlotVertices(
           b,
           contentPos,
@@ -656,7 +662,7 @@ proc renderNewUi(b: var UiBuilder) =
     of TextureSamplerMode.Nearest: Render2DSamplerMode.Nearest
 
   proc renderFilledRectTransformed(renderer: var Render2D, transform: UiAffine2, pos, size: Vec2, color: UiColor,
-      texture: nil GPUTexture = nil, uv0: Vec2 = vec2(0), uv1: Vec2 = vec2(1),
+      texture: GPUTexture = nil, uv0: Vec2 = vec2(0), uv1: Vec2 = vec2(1),
       samplerMode: TextureSamplerMode = TextureSamplerMode.Linear) =
     if size.x <= 0.0'f32 or size.y <= 0.0'f32:
       return
@@ -719,7 +725,7 @@ proc renderNewUi(b: var UiBuilder) =
 
     of CmdRawVertices:
       if cmd.vertexData != nil and cmd.vertexCount > 0:
-        var gpuTexture: nil GPUTexture = nil
+        var gpuTexture: GPUTexture = nil
         case cmd.imageId.imageIdKind()
         of imageTexture:
           gpuTexture = cmd.imageId.imageIdToTexture().textureToGpuTexture()
@@ -745,13 +751,10 @@ proc renderNewUi(b: var UiBuilder) =
         gRender2D.renderFilledRectTransformed(transform, vec2(cmd.pos.x + cmd.size.x - thickness, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
 
     of CmdText:
-      var text: nil ptr UiNodeText = nil
       if cmd.textIndex > 0 and b.frame.texts[cmd.textIndex - 1].text.len > 0:
-        text = b.frame.texts[cmd.textIndex - 1].addr
-
-      if text != nil:
+        var text = b.frame.texts[cmd.textIndex - 1]
         # let maxWidth = if WrapText in n.flags: contentSize.x else: -1.0'f32
-        let arrangement = b.getTextArrangement(text, -1)
+        let arrangement = b.getTextArrangement(text.addr, -1)
         if b.buildTextMesh != nil:
           let (vertexData, vertexCount) = b.buildTextMesh(
             arrangement[], cmd.pos, vec2(0.0'f32), text.textColor, transform)
@@ -806,7 +809,7 @@ when defined(wasm):
     # Render an already-triangulated list of vertices via the SDL renderer.
     # UiVertex and Render2DVertex share the same 32-byte interleaved layout
     # (x, y, u, v, r, g, b, a), so we can point renderGeometryRaw directly at it.
-    proc drawRawVertices(renderer: Renderer, texture: nil Texture, first: ptr UiVertex, count: int) =
+    proc drawRawVertices(renderer: Renderer, texture: Texture, first: ptr UiVertex, count: int) =
       if count <= 0:
         return
       let xy = cast[ptr cfloat](first)
@@ -818,7 +821,7 @@ when defined(wasm):
         cint(count), nil, 0, 0)
 
     # Emit a filled quad (two triangles) for an axis/transformed rect.
-    proc renderFilledRectTransformed(renderer: Renderer, transform: UiAffine2, pos, size: Vec2, color: UiColor, texture: nil Texture = nil) =
+    proc renderFilledRectTransformed(renderer: Renderer, transform: UiAffine2, pos, size: Vec2, color: UiColor, texture: Texture = nil) =
       if size.x <= 0.0'f32 or size.y <= 0.0'f32:
         return
       let p0 = transform.transformPoint2(pos)
@@ -861,7 +864,7 @@ when defined(wasm):
 
       of CmdRawVertices:
         if cmd.vertexData != nil and cmd.vertexCount > 0:
-          var texture: nil Texture = nil
+          var texture: Texture = nil
           if cmd.imageId.uint64 == 1:
             texture = gFontAtlasTexture
           else:
@@ -893,7 +896,7 @@ when defined(wasm):
           renderFilledRectTransformed(renderer, transform, vec2(cmd.pos.x + cmd.size.x - thickness, cmd.pos.y + thickness), vec2(thickness, innerH), cmd.color)
 
       of CmdText:
-        var text: nil ptr UiNodeText = nil
+        var text: ptr UiNodeText = nil
         if cmd.textIndex > 0 and b.frame.texts[cmd.textIndex - 1].text.len > 0:
           text = b.frame.texts[cmd.textIndex - 1].addr
 
@@ -947,7 +950,7 @@ when defined(wasm):
 
       of CmdImage:
         # Textures ignored for now; draw as a plain filled rect.
-        var texture: nil Texture = nil
+        var texture: Texture = nil
         if cmd.imageId.uint64 == 1:
           texture = gFontAtlasTexture
         else:
@@ -1006,7 +1009,7 @@ proc redrawUiFrame(dt: float64, tickStart: float32) =
     finishFrameMetrics(dt, tickStart)
     block:
       prof("present")
-      gRender2D.endRender()
+      discard gRender2D.endRender()
     block:
       prof("vsync")
       discard gRender2D.presentToSwapchain(gWindow)
@@ -1040,11 +1043,11 @@ proc mainLoop() {.cdecl.} =
     if dt != 0:
       fps = mix(fps, 1.0 / dt, 0.5)
 
-    when defined(nuigiProfiler) and not defined(nimony):
+    when defined(nuigiProfiler):
       gprof.frameStart = eventHistoryIndex
     profilerFrameStart()
     prof("frame")
-    when defined(nuigiProfiler) and not defined(nimony):
+    when defined(nuigiProfiler):
       profilerBeginFrame(false)
 
     let tickStart = (timer.getTicksNS().float64 / NS_PER_MS.float64).float32
@@ -1110,9 +1113,14 @@ proc main(quitImmediately: bool) =
   discard setCurrentThreadPriority(THREAD_PRIORITY_TIME_CRITICAL)
 
   when defined(nimony):
-    let title = "nuigi (nimony)".cstring
+    when defined(nimNativeBackend):
+      let title = "nuigi (nimony native)".cstring
+    else:
+      let title = "nuigi (nimony)".cstring
   elif defined(nlvm):
     let title = "nuigi (nlvm)".cstring
+  elif defined(ic):
+    let title = "nuigi (nim2ic)".cstring
   else:
     let title = "nuigi (nim2)".cstring
 

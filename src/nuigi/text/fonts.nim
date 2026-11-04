@@ -97,7 +97,7 @@ type
     color*: UiColor
 
   TextMesh* = object
-    data*: nil ptr UncheckedArray[TextMeshVertex]
+    data*: ptr UncheckedArray[TextMeshVertex]
     count*: int
 
   TextMeshCacheEntry {.acyclic.} = ref object
@@ -136,7 +136,7 @@ type
     glyphPackingDeferredCount*: uint32
     textMeshCacheCapacity*: int
     textMeshCache: Table[uint64, TextMeshCacheEntry]
-    textMeshLruHead: nil TextMeshCacheEntry
+    textMeshLruHead: TextMeshCacheEntry
     textMeshCacheTick: uint64
     glyphAdvanceCache: Table[(int, int, FT_UInt), cfloat] # (fontIndex, sizeIdx, glyphIndex) -> advance
     fontFamilies: Table[string, array[4, FontId]] # normalized family name -> font per style
@@ -402,7 +402,7 @@ when useHarfbuzz:
 
     0
 
-proc getPackedGlyphPtr(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int, textFlags: UiTextFlags = {}): nil ptr PackedChar {.raises: [].} =
+proc getPackedGlyphPtr(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt, fontSize, subpixelPhase: int, textFlags: UiTextFlags = {}): ptr PackedChar {.raises: [].} =
   if fontIndex < 0 or fontIndex >= r.fonts.len:
     return nil
   assert r.fonts[fontIndex].children.len == 0
@@ -495,7 +495,8 @@ proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UIn
   if fontIndex < 0 or fontIndex >= r.fonts.len:
     return
   assert r.fonts[fontIndex].children.len == 0
-  if r.fonts[fontIndex].face == nil or glyphIndex == 0:
+  let face = r.fonts[fontIndex].face
+  if face == nil or glyphIndex == 0:
     return
 
   r.fonts[fontIndex].sized.ensureSizedSlot(fontSize)
@@ -512,7 +513,6 @@ proc packFontGlyphOnDemand(r: var FontRender, fontIndex: int, glyphIndex: FT_UIn
   if not r.ensureFtPixelSize(fontIndex, fontSize):
     r.glyphPackingTimeNs += timer.getTicksNS() - packingStart
     return
-  let face = r.fonts[fontIndex].face
   var delta = FT_Vector(x: (subpixelPhase * glyphSubpixelStep26Dot6).clong, y: 0)
   FT_Set_Transform(face, nil, delta)
 
@@ -812,7 +812,11 @@ proc ftGlyphAdvanceCached(r: var FontRender, fontIndex: int, glyphIndex: FT_UInt
       return r.glyphAdvanceCache[key]
     except:
       discard
+  if fontIndex < 0 or fontIndex >= r.fonts.len:
+    return 0
   let face = r.fonts[fontIndex].face
+  if face == nil:
+    return 0
   block:
     discard FT_Load_Glyph(face, glyphIndex, glyphLoadFlags(r.fonts[fontIndex]))
   let adv = face.glyph.advance.x.cfloat / 64.0
@@ -834,11 +838,15 @@ proc measureTextWidthLegacy(r: var FontRender, text: string, fontSize: float32, 
       prevFi = 0
       continue
     let fi = r.resolveFontIndex(codepoint, sizeIdx, primaryFont)
-    if fi < 0 or fi >= r.fonts.len or r.fonts[fi].face == nil:
+    if fi < 0 or fi >= r.fonts.len:
       prevGi = 0
       prevFi = 0
       continue
     let face = r.fonts[fi].face
+    if face == nil:
+      prevGi = 0
+      prevFi = 0
+      continue
     let gi = FT_Get_Char_Index(face, codepoint.culong)
     if gi != 0:
       widthAcc += r.ftGlyphAdvanceCached(fi, gi, sizeIdx)
@@ -862,11 +870,15 @@ proc buildArrangementGlyphsAt(r: var FontRender, text: openArray[char], sizeIdx:
       prevFi = -1
       continue
     let fi = r.resolveFontIndex(codepoint, sizeIdx, primaryFont)
-    if fi < 0 or fi >= r.fonts.len or r.fonts[fi].face == nil:
+    if fi < 0 or fi >= r.fonts.len:
       prevGi = 0
       prevFi = -1
       continue
     let face = r.fonts[fi].face
+    if face == nil:
+      prevGi = 0
+      prevFi = -1
+      continue
     let gi = FT_Get_Char_Index(face, codepoint.culong)
     if gi == 0:
       prevGi = 0
@@ -917,10 +929,14 @@ proc buildArrangementLegacy(r: var FontRender, text: string, sizeIdx: int,
 
   proc kerning(renderer: var FontRender, left, right: LegacyGlyph): cfloat {.inline.} =
     if left.glyphIndex == 0 or right.glyphIndex == 0 or
-        left.fontIndex != right.fontIndex:
+        left.fontIndex != right.fontIndex or right.fontIndex < 0 or
+        right.fontIndex >= renderer.fonts.len:
+      return 0
+    let face = renderer.fonts[right.fontIndex].face
+    if face == nil:
       return 0
     var kern = FT_Vector()
-    discard FT_Get_Kerning(renderer.fonts[right.fontIndex].face, left.glyphIndex,
+    discard FT_Get_Kerning(face, left.glyphIndex,
       right.glyphIndex, FT_UInt(0), kern)
     kern.x.cfloat / 64.0
 
@@ -955,8 +971,10 @@ proc buildArrangementLegacy(r: var FontRender, text: string, sizeIdx: int,
     for rune in rawLine.runes:
       let fontIndex = r.resolveFontIndex(rune.int, sizeIdx, primaryFont)
       var glyphIndex: FT_UInt = 0
-      if fontIndex >= 0 and fontIndex < r.fonts.len and r.fonts[fontIndex].face != nil:
-        glyphIndex = FT_Get_Char_Index(r.fonts[fontIndex].face, rune.int.culong)
+      if fontIndex >= 0 and fontIndex < r.fonts.len:
+        let face = r.fonts[fontIndex].face
+        if face != nil:
+          glyphIndex = FT_Get_Char_Index(face, rune.int.culong)
       let advance =
         if glyphIndex != 0:
           r.ftGlyphAdvanceCached(fontIndex, glyphIndex, sizeIdx)
@@ -1298,19 +1316,23 @@ proc addFontFace*(r: var FontRender, name: string, content: string): FontId {.ra
   if FT_New_Memory_Face(r.fontLibrary, cast[cstring](entry.data[0].addr), entry.data.len.clong, 0, entry.face) != 0:
     echo "Failed to initialize font face: ", name
     return -1
+  let face = entry.face
+  if face == nil:
+    echo "Failed to initialize font face: ", name
+    return -1
 
   entry.activePixelSize = -1
-  entry.hasColor = entry.face.hasColor
+  entry.hasColor = face.hasColor
   entry.styleVariants = noFontStyleVariants
-  if entry.face.family_name != nil:
-    entry.family = fontCString(cast[cstring](entry.face.family_name))
+  if face.family_name != nil:
+    entry.family = fontCString(cast[cstring](face.family_name))
   entry.style = 0
-  if (entry.face.style_flags.int and FT_STYLE_FLAG_BOLD) != 0:
+  if (face.style_flags.int and FT_STYLE_FLAG_BOLD) != 0:
     entry.style = entry.style or 1
-  if (entry.face.style_flags.int and FT_STYLE_FLAG_ITALIC) != 0:
+  if (face.style_flags.int and FT_STYLE_FLAG_ITALIC) != 0:
     entry.style = entry.style or 2
   entry.weight = if (entry.style and 1) != 0: 700 else: 400
-  let os2 = cast[nil ptr TT_OS2](FT_Get_Sfnt_Table(entry.face, FT_SFNT_OS2))
+  let os2 = cast[ptr TT_OS2](FT_Get_Sfnt_Table(face, FT_SFNT_OS2))
   if os2 != nil and os2.usWeightClass > 0:
     entry.weight = os2.usWeightClass.int
 
@@ -1402,6 +1424,10 @@ proc init*(r: var FontRender, flags: FontRenderFlags = {
   maxFontAtlasSize: int = defaultMaxFontAtlasSize,
   glyphPackingBudgetNs: uint64 = defaultGlyphPackingBudgetNs): bool =
   prof("initFontRenderer")
+  r.textMeshCache = initTable[uint64, TextMeshCacheEntry]()
+  r.glyphAdvanceCache = initTable[(int, int, FT_UInt), cfloat]()
+  r.fontFamilies = initTable[string, array[4, FontId]]()
+  r.textMeshLruHead = nil
   r.flags = flags
   r.glyphPackingBudgetNs = glyphPackingBudgetNs
   r.textMeshCacheCapacity = defaultTextMeshCacheCapacity
@@ -1427,6 +1453,15 @@ proc init*(r: var FontRender, flags: FontRenderFlags = {
 
   return true
 
+proc defaultFontRender*(): FontRender =
+  result = FontRender(
+    textMeshCache: initTable[uint64, TextMeshCacheEntry](),
+    glyphAdvanceCache: initTable[(int, int, FT_UInt), cfloat](),
+    fontFamilies: initTable[string, array[4, FontId]](),
+    textMeshLruHead: nil,
+    fontLibrary: FT_Library(nil),
+  )
+
 proc addSystemDefaultFonts*(r: var FontRender): bool =
   # todo: other platforms (Linux, macOS, Android, iOS)
   let fonts = @[
@@ -1450,8 +1485,9 @@ proc addSystemDefaultFonts*(r: var FontRender): bool =
 
 proc deinit*(r: var FontRender) =
   for i in 0 ..< r.fonts.len:
-    if r.fonts[i].face != nil:
-      discard FT_Done_Face(r.fonts[i].face)
+    let face = r.fonts[i].face
+    if face != nil:
+      discard FT_Done_Face(face)
       r.fonts[i].face = nil
   if cast[pointer](r.fontLibrary) != nil:
     discard FT_Done_FreeType(r.fontLibrary)

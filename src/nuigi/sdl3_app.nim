@@ -77,7 +77,7 @@ type
     running*: bool
     renderOnDemand*: bool
     showSettingsWindow*, showDemoWindow*, showGamepadWindow*: bool
-    dockSpace*: nil DockSpace
+    dockSpace*: DockSpace
       ## Optional dock space for the app's window space. When set, windows
       ## can be docked into its layout; tool windows start floating.
     sampleCount*: GPUSampleCount
@@ -85,8 +85,8 @@ type
     frameMs*, tickMs*, fps*: float64
     renderedFrames*: uint64
     onRenderUi*: Sdl3RenderUiCallback
-    onEvent*: nil Sdl3EventCallback
-    onUpdate*: nil Sdl3UpdateCallback
+    onEvent*: Sdl3EventCallback
+    onUpdate*: Sdl3UpdateCallback
     closeToTray*: bool
       ## Hide the window instead of quitting when it is closed. Only takes
       ## effect while a tray icon exists, so the app stays reachable.
@@ -538,8 +538,8 @@ proc deinit*(app: var Sdl3App) =
   app.sdlInitialized = false
 
 proc init*(app: var Sdl3App, config: Sdl3AppConfig,
-    renderUi: Sdl3RenderUiCallback, update: nil Sdl3UpdateCallback = nil,
-    handleEvent: nil Sdl3EventCallback = nil) =
+    renderUi: Sdl3RenderUiCallback, update: Sdl3UpdateCallback = nil,
+    handleEvent: Sdl3EventCallback = nil) =
   if app.initialized or app.sdlInitialized:
     raise newException(ValueError, "SDL3 app is already initialized")
   if config.width <= 0 or config.height <= 0:
@@ -601,10 +601,10 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
         flags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
       font[].arrangeText(text, fontSize, fontId, maxWidth, flags)
     proc mesh(arrangement: UiTextArrangement, pos, offset: Vec2, color: UiColor,
-        transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int]
+        transform: UiAffine2): tuple[data: ptr UncheckedArray[UiVertex], count: int]
         {.gcsafe, raises: [].} =
       let vertices = font[].buildTextMesh(arrangement, pos, offset, color, transform)
-      (cast[nil ptr UncheckedArray[UiVertex]](vertices.data), vertices.count)
+      (cast[ptr UncheckedArray[UiVertex]](vertices.data), vertices.count)
     proc listFonts(): seq[(string, UiFontId)] {.gcsafe, raises: [].} =
       font[].listFontFaces()
     proc resolveFont(name: string): UiFontId {.gcsafe, raises: [].} =
@@ -753,10 +753,10 @@ proc syncTextInput(app: var Sdl3App) =
 func gpuTextureToImageId*(texture: GPUTexture): UiImageId =
   cast[UiImageId](texture)
 
-func textureToImageId*(texture: nil Texture): UiImageId =
+func textureToImageId*(texture: Texture): UiImageId =
   UiImageId(cast[uint64](texture) or (1'u64 shl 62))
 
-proc resolveTexture(id: UiImageId): nil GPUTexture =
+proc resolveTexture(id: UiImageId): GPUTexture =
   if (id.uint64 shr 62) == 1:
     let texture = cast[Texture](id.uint64 and not (3'u64 shl 62))
     if texture == nil: return nil

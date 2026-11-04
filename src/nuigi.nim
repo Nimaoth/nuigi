@@ -620,7 +620,7 @@ type
       ## Line/stroke thickness (`CmdLine`/`CmdRectStroke`).
     imageId*: UiImageId
       ## Texture handle for `CmdImage` or font atlas for `CmdText`.
-    vertexData*: nil ptr UncheckedArray[UiVertex]
+    vertexData*: ptr UncheckedArray[UiVertex]
       ## Vertex pointer for `CmdRawVertices`.
     vertexCount*: int32
       ## Number of vertices in `vertexData`.
@@ -785,7 +785,7 @@ type
 
   UiNodeStorage* = object
     ## Per-node storage entry; keyed by node ID in `UiBuilder.nodeStorage`.
-    data*: nil UiNodeStorageData
+    data*: UiNodeStorageData
       ## The widget's custom storage (nil if none).
     lastAccess*: uint64
       ## Frame index of last access; used by GC to drop stale entries.
@@ -818,7 +818,7 @@ type
   UiMeasureTextFn* = proc(text: openArray[char], fontId: UiFontId, fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.raises: [].}
     ## Callback that shapes/wraps `text` into a cached `UiTextArrangement` (no atlas UVs).
   UiBuildTextMeshFn* = proc(arrangement: UiTextArrangement, pos: Vec2,
-    screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
+    screenOffset: Vec2, color: UiColor, transform: UiAffine2): tuple[data: ptr UncheckedArray[UiVertex], count: int] {.raises: [].}
     ## Callback that rasterizes `arrangement` into renderer-owned `UiVertex` data (runs during render-command build).
   UiOpenUrlFn* = proc(url: string): bool {.nimcall, raises: [].}
     ## Optional callback that asks the host application to open a URL.
@@ -931,7 +931,7 @@ type
 
     currentNode: ptr UiNode
       ## Pointer to the node currently being built (innermost begin/endNode).
-    currentParent: nil ptr UiNode
+    currentParent: ptr UiNode
       ## Pointer to the parent of the current node (nil at root).
     lastNode: ptr UiNode
       ## Pointer to the node finished most recently.
@@ -972,13 +972,13 @@ type
       ## Monotonic tick used for LRU eviction.
     measureText*: UiMeasureTextFn
       ## Callback that lays out text (set at `newBuilder`).
-    buildTextMesh*: nil UiBuildTextMeshFn
+    buildTextMesh*: UiBuildTextMeshFn
       ## Optional callback that builds text meshes (set at `newBuilder`).
-    openUrlFn*: nil UiOpenUrlFn
+    openUrlFn*: UiOpenUrlFn
       ## Optional callback supplied by the host application for opening URLs.
-    readClipboardFn*: nil UiReadClipboardFn
+    readClipboardFn*: UiReadClipboardFn
       ## Optional platform clipboard reader used by text-editing widgets.
-    writeClipboardFn*: nil UiWriteClipboardFn
+    writeClipboardFn*: UiWriteClipboardFn
       ## Optional platform clipboard writer used by text-editing widgets.
     textInputRequest*: UiTextInputRequest
       ## Text-input activation and IME location requested by the focused widget this frame.
@@ -1540,7 +1540,7 @@ proc lastNodeIndex*(b: var UiBuilder): int =
   ## Index of the node which was finished most recently (most recent endNode call)
   b.lastNodeIndex
 
-proc currentParent*(b: var UiBuilder): nil ptr UiNode =
+proc currentParent*(b: var UiBuilder): ptr UiNode =
   ## Pointer to the parent of the current node, or nil if at root.
   b.currentParent
 
@@ -1612,7 +1612,7 @@ proc nodeStorageClearOldChildren*(b: var UiBuilder, node: ptr UiNode) {.inline.}
   b.nodeStorage.mgetOrPut(nodeId, UiNodeStorage()).clearOldChildren = true
   b.nodeStorage.getOrQuit(nodeId).lastAccess = b.frameCtx.input.frameIndex
 
-proc nodeStorageGet*(b: var UiBuilder, node: ptr UiNode): nil UiNodeStorageData {.inline.} =
+proc nodeStorageGet*(b: var UiBuilder, node: ptr UiNode): UiNodeStorageData {.inline.} =
   ## Get node storage for given node, or nil if not found.
   let nodeId = node.id.uint64
   if b.nodeStorage.hasKey(nodeId):
@@ -2962,7 +2962,7 @@ proc themeSlotName*(name: string): string =
     else:
       result.add c
 
-proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMeshFn = nil,
+proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: UiBuildTextMeshFn = nil,
   textHeight = 16.0'f32, antialiasMeshWidth = 0.0'f32,
   backendType = UiBackendType.Graphical): UiBuilder =
   ## Create a new UiBuilder with default theme styles and the given text metrics.
@@ -3567,7 +3567,8 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
           candidate = index
     if candidate >= 0:
       let previousFocusedNode = b.focusedNode
-      b.applyFocusedItem(b.frame.focusItems[candidate], input.frameIndex)
+      let focusedItem = b.frame.focusItems[candidate]
+      b.applyFocusedItem(focusedItem, input.frameIndex)
       b.focusChangedByKeyboard = b.focusedNode != previousFocusedNode
     return
 
@@ -4091,7 +4092,7 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
     transformMap = initTable[int, int]()
     commandMap = initTable[int, int]()
     layoutMap = initTable[int, int]()
-    commandRanges: seq[tuple[start, count: int]]
+    commandRanges: seq[tuple[start, count: int]] = @[]
   for i in 0 ..< result.nodes.len:
     var n = addr result.nodes[i]
     if n.textIndex != 0'u16:
@@ -4186,7 +4187,7 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
   for i in 0 ..< result.commandData.len:
     if vertexOffsets[i] >= 0:
       result.commandData[i].vertexData =
-        cast[nil ptr UncheckedArray[UiVertex]](addr result.commandVertices[vertexOffsets[i]])
+        cast[ptr UncheckedArray[UiVertex]](addr result.commandVertices[vertexOffsets[i]])
   for index, commandRange in commandRanges:
     if commandRange.count > 0:
       result.customCommands[index] = initArrayView(
@@ -4659,19 +4660,19 @@ proc clampNodeSize*(b: var UiBuilder, n: ptr UiNode) {.inline.} =
   n.size = clamp(n.size, minV, maxV)
 
 proc getAnimatedFieldValue(frame: UiFrame, node: UiNode, fieldOffset: UiNodeFloatField): float32 {.inline.} =
-  proc layoutPtr(frame: UiFrame, node: UiNode): nil ptr UiStyle {.inline.} =
+  proc layoutPtr(frame: UiFrame, node: UiNode): ptr UiStyle {.inline.} =
     if node.styleIndex > 0: addr(frame.styles[node.styleIndex - 1]) else: nil
 
-  proc textPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeText {.inline.} =
+  proc textPtr(frame: UiFrame, node: UiNode): ptr UiNodeText {.inline.} =
     if node.textIndex > 0: addr(frame.texts[node.textIndex - 1]) else: nil
 
-  proc gapPtr(frame: UiFrame, node: UiNode): nil ptr float32 {.inline.} =
+  proc gapPtr(frame: UiFrame, node: UiNode): ptr float32 {.inline.} =
     if node.gapIndex > 0: addr(frame.gaps[node.gapIndex - 1]) else: nil
 
-  proc anchorPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeAnchor {.inline.} =
+  proc anchorPtr(frame: UiFrame, node: UiNode): ptr UiNodeAnchor {.inline.} =
     if node.anchorIndex > 0: addr(frame.anchors[node.anchorIndex - 1]) else: nil
 
-  proc transformPtr(frame: UiFrame, node: UiNode): nil ptr UiNodeTransform {.inline.} =
+  proc transformPtr(frame: UiFrame, node: UiNode): ptr UiNodeTransform {.inline.} =
     if node.transformIndex > 0: addr(frame.transforms[node.transformIndex - 1]) else: nil
 
   case fieldOffset
@@ -5161,6 +5162,7 @@ proc setAnimatedField[T](
   let anim = b.animations[animIdx].addr
 
   when T is Vec2:
+    let target = cast[Vec2](targetValue)
     let xOffset = nextFloatFieldOffset(firstFieldOffset, 0)
     let yOffset = nextFloatFieldOffset(firstFieldOffset, 1)
     let xCurrentBefore = animationCurrentValue(b.frame, anim[], node[], xOffset)
@@ -5180,10 +5182,11 @@ proc setAnimatedField[T](
         initY = true
         prevY = previousY.value
     result = vec2(
-      anim[].applyAnimatedFieldTarget(node[], xOffset, targetValue.x, speed, b.frameCtx.input.frameIndex, initX, prevX),
-      anim[].applyAnimatedFieldTarget(node[], yOffset, targetValue.y, speed, b.frameCtx.input.frameIndex, initY, prevY),
+      anim[].applyAnimatedFieldTarget(node[], xOffset, target.x, speed, b.frameCtx.input.frameIndex, initX, prevX),
+      anim[].applyAnimatedFieldTarget(node[], yOffset, target.y, speed, b.frameCtx.input.frameIndex, initY, prevY),
     )
   elif T is UiColor:
+    let target = cast[UiColor](targetValue)
     let rOffset = nextFloatFieldOffset(firstFieldOffset, 0)
     let gOffset = nextFloatFieldOffset(firstFieldOffset, 1)
     let bOffset = nextFloatFieldOffset(firstFieldOffset, 2)
@@ -5221,10 +5224,10 @@ proc setAnimatedField[T](
         initA = true
         prevA = previousA.value
     result = UiColor(
-      r: anim[].applyAnimatedFieldTarget(node[], rOffset, targetValue.r, speed, b.frameCtx.input.frameIndex, initR, prevR),
-      g: anim[].applyAnimatedFieldTarget(node[], gOffset, targetValue.g, speed, b.frameCtx.input.frameIndex, initG, prevG),
-      b: anim[].applyAnimatedFieldTarget(node[], bOffset, targetValue.b, speed, b.frameCtx.input.frameIndex, initB, prevB),
-      a: anim[].applyAnimatedFieldTarget(node[], aOffset, targetValue.a, speed, b.frameCtx.input.frameIndex, initA, prevA),
+      r: anim[].applyAnimatedFieldTarget(node[], rOffset, target.r, speed, b.frameCtx.input.frameIndex, initR, prevR),
+      g: anim[].applyAnimatedFieldTarget(node[], gOffset, target.g, speed, b.frameCtx.input.frameIndex, initG, prevG),
+      b: anim[].applyAnimatedFieldTarget(node[], bOffset, target.b, speed, b.frameCtx.input.frameIndex, initB, prevB),
+      a: anim[].applyAnimatedFieldTarget(node[], aOffset, target.a, speed, b.frameCtx.input.frameIndex, initA, prevA),
     )
   else:
     {.error: "Unsupported animated composite type".}
@@ -7197,7 +7200,7 @@ proc endDrop*(b: var UiBuilder, canDrop: bool): bool =
   b.dragData.canDrop = canDrop
   return canDrop and b.dragReleased()
 
-proc externalDragData*(b: UiBuilder): nil UiExternalDragUserData =
+proc externalDragData*(b: UiBuilder): UiExternalDragUserData =
   ## Payload of the active external (OS) drag, or nil when the active drag is
   ## not external.
   if not b.isExternalDrag():
@@ -7215,8 +7218,11 @@ proc buildDragUi(b: var UiBuilder) =
   let attached = b.beginAttach(overlayIdx)
   try:
     discard b.beginNodeId("drag-tooltip")
-    if b.dragData.uiCallback != nil:
-      b.dragData.uiCallback(b, b.dragData.userData, b.dragData.canDrop)
+    let uiCallback = b.dragData.uiCallback
+    if uiCallback != nil:
+        let userData = b.dragData.userData
+        let canDrop = b.dragData.canDrop
+        uiCallback(b, userData, canDrop)
     let input = b.frameCtx.input
     discard b.offsets(input.mouse.x, input.mouse.y, 0, 0).pivot(0, 1).finishAnchors().noHover()
     discard b.endNode()

@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 
 {.compile: "../../../vendor/stb_truetype.c".}
 {.compile: "../../../vendor/stb_rect_pack.c".}
@@ -79,7 +82,7 @@ template POINT_SIZE*(x: cfloat): cfloat = -x
 
 type
   BufObj {.bycopy.} = object
-    data*: nil ptr UncheckedArray[uint8]
+    data*: ptr UncheckedArray[uint8]
     cursor*: cint
     size*: cint
 
@@ -118,8 +121,8 @@ type
     pixels*: ptr UncheckedArray[uint8]
 
   FontInfo* {.bycopy.} = object
-    userdata*: nil pointer
-    data*: nil ptr UncheckedArray[uint8]
+    userdata*: pointer
+    data*: ptr UncheckedArray[uint8]
     fontstart*: cint
     numGlyphs*: cint
     loca*, head*, glyf*, hhea*, hmtx*, kern*, gpos*, svg*: cint
@@ -133,15 +136,15 @@ type
     fdselect*: BufObj
 
   PackContext* {.bycopy.} = object
-    user_allocator_context*: nil pointer
-    pack_info*: nil pointer
+    user_allocator_context*: pointer
+    pack_info*: pointer
     width*, height*: cint
     stride_in_bytes*: cint
     padding*: cint
     skip_missing*: cint
     h_oversample*, v_oversample*: cuint
     pixels*: ptr UncheckedArray[uint8]
-    nodes*: nil pointer
+    nodes*: pointer
 
   RectObj* {.bycopy.} = object
     id*, w*, h*: cint
@@ -204,7 +207,7 @@ proc getScaledFontVMetrics*(fontdata: ptr UncheckedArray[uint8], index: cint,
 
 proc packBegin*(spc: ptr PackContext, pixels: ptr UncheckedArray[uint8],
     width, height, stride_in_bytes, padding: cint,
-    alloc_context: nil pointer): cint {.importc: "stbtt_PackBegin".}
+    alloc_context: pointer): cint {.importc: "stbtt_PackBegin".}
 
 proc packEnd*(spc: ptr PackContext) {.importc: "stbtt_PackEnd".}
 
@@ -276,7 +279,7 @@ proc getFontBoundingBox*(info: ptr FontInfo, x0, y0, x1, y1: ptr cint) {.
     importc: "stbtt_GetFontBoundingBox".}
 
 proc getCodepointHMetrics*(info: ptr FontInfo, codepoint: cint,
-    advanceWidth: ptr cint, leftSideBearing: nil pointer) {.
+    advanceWidth: ptr cint, leftSideBearing: pointer) {.
     importc: "stbtt_GetCodepointHMetrics".}
 
 proc getCodepointKernAdvance*(info: ptr FontInfo, ch1, ch2: cint): cint {.

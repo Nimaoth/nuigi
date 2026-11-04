@@ -13,7 +13,7 @@ proc data*[T](a: openArray[T]): ptr UncheckedArray[T] =
   if a.len > 0:
     cast[ptr UncheckedArray[T]](a[0].addr)
   else:
-    cast[ptr UncheckedArray[T]](0)
+    nil
 
 when defined(nimony):
   type BackwardsIndex = distinct int
@@ -74,12 +74,12 @@ proc `[]=`*[T](arr: var ArrayView[T], index: int, value: T) =
   assert index < arr.len
   arr.data[index] = value
 
-proc first*[T](arr {.byref.}: ArrayView[T]): nil ptr T =
+proc first*[T](arr {.byref.}: ArrayView[T]): ptr T =
   if arr.len > 0:
     return arr.data[0].addr
   return nil
 
-proc last*[T](arr {.byref.}: ArrayView[T]): nil ptr T =
+proc last*[T](arr {.byref.}: ArrayView[T]): ptr T =
   if arr.len > 0:
     return arr.data[arr.high].addr
   return nil

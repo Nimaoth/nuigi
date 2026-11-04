@@ -102,7 +102,7 @@ proc ensureSizedSlot(fd: var FontData, fontSize: int) {.raises: [].} =
   while fd.sizedData.len <= fontSize:
     fd.sizedData.add(FontDataSized())
 
-proc getPackedGlyphPtr*(atlas: var FontAtlas, fontIndex: int, glyphId: uint32, fontSize, subpixelPhase: int): nil ptr PackedChar {.raises: [].} =
+proc getPackedGlyphPtr*(atlas: var FontAtlas, fontIndex: int, glyphId: uint32, fontSize, subpixelPhase: int): ptr PackedChar {.raises: [].} =
   if fontIndex < 0 or fontIndex >= atlas.sized.len:
     echo "getPackedGlyphPtr fontIndex ", fontIndex, ", ", atlas.sized.len
     return nil
@@ -124,7 +124,7 @@ proc getPackedGlyphPtr*(atlas: var FontAtlas, fontIndex: int, glyphId: uint32, f
 # glyph locations (rect placement + cache key); metric/offsets are filled by the
 # caller. Returns nil if the glyph is already cached, does not fit and the atlas
 # cannot grow, or the size is invalid.
-proc packGlyphLocation*(atlas: var FontAtlas, fontIndex: int, glyphId: uint32, fontSize, subpixelPhase, w, h: int): nil ptr PackedChar {.raises: [].} =
+proc packGlyphLocation*(atlas: var FontAtlas, fontIndex: int, glyphId: uint32, fontSize, subpixelPhase, w, h: int): ptr PackedChar {.raises: [].} =
   if fontIndex < 0 or fontIndex >= atlas.sized.len:
     echo "f"
     return nil

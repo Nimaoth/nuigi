@@ -14,6 +14,10 @@ import nuigi/widgets/dynamic_virtuallist
 import nuigi/core/[vecmath, arena, array_view]
 import nuigi/debug/profiler
 
+when defined(nimony):
+  {.feature: "assumeSync".}
+
+
 when not defined(wasm):
   import std/os
   import nuigi/widgets/file_system_cursor
@@ -1547,7 +1551,7 @@ proc buildCustomQuadCommands*(frameArena: ptr Arena, origin: Vec2, size: Vec2, t
   let y0 = origin.y
   let x1 = origin.x + size.x
   let y1 = origin.y + size.y
-  var vdata = cast[nil ptr UncheckedArray[UiVertex]](frameArena[].alloc(6 * sizeof(UiVertex)))
+  var vdata = cast[ptr UncheckedArray[UiVertex]](frameArena[].alloc(6 * sizeof(UiVertex)))
   vdata[0] = UiVertex(pos: vec2(x0, y0), uv: vec2(0.0'f32, 0.0'f32), color: rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
   vdata[1] = UiVertex(pos: vec2(x1, y0), uv: vec2(1.0'f32, 0.0'f32), color: rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
   vdata[2] = UiVertex(pos: vec2(x1, y1), uv: vec2(1.0'f32, 1.0'f32), color: rgba(1.0'f32, 1.0'f32, 1.0'f32, 1.0'f32))
@@ -1624,7 +1628,7 @@ type
   DemoTreeDragUserData = ref object of UiDragUserData
     node: DemoTreeNode
 
-var demoTreeRoot: DemoTreeNode
+var demoTreeRoot: DemoTreeNode = nil
 
 proc addDemoTreeChild(parent: DemoTreeNode, key, name: string): DemoTreeNode =
   result = DemoTreeNode(key: key, name: name, parent: parent)
@@ -1644,6 +1648,14 @@ proc createDemoTree(): DemoTreeNode =
 
 proc resetDemoTree() =
   demoTreeRoot = createDemoTree()
+
+proc currentDemoTreeRoot(): DemoTreeNode =
+  if demoTreeRoot == nil:
+    resetDemoTree()
+  let root = demoTreeRoot
+  if root == nil:
+    quit "demo tree root was not initialized"
+  return root
 
 proc demoTreeCursor(root: DemoTreeNode): DemoTreeCursor =
   DemoTreeCursor(node: root, fieldName: root.name, path: @[])
@@ -1701,7 +1713,7 @@ method exitChild*(c: DemoTreeCursor): bool =
   if c.parents.len == 0:
     return false
   c.node = c.parents[^1]
-  c.parents.setLen(c.parents.len - 1)
+  discard c.parents.pop()
   c.path.setLen(c.path.len - 1)
   c.index = if c.path.len > 0: c.path[^1] else: 0
   c.fieldName = c.node.name
@@ -1811,7 +1823,7 @@ proc buildDemoTreeDropGradient(b: var UiBuilder, nodeIdx: int, userData: int) =
   let transparent = rgba(accent.r, accent.g, accent.b, 0.0'f32)
   let topColor = if userData == 0: accent else: transparent
   let bottomColor = if userData == 0: transparent else: accent
-  let vertices = cast[nil ptr UncheckedArray[UiVertex]](
+  let vertices = cast[ptr UncheckedArray[UiVertex]](
     b.frame.arena[].alloc(6 * sizeof(UiVertex)))
   if vertices == nil:
     return
@@ -1873,8 +1885,7 @@ var treeTableCustomHoverColor = false
 var treeTableAlternatingRowHeights = false
 proc buildTreeTableExample(b: var UiBuilder) =
   let parent = b.currentNode
-  if demoTreeRoot == nil:
-    resetDemoTree()
+  let demoRoot = currentDemoTreeRoot()
   b.layoutVertical:
     b.debugName("tree-table-demo")
     discard b.fillX()
@@ -2060,7 +2071,7 @@ proc buildTreeTableExample(b: var UiBuilder) =
           opts.highlightHoveredRow = treeTableHighlightHoveredRow
           opts.hoverColor = treeTableHoverColor
           opts.hasCustomHoverColor = treeTableCustomHoverColor
-          let testCursor = demoTreeCursor(demoTreeRoot)
+          let testCursor = demoTreeCursor(demoRoot)
           b.treeTable(testCursor, opts, renderRow)
 
 proc buildFileSystemTreeExample(b: var UiBuilder) =

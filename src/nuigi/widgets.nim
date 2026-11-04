@@ -1369,4 +1369,3 @@ proc virtualList*(b: var UiBuilder,
             0.0'f32, 1.0'f32)
           scrollOffset = (pointerNorm * vlSbRange).float
           vlRaw[0].scrollOffsetY = scrollOffset.float32
-

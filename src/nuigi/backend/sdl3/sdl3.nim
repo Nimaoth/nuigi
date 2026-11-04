@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 # Based on SDL3.2.0
 
 # todo for 3.4.0
@@ -266,7 +269,7 @@ proc setFloatProperty*(props: PropertiesID, name: cstring, value: cfloat): bool 
 proc setBooleanProperty*(props: PropertiesID, name: cstring, value: bool): bool {.importc: "SDL_SetBooleanProperty".}
 proc hasProperty*(props: PropertiesID, name: cstring): bool {.importc: "SDL_HasProperty".}
 proc getPropertyType*(props: PropertiesID, name: cstring): PropertyType {.importc: "SDL_GetPropertyType".}
-proc getPointerProperty*(props: PropertiesID, name: cstring, default_value: nil pointer): nil pointer {.importc: "SDL_GetPointerProperty".}
+proc getPointerProperty*(props: PropertiesID, name: cstring, default_value: pointer): pointer {.importc: "SDL_GetPointerProperty".}
 proc getStringProperty*(props: PropertiesID, name: cstring, default_value: cstring): cstring {.importc: "SDL_GetStringProperty".}
 proc getNumberProperty*(props: PropertiesID, name: cstring, default_value: int64): int64 {.importc: "SDL_GetNumberProperty".}
 proc getFloatProperty*(props: PropertiesID, name: cstring, default_value: cfloat): cfloat {.importc: "SDL_GetFloatProperty".}
@@ -2033,7 +2036,7 @@ type
     clear_color*: FColor
     load_op*: GPULoadOp
     store_op*: GPUStoreOp
-    resolve_texture*: nil GPUTexture
+    resolve_texture*: GPUTexture
     resolve_mip_level*: uint32
     resolve_layer*: uint32
     cycle*: bool
@@ -2094,7 +2097,7 @@ type
 proc gPUSupportsShaderFormats*(format_flags: GPUShaderFormat, name: cstring): bool {.importc: "SDL_GPUSupportsShaderFormats".}
 proc gPUSupportsProperties*(props: PropertiesID): bool {.importc: "SDL_GPUSupportsProperties".}
 
-proc createGPUDevice*(format_flags: GPUShaderFormat, debug_mode: bool, name: nil cstring): GPUDevice {.importc: "SDL_CreateGPUDevice".}
+proc createGPUDevice*(format_flags: GPUShaderFormat, debug_mode: bool, name: cstring): GPUDevice {.importc: "SDL_CreateGPUDevice".}
 proc createGPUDeviceWithProperties*(props: PropertiesID): GPUDevice {.importc: "SDL_CreateGPUDeviceWithProperties".}
 proc destroyGPUDevice*(device: GPUDevice) {.importc: "SDL_DestroyGPUDevice".}
 proc getNumGPUDrivers*(): cint {.importc: "SDL_GetNumGPUDrivers".}
@@ -2126,7 +2129,7 @@ proc pushGPUVertexUniformData*(command_buffer: GPUCommandBuffer, slot_index: uin
 proc pushGPUFragmentUniformData*(command_buffer: GPUCommandBuffer, slot_index: uint32, data: pointer, length: uint32) {.importc: "SDL_PushGPUFragmentUniformData".}
 proc pushGPUComputeUniformData*(command_buffer: GPUCommandBuffer, slot_index: uint32, data: pointer, length: uint32) {.importc: "SDL_PushGPUComputeUniformData".}
 
-proc beginGPURenderPass*(command_buffer: GPUCommandBuffer, color_target_infos: ptr GPUColorTargetInfo, num_color_targets: uint32, depth_stencil_target_info: nil ptr GPUDepthStencilTargetInfo): GPURenderPass {.importc: "SDL_BeginGPURenderPass".}
+proc beginGPURenderPass*(command_buffer: GPUCommandBuffer, color_target_infos: ptr GPUColorTargetInfo, num_color_targets: uint32, depth_stencil_target_info: ptr GPUDepthStencilTargetInfo): GPURenderPass {.importc: "SDL_BeginGPURenderPass".}
 proc bindGPUGraphicsPipeline*(render_pass: GPURenderPass, graphics_pipeline: GPUGraphicsPipeline) {.importc: "SDL_BindGPUGraphicsPipeline".}
 proc setGPUViewport*(render_pass: GPURenderPass, viewport: ptr GPUViewport) {.importc: "SDL_SetGPUViewport".}
 proc setGPUScissor*(render_pass: GPURenderPass, scissor: ptr Rect) {.importc: "SDL_SetGPUScissor".}
@@ -5057,9 +5060,9 @@ type
 proc getNumRenderDrivers*(): cint {.importc: "SDL_GetNumRenderDrivers".}
 proc getRenderDriver*(index: cint): cstring {.importc: "SDL_GetRenderDriver".}
 proc createWindowAndRenderer*(title: cstring, width, height: cint, window_flags: WindowFlags, window: var Window, renderer: var Renderer): bool {.importc: "SDL_CreateWindowAndRenderer".}
-proc createRenderer*(window: Window, name: nil cstring): Renderer {.importc: "SDL_CreateRenderer".}
+proc createRenderer*(window: Window, name: cstring): Renderer {.importc: "SDL_CreateRenderer".}
 proc createRendererWithProperties*(props: PropertiesID): Renderer {.importc: "SDL_CreateRendererWithProperties".}
-proc createGPURenderer*(device: nil GPUDevice, window: nil Window): Renderer {.importc: "SDL_CreateGPURenderer".}
+proc createGPURenderer*(device: GPUDevice, window: Window): Renderer {.importc: "SDL_CreateGPURenderer".}
 proc getGPURendererDevice*(renderer: Renderer): GPUDevice {.importc: "SDL_GetGPURendererDevice".}
 proc createSoftwareRenderer*(surface: ptr Surface): Renderer {.importc: "SDL_CreateSoftwareRenderer".}
 proc getRenderer*(window: Window): Renderer {.importc: "SDL_GetRenderer".}
@@ -5105,7 +5108,7 @@ proc setRenderViewport*(renderer: Renderer, rect: ptr Rect): bool {.importc: "SD
 proc getRenderViewport*(renderer: Renderer, rect: var Rect): bool {.importc: "SDL_GetRenderViewport".}
 proc renderViewportSet*(renderer: Renderer): bool {.importc: "SDL_RenderViewportSet".}
 proc getRenderSafeArea*(renderer: Renderer, rect: var Rect):bool {.importc: "SDL_GetRenderSafeArea".}
-proc setRenderClipRect*(renderer: Renderer, rect: nil ptr Rect): bool {.importc: "SDL_SetRenderClipRect".}
+proc setRenderClipRect*(renderer: Renderer, rect: ptr Rect): bool {.importc: "SDL_SetRenderClipRect".}
 proc setRenderClipRect*(renderer: Renderer, rect: Rect): bool = setRenderClipRect(renderer, rect.addr)
 proc getRenderClipRect*(renderer: Renderer, rect: var Rect): bool {.importc: "SDL_GetRenderClipRect".}
 proc renderClipEnabled*(renderer: Renderer): bool {.importc: "SDL_RenderClipEnabled".}
@@ -5138,7 +5141,7 @@ proc renderTextureTiled*(renderer: Renderer, texture: Texture, srcrect: ptr FRec
 proc renderTexture9Grid*(renderer: Renderer, texture: Texture, srcrect: ptr FRect, left_width, right_width, top_height, bottom_height, scale: cfloat, dstrect: ptr FRect): bool {.importc: "SDL_RenderTexture9Grid".}
 proc renderGeometry*(renderer: Renderer, texture: Texture, vertices: ptr[Vertex], num_vertices: cint, indices: ptr[cint], num_indices: cint): bool {.importc: "SDL_RenderGeometry".}
 proc renderGeometry*(renderer: Renderer, texture: Texture, vertices: openArray[Vertex], indices: openArray[cint]): bool {.importc: "SDL_RenderGeometry".}
-proc renderGeometryRaw*(renderer: Renderer, texture: nil Texture, xy: ptr cfloat, xy_stride: cint, color: ptr FColor, color_stride: cint, uv: ptr cfloat, uv_stride: cint, num_vertices: cint, indices: nil pointer, num_indices: cint, size_indices: cint): bool {.importc: "SDL_RenderGeometryRaw".}
+proc renderGeometryRaw*(renderer: Renderer, texture: Texture, xy: ptr cfloat, xy_stride: cint, color: ptr FColor, color_stride: cint, uv: ptr cfloat, uv_stride: cint, num_vertices: cint, indices: pointer, num_indices: cint, size_indices: cint): bool {.importc: "SDL_RenderGeometryRaw".}
 proc renderReadPixels*(renderer: Renderer, rect: ptr Rect): ptr Surface {.importc: "SDL_RenderReadPixels".}
 proc renderPresent*(renderer: Renderer): bool {.importc: "SDL_RenderPresent".}
 proc destroyTexture*(texture: Texture) {.importc: "SDL_DestroyTexture".}
@@ -5173,7 +5176,7 @@ proc setGPURenderStateSamplerBindings*(state: GPURenderState, num_sampler_bindin
 proc setGPURenderStateStorageTextures*(state: GPURenderState, num_storage_textures: cint, storage_textures: ptr GPUTexture): bool {.importc: "SDL_SetGPURenderStateStorageTextures".}
 proc setGPURenderStateStorageBuffers*(state: GPURenderState, num_storage_buffers: cint, storage_buffers: ptr GPUBuffer): bool {.importc: "SDL_SetGPURenderStateStorageBuffers".}
 proc setGPURenderStateFragmentUniforms*(state: GPURenderState, slot_index: uint32, data: pointer, length: uint32): bool {.importc: "SDL_SetGPURenderStateFragmentUniforms".}
-proc setGPURenderState*(renderer: Renderer, state: nil GPURenderState): bool {.importc: "SDL_SetGPURenderState".}
+proc setGPURenderState*(renderer: Renderer, state: GPURenderState): bool {.importc: "SDL_SetGPURenderState".}
 proc destroyGPURenderState*(state: GPURenderState): void {.importc: "SDL_DestroyGPURenderState".}
 
 const SOFTWARE_RENDERER* = cstring "software"

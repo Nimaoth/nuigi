@@ -73,7 +73,7 @@ proc cpCompHex(v: float32): string =
 proc toHex(c: UiColor): string =
   "#" & cpCompHex(c.r) & cpCompHex(c.g) & cpCompHex(c.b) & cpCompHex(c.a)
 
-proc cpPushQuad(v: nil ptr UncheckedArray[UiVertex], i: var int,
+proc cpPushQuad(v: ptr UncheckedArray[UiVertex], i: var int,
     x0, y0, x1, y1: float32, cTL, cTR, cBL, cBR: UiColor) =
   v[i] = UiVertex(pos: vec2(x0, y0), uv: vec2(0.0'f32, 0.0'f32), color: cTL); inc i
   v[i] = UiVertex(pos: vec2(x1, y0), uv: vec2(1.0'f32, 0.0'f32), color: cTR); inc i
@@ -82,11 +82,11 @@ proc cpPushQuad(v: nil ptr UncheckedArray[UiVertex], i: var int,
   v[i] = UiVertex(pos: vec2(x1, y1), uv: vec2(1.0'f32, 1.0'f32), color: cBR); inc i
   v[i] = UiVertex(pos: vec2(x0, y1), uv: vec2(0.0'f32, 1.0'f32), color: cBL); inc i
 
-proc cpPushRect(v: nil ptr UncheckedArray[UiVertex], i: var int,
+proc cpPushRect(v: ptr UncheckedArray[UiVertex], i: var int,
     x0, y0, x1, y1: float32, c: UiColor) =
   cpPushQuad(v, i, x0, y0, x1, y1, c, c, c, c)
 
-proc cpPushCircleFan(v: nil ptr UncheckedArray[UiVertex], i: var int,
+proc cpPushCircleFan(v: ptr UncheckedArray[UiVertex], i: var int,
     cx, cy, r: float32, c: UiColor, segments: int = 12) =
   for sIdx in 0 ..< segments:
     let a0 = cpTwoPi * sIdx.float32 / segments.float32
@@ -96,7 +96,7 @@ proc cpPushCircleFan(v: nil ptr UncheckedArray[UiVertex], i: var int,
     v[i] = UiVertex(pos: vec2(cx + cos(a1) * r, cy + sin(a1) * r), uv: vec2(0.0'f32), color: c); inc i
 
 proc cpSetCommands(b: var UiBuilder, nodeIdx: int,
-    vbuf: nil ptr UncheckedArray[UiVertex], vi: int) =
+    vbuf: ptr UncheckedArray[UiVertex], vi: int) =
   if nodeIdx < 0 or nodeIdx >= b.frame.nodes.len:
     return
   var cmds = b.frame.arena[].allocEmptyArray(1, UiRenderCommand)
@@ -130,7 +130,7 @@ proc cpBuildSv(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let cBR = hsvToRgb(hsvH, 1.0'f32, 0.0'f32)
 
   let vcount = 6 + 12 * 3 + 12 * 3
-  let vbuf = cast[nil ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
+  let vbuf = cast[ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
   var vi = 0
   cpPushQuad(vbuf, vi, x0, y0, x1, y1, cTL, cTR, cBL, cBR)
 
@@ -156,7 +156,7 @@ proc cpBuildHue(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
 
   let segs = 32
   let vcount = segs * 6 + 6
-  let vbuf = cast[nil ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
+  let vbuf = cast[ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
   var vi = 0
   for sIdx in 0 ..< segs:
     let t0 = sIdx.float32 / segs.float32
@@ -192,7 +192,7 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
   let cols = max(1, int(ceil(w / tile)))
   let rows = max(1, int(ceil(hgt / tile)))
   let vcount = cols * rows * 6 + 6 + 6
-  let vbuf = cast[nil ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
+  let vbuf = cast[ptr UncheckedArray[UiVertex]](b.frame.arena[].alloc(vcount * sizeof(UiVertex)))
   var vi = 0
   for r in 0 ..< rows:
     for c in 0 ..< cols:
@@ -214,14 +214,14 @@ proc cpBuildAlpha(b: var UiBuilder, nodeIdx: int, userData: int) {.nimcall.} =
 
   cpSetCommands(b, nodeIdx, vbuf, vi)
 
-proc colorPicker*(b: var UiBuilder, value: var UiColor, storage: nil ColorPickerStorage = nil): bool =
+proc colorPicker*(b: var UiBuilder, value: var UiColor, storage: ColorPickerStorage = nil): bool =
   prof("colorPicker")
   var changed = false
 
   var swatchIdx = -1
   var swatchId = noneNodeId()
   var pickerIdx = -1
-  var storage: nil ColorPickerStorage = storage
+  var storage: ColorPickerStorage = storage
 
   b.node:
     b.debugName("color-picker")

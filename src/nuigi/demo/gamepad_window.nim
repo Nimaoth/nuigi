@@ -43,7 +43,7 @@ type
     navigationPressed: UiNavigationDirections
 
   MeshWriter = object
-    vertices: nil ptr UncheckedArray[UiVertex]
+    vertices: ptr UncheckedArray[UiVertex]
     count: int
     capacity: int
     antialiasMeshWidth: float32
@@ -198,7 +198,9 @@ proc removeGamepad(input: var DemoGamepadInput, instanceId: JoystickID) =
   let releasedSouth = input.gamepads[index].buttons[ord(GAMEPAD_BUTTON_SOUTH)]
   let releasedEast = input.gamepads[index].buttons[ord(GAMEPAD_BUTTON_EAST)]
   debugLog("Gamepad removed: " & input.gamepads[index].name & " (" & $instanceId & ")")
-  closeGamepad(input.gamepads[index].handle)
+  let handle = input.gamepads[index].handle
+  if handle != nil:
+    closeGamepad(handle)
   input.gamepads.delete(index)
   if releasedSouth and not input.anyButtonDown(GAMEPAD_BUTTON_SOUTH):
     input.keysDown.excl KeyEnter
@@ -273,7 +275,10 @@ proc handleEvent*(input: var DemoGamepadInput, event: var Event): bool =
   of EVENT_GAMEPAD_REMAPPED:
     let index = input.findGamepad(event.gdevice.which)
     if index >= 0:
-      let namePtr = getGamepadName(input.gamepads[index].handle)
+      let handle = input.gamepads[index].handle
+      if handle == nil:
+        return false
+      let namePtr = getGamepadName(handle)
       input.gamepads[index].name = if namePtr == nil: "Unknown gamepad" else: cStringValue(namePtr)
   of EVENT_GAMEPAD_BUTTON_DOWN, EVENT_GAMEPAD_BUTTON_UP:
     input.updateButton(event.gbutton.which, event.gbutton.button.int, event.gbutton.down)
@@ -323,7 +328,7 @@ proc addAnimatedButton(writer: var MeshWriter, center: Vec2, radius: float32,
 proc buildControllerMesh(b: var UiBuilder, gamepad: var DemoGamepad,
     origin: Vec2): ArrayView[UiRenderCommand] =
   const MaxVertices = 4096
-  let vertexData = cast[nil ptr UncheckedArray[UiVertex]](
+  let vertexData = cast[ptr UncheckedArray[UiVertex]](
     b.frame.arena[].alloc(MaxVertices * sizeof(UiVertex)))
   if vertexData == nil:
     return default(ArrayView[UiRenderCommand])
@@ -422,7 +427,10 @@ proc buildControllerMesh(b: var UiBuilder, gamepad: var DemoGamepad,
   for (button, localPoints) in dpadButtons:
     let amount = gamepad.buttonAmount(button)
     let move = vec2(0.0'f32, amount * 2.0'f32)
-    var points: array[5, Vec2]
+    var points = [
+      vec2(0.0'f32), vec2(0.0'f32), vec2(0.0'f32),
+      vec2(0.0'f32), vec2(0.0'f32),
+    ]
     for pointIndex in 0 ..< localPoints.len:
       points[pointIndex] = transformPoint(
         dpadCenter + localPoints[pointIndex] + move,
@@ -505,5 +513,7 @@ proc buildGamepadWindow*(input: var DemoGamepadInput, b: var UiBuilder) =
 
 proc shutdown*(input: var DemoGamepadInput) =
   for gamepad in input.gamepads:
-    closeGamepad(gamepad.handle)
+    let handle = gamepad.handle
+    if handle != nil:
+      closeGamepad(handle)
   input.gamepads.setLen(0)

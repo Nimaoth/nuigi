@@ -22,28 +22,21 @@ type
     body: string
     kind: FaqPostKind
     score: int
-    when defined(nimony):
-      parent: nil FaqPost
-    else:
-      parent: FaqPost
+    parent: FaqPost
     children: seq[FaqPost]
 
   FaqCursor = ref object of TreeCursor
     post: FaqPost
     parents: seq[FaqPost]
 
-var faqRoot: FaqPost
+
+var faqRoot: FaqPost = nil
 
 when defined(wasm):
   const faqMarkdown = staticRead("../../../docs/faq.md")
 
-when defined(nimony):
-  type NullableFaqPost = nil FaqPost
-else:
-  type NullableFaqPost = FaqPost
-
 proc addFaqPost(
-  parent: NullableFaqPost, key, body: string, kind: FaqPostKind,
+  parent: FaqPost, key, body: string, kind: FaqPostKind,
     score = 1): FaqPost =
   result = FaqPost(
     key: key,
@@ -55,7 +48,7 @@ proc addFaqPost(
   if parent != nil:
     parent.children.add(result)
 
-proc addParsedAnswer(question: NullableFaqPost, body: var string) =
+proc addParsedAnswer(question: FaqPost, body: var string) =
   if question != nil:
     let answer = body.strip()
     if answer.len > 0:
@@ -65,8 +58,8 @@ proc addParsedAnswer(question: NullableFaqPost, body: var string) =
 
 proc parseFaq(markdown: string): FaqPost =
   result = addFaqPost(nil, "faq-root", "FAQ", FaqTopic)
-  var topic: NullableFaqPost = nil
-  var question: NullableFaqPost = nil
+  var topic: FaqPost = nil
+  var question: FaqPost = nil
   var answer = ""
 
   for sourceLine in markdown.splitLines():
@@ -102,6 +95,12 @@ proc createFaq(): FaqPost =
 
 proc faqCursor(root: FaqPost): FaqCursor =
   FaqCursor(post: root, fieldName: root.body, path: @[])
+
+proc currentFaqRoot(): FaqPost =
+  assumeSyncBlock:
+    if faqRoot == nil:
+      faqRoot = createFaq()
+    return faqRoot
 
 method clone*(cursor: FaqCursor): TreeCursor {.gcsafe, raises: [].} =
   let copy = FaqCursor(
@@ -156,7 +155,7 @@ method exitChild*(cursor: FaqCursor): bool =
   if cursor.parents.len == 0:
     return false
   cursor.post = cursor.parents[^1]
-  cursor.parents.setLen(cursor.parents.len - 1)
+  discard cursor.parents.pop()
   cursor.path.setLen(cursor.path.len - 1)
   cursor.index = if cursor.path.len > 0: cursor.path[^1] else: 0
   cursor.fieldName = cursor.post.body
@@ -241,8 +240,7 @@ proc renderFaqRow(
 
 proc buildFaqTreeTableExample*(b: var UiBuilder) =
   let parent = b.currentNode
-  if faqRoot == nil:
-    faqRoot = createFaq()
+  let root = currentFaqRoot()
 
   b.layoutVertical:
     b.debugName("faq-tree-table-demo")
@@ -273,4 +271,4 @@ proc buildFaqTreeTableExample*(b: var UiBuilder) =
           6.0'f32 / faqBaseFontSize * b.defaultText.fontSize * b.fontScale
       options.hideRoot = true
       options.highlightHoveredRow = false
-      b.treeTable(faqCursor(faqRoot), options, renderFaqRow)
+      b.treeTable(faqCursor(root), options, renderFaqRow)

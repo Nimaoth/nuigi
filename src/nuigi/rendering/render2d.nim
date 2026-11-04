@@ -69,10 +69,10 @@ type
     vertices: int
     count: int
     texture: int
-    customTexture: nil GPUTexture
-    customSampler: nil GPUSampler
+    customTexture: GPUTexture
+    customSampler: GPUSampler
     scissorRect: Rect
-    rawData: nil ptr Render2DVertex
+    rawData: ptr Render2DVertex
     materialId: MaterialId
     materialUniform: ArrayView[uint8]
 
@@ -109,7 +109,7 @@ type
 
     activeTextures: array[3, GPUTextureSamplerBinding]
 
-    renderPass: nil GPURenderPass
+    renderPass: GPURenderPass
 
     commands: seq[Command]
     textureIndices: seq[(int, int)]
@@ -124,6 +124,49 @@ type
     sample_count*: GPUSampleCount
     fontRender*: ptr FontRender
     shaderDirectory: string
+
+proc defaultRender2D*(): Render2D =
+    let nullTexture: GPUTexture = nil
+    let nullSampler: GPUSampler = nil
+    result = Render2D(
+      device: nil,
+      commandBuffer: nil,
+      vertexShader: nil,
+      fragmentShader: nil,
+      pipeline: nil,
+      whiteTexture: nullTexture,
+      whiteSampler: nullSampler,
+      nearestSampler: nullSampler,
+      vertexBuffer: nil,
+      textureIndexBuffer: nil,
+      transferBuffer: nil,
+      textureIndexTransferBuffer: nil,
+      target: nullTexture,
+      targetMsaa: nullTexture,
+      previousTarget: nullTexture,
+      targetTexture: nil,
+      fontTexture: nullTexture,
+      fontTextureSampler: nullSampler,
+      fontAtlasTransferBuffer: nil,
+      activeTextures: [
+        GPUTextureSamplerBinding(texture: nullTexture, sampler: nullSampler),
+        GPUTextureSamplerBinding(texture: nullTexture, sampler: nullSampler),
+        GPUTextureSamplerBinding(texture: nullTexture, sampler: nullSampler),
+      ],
+      fontRender: nil,
+      sample_count: GPU_SAMPLECOUNT_1,
+    )
+
+proc emptyRender2DMaterial(): Render2DMaterial =
+  Render2DMaterial(
+    fragmentShader: nil,
+    pipeline: nil,
+  )
+
+proc copyRenderCommands(commands: seq[Command]): seq[Command] =
+  result = @[]
+  for command in commands:
+    result.add command
 
 proc deinitRender2D*(r: var Render2D)
 
@@ -156,7 +199,7 @@ proc releaseRenderTarget(r: var Render2D) =
   r.targetHeight = 0
   r.previousTargetReady = false
 
-proc ensureRenderTargetTexture(r: var Render2D, renderer: Renderer): nil Texture =
+proc ensureRenderTargetTexture(r: var Render2D, renderer: Renderer): Texture =
   if renderer == nil or r.target == nil or r.targetWidth == 0 or r.targetHeight == 0:
     return nil
 
@@ -180,7 +223,7 @@ proc ensureRenderTargetTexture(r: var Render2D, renderer: Renderer): nil Texture
     discard r.targetTexture.setTextureBlendMode(BLENDMODE_BLEND)
   r.targetTexture
 
-proc ensureRenderTarget(r: var Render2D, renderer: nil Renderer, width, height: uint32, targetFormat: GPUTextureFormat,
+proc ensureRenderTarget(r: var Render2D, renderer: Renderer, width, height: uint32, targetFormat: GPUTextureFormat,
     sample_count: GPUSampleCount
   ): bool =
   if r.device == nil or width == 0 or height == 0:
@@ -770,7 +813,7 @@ proc clearBatch*(r: var Render2D) =
   r.textureIndices.setLen(0)
   r.vertexIndex = 0
 
-proc beginRender*(r: var Render2D, renderer: nil Renderer, targetWidth, targetHeight: uint32, targetFormat: GPUTextureFormat = render2DTargetFormat,
+proc beginRender*(r: var Render2D, renderer: Renderer, targetWidth, targetHeight: uint32, targetFormat: GPUTextureFormat = render2DTargetFormat,
     sample_count: GPUSampleCount = GPU_SAMPLECOUNT_1): bool =
   prof("Render2D.beginRender")
   if r.device == nil or targetWidth == 0 or targetHeight == 0:
@@ -982,7 +1025,7 @@ proc uploadFontAtlasGPU*(r: var Render2D): bool =
   r.fontRender[].clearFontAtlasDirty()
   true
 
-proc addCommand(r: var Render2D, start, count: int, textureIndex: int, texture: nil GPUTexture = nil, sampler: nil GPUSampler = nil, rawData: nil ptr Render2DVertex = nil, materialId: MaterialId = 0, materialUniform: ArrayView[uint8] = default(ArrayView[uint8])) =
+proc addCommand(r: var Render2D, start, count: int, textureIndex: int, texture: GPUTexture = nil, sampler: GPUSampler = nil, rawData: ptr Render2DVertex = nil, materialId: MaterialId = 0, materialUniform: ArrayView[uint8] = default(ArrayView[uint8])) =
   if r.commands.len > 0:
     let last = r.commands[^1].addr
     let requireBindingChange = ((texture != nil and last.customTexture != nil and
@@ -1019,7 +1062,7 @@ proc renderQuad*(
   angle: float = 0,
   pivotX: float = 0.5,
   pivotY: float = 0.5,
-  texture: nil GPUTexture = nil,
+  texture: GPUTexture = nil,
   samplerMode: Render2DSamplerMode = Render2DSamplerMode.Linear,
   uv0: Vec2 = Vec2(x: 0, y: 0),
   uv1: Vec2 = Vec2(x: 1, y: 1),
@@ -1029,7 +1072,7 @@ proc renderQuad*(
 
   var
     textureIndex: int = 0
-    texture2: nil GPUTexture = nil
+    texture2: GPUTexture = nil
   if texture == nil:
     textureIndex = 0
   elif cast[uint64](texture) == 1:
@@ -1073,7 +1116,7 @@ proc renderQuad*(
   r.queuedVertices[oldLen + 4] = Render2DVertex(x: rx2, y: ry2, u: uv1.x, v: uv1.y, r: color.r, g: color.g, b: color.b, a: color.a)
   r.queuedVertices[oldLen + 5] = Render2DVertex(x: rx3, y: ry3, u: uv0.x, v: uv1.y, r: color.r, g: color.g, b: color.b, a: color.a)
 
-  var customSampler: nil GPUSampler = nil
+  var customSampler: GPUSampler = nil
   if texture2 != nil:
     customSampler = case samplerMode
       of Render2DSamplerMode.Linear: r.whiteSampler
@@ -1189,7 +1232,7 @@ proc drawLines*(
 proc drawVertices*(
   r: var Render2D,
   vertices: openArray[Render2DVertex],
-  texture: nil GPUTexture = nil,
+  texture: GPUTexture = nil,
   samplerMode: Render2DSamplerMode = Render2DSamplerMode.Linear,
   materialId: MaterialId = 0,
   materialUniform: ArrayView[uint8] = default(ArrayView[uint8]),
@@ -1200,7 +1243,7 @@ proc drawVertices*(
     return false
   var
     textureIndex: int = 0
-    texture2: nil GPUTexture = nil
+    texture2: GPUTexture = nil
   if texture == nil:
     textureIndex = 0
   elif cast[uint64](texture) == 1:
@@ -1228,7 +1271,7 @@ proc restartRenderpass*(r: var Render2D) =
     r.renderPass = nil
 
   var target = r.target
-  var resolveTarget: nil GPUTexture = nil
+  var resolveTarget: GPUTexture = nil
   var storeOp = GPU_STOREOP_STORE
   if r.sample_count != GPU_SAMPLECOUNT_1:
     target = r.targetMsaa
@@ -1403,7 +1446,8 @@ proc flush(r: var Render2D): bool =
       uploadToGPUBuffer(copyPass, src.addr, dst.addr, true)
     endGPUCopyPass(copyPass)
 
-  for c in r.commands:
+  let commands = copyRenderCommands(r.commands)
+  for c in commands:
     case c.kind
     of cClear:
       prof("Render2D.clear")
@@ -1437,7 +1481,7 @@ proc flush(r: var Render2D): bool =
         continue
 
       if r.lastBoundMaterial != c.materialId:
-        let mat = r.materials.getOrDefault(c.materialId, Render2DMaterial())
+        let mat = r.materials.getOrDefault(c.materialId, emptyRender2DMaterial())
         let desiredPipeline = if c.materialId == r.defaultMaterialId:
             r.pipeline
           elif mat.pipeline != nil:
@@ -1484,7 +1528,7 @@ proc presentToSwapchain*(r: var Render2D, window: Window): bool {.discardable.} 
   let commandBuffer = r.device.acquireGPUCommandBuffer()
   if commandBuffer == nil:
     return false
-  var swapchainTexture: nil GPUTexture = nil
+  var swapchainTexture: GPUTexture = nil
   var swapchainWidth: uint32 = 0
   var swapchainHeight: uint32 = 0
   if not commandBuffer.waitAndAcquireGPUSwapchainTexture(window, swapchainTexture, swapchainWidth, swapchainHeight):

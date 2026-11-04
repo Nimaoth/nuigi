@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 ## Renderer-independent UI geometry and render-command definitions.
 ##
 ## Provides colors, vertices, affine transforms, rounded-corner and border
@@ -163,7 +166,7 @@ func mixColor(a, b: UiColor, t: float32): UiColor {.inline.} =
 proc cornerSegments(radius: float32): int {.inline.} =
   if radius > 0.0'f32: clamp(radius.int, 1, 50) else: 1
 
-proc writeRoundedBoundary(points: ptr UncheckedArray[Vec2], colors: nil ptr UncheckedArray[UiColor],
+proc writeRoundedBoundary(points: ptr UncheckedArray[Vec2], colors: ptr UncheckedArray[UiColor],
     pos, size: Vec2, radii: UiCornerRadii, segments: array[4, int],
     sideColors: UiBorderColors) =
   let x = pos.x
@@ -193,7 +196,7 @@ proc writeRoundedBoundary(points: ptr UncheckedArray[Vec2], colors: nil ptr Unch
       inc pointIndex
 
 proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
-  radii: UiCornerRadii, antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+  radii: UiCornerRadii, antialiasMeshWidth = 0.0'f32): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   ## Generate a filled rectangle with independently rounded corners.
   if arena == nil:
     return (nil, 0)
@@ -214,10 +217,10 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
   let boundaryCount = segments[0] + segments[1] + segments[2] + segments[3] + 4
   let aaRing = aaWidth > 0.0'f32
   let vertexCount = boundaryCount * 3 + (if aaRing: boundaryCount * 6 else: 0)
-  let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+  let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
   let points = cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   let outerPoints = if aaRing:
-    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   if data == nil or points == nil or (aaRing and outerPoints == nil):
@@ -263,7 +266,7 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
   (data, vertexCount)
 
 proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
-    radius: float32, antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+    radius: float32, antialiasMeshWidth = 0.0'f32): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   if radius == 0 and antialiasMeshWidth <= 0.0'f32:
     if arena == nil:
       return (nil, 0)
@@ -273,7 +276,7 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
     if w <= 0.0'f32 or h <= 0.0'f32:
       return (nil, 0)
     const vertexCount = 6
-    let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+    let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
     if data == nil:
       return (nil, 0)
     let x0 = pos.x
@@ -293,7 +296,7 @@ proc buildRectFillVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
 
 proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
     colors: UiBorderColors, radii: UiCornerRadii,
-  widths: UiBorderWidths, antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+  widths: UiBorderWidths, antialiasMeshWidth = 0.0'f32): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   ## Generate a rectangle border with per-side widths/colors and per-corner radii.
   if arena == nil:
     return (nil, 0)
@@ -339,16 +342,16 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
   let vertexCount = boundaryCount * 6 +
     (if hasAaRing: boundaryCount * 6 else: 0) +
     (if innerAaRing: boundaryCount * 6 else: 0)
-  let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+  let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
   let outer = cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   let inner = cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   let pointColors = cast[ptr UncheckedArray[UiColor]](arena[].alloc(boundaryCount * sizeof(UiColor)))
   let outerAa = if hasAaRing:
-    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   let innerAa = if innerAaRing:
-    cast[nil ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
+    cast[ptr UncheckedArray[Vec2]](arena[].alloc(boundaryCount * sizeof(Vec2)))
   else:
     nil
   if data == nil or outer == nil or inner == nil or pointColors == nil or
@@ -425,7 +428,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2,
   (data, vertexCount)
 
 proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
-    radius, thickness: float32, antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+    radius, thickness: float32, antialiasMeshWidth = 0.0'f32): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   if radius == 0.0'f32 and thickness > 0.0'f32 and antialiasMeshWidth <= 0.0'f32:
     if arena == nil:
       return (nil, 0)
@@ -445,7 +448,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
     let innerY2 = y1 - t
     if innerX2 <= innerX or innerY2 <= innerY:
       const fillCount = 6
-      let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(fillCount * sizeof(UiVertex)))
+      let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(fillCount * sizeof(UiVertex)))
       if data == nil:
         return (nil, 0)
       data[0] = UiVertex(pos: vec2(x0, y0), color: color)
@@ -456,7 +459,7 @@ proc buildRectStrokeVertices*(arena: ptr Arena, pos, size: Vec2, color: UiColor,
       data[5] = UiVertex(pos: vec2(x0, y1), color: color)
       return (data, fillCount)
     const vertexCount = 24
-    let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+    let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
     if data == nil:
       return (nil, 0)
     var i = 0
@@ -504,7 +507,7 @@ func offsetChevronPolygon(points: array[6, Vec2], distance: float32): array[6, V
 
 proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
   color: UiColor, thickness: float32 = -1.0'f32, angle: float32 = float32(PI) * 0.5'f32,
-    antialiasMeshWidth = 0.0'f32): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+    antialiasMeshWidth = 0.0'f32): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   ## Build a thick "V" / ">" chevron symbol.
   ##
   ## `pos`/`size` define the bounding box of the symbol (top-left + extent).
@@ -615,7 +618,7 @@ proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
   let innerPolygon = if hasAaRing: polygon.offsetChevronPolygon(-aaHalfWidth) else: polygon
   let outerPolygon = if hasAaRing: polygon.offsetChevronPolygon(aaHalfWidth) else: polygon
   let vertexCount = 12 + (if hasAaRing: polygon.len * 6 else: 0)
-  let data = cast[nil ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
+  let data = cast[ptr UncheckedArray[UiVertex]](arena[].alloc(vertexCount * sizeof(UiVertex)))
   if data == nil:
     return (nil, 0)
   var i = 0
@@ -636,7 +639,7 @@ proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2, direction: Vec2,
   return (data, vertexCount)
 
 proc buildChevronVertices*(arena: ptr Arena, pos, size: Vec2,
-    direction: Vec2): tuple[data: nil ptr UncheckedArray[UiVertex], count: int] =
+    direction: Vec2): tuple[data: ptr UncheckedArray[UiVertex], count: int] =
   ## Convenience overload with default white color and auto thickness.
   buildChevronVertices(arena, pos, size, direction, UiColor(r: 1.0'f32, g: 1.0'f32, b: 1.0'f32, a: 1.0'f32), -1.0'f32)
 

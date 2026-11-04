@@ -7,8 +7,11 @@
 ## Compat shims that let a module compile under both Nim and Nimony.
 ## Must be `include`d, not `import`ed, because Nim does not export
 ## custom pragmas across module boundaries. Besides exception pragmas, this
-## file centralizes compiler-specific logging, path, and raw string-storage
-## helpers so call sites can remain portable.
+## file enables classic Nim nilability under Nimony and centralizes
+## compiler-specific logging, path, and raw string-storage helpers.
+
+when defined(nimony):
+  {.feature: "lenientnils".}
 
 {.push hint[DuplicateModuleImport]: off.}
 {.push warning[UnusedImport]: off.}
