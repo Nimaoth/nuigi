@@ -2993,6 +2993,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: nil UiBuildTextMes
     defaultStyle: UiStyle(),
     defaultAnchor: UiNodeAnchor(),
     defaultTransform: UiNodeTransform(scale: vec2(1.0'f32, 1.0'f32), pivot: vec2(0.5'f32, 0.5'f32)),
+    measureText: measureText,
     sentinelNode: sentinelNode,
     currentNode: cast[ptr UiNode](sentinelNode),
     lastNode: cast[ptr UiNode](sentinelNode),
