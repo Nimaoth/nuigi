@@ -52,6 +52,8 @@ proc llvmBinDir(): string =
   else:
     return ""
 var passthroughArgs = newSeq[string]()
+var nimCompilerPath = "nim"
+var useNimIc = false
 
 var wasm = false
 var gEmscriptenEnv: Table[string, string] = initTable[string, string]()
@@ -62,8 +64,17 @@ type NimCompiler = enum
   Nim2
   Nim2Ic
   Nimony
+  NimonyN
   NimonyLlvm
   Nlvm
+
+proc nimCommand(args: string): string =
+  let commandArgs =
+    if useNimIc and args.startsWith("c "):
+      "ic " & args[2 .. ^1]
+    else:
+      args
+  quoteShell(nimCompilerPath) & " " & commandArgs
 
 proc printCommandTiming(startedAt: float) =
   echo "=== command finished in ", formatFloat(epochTime() - startedAt, ffDecimal, 3), " s ==="
@@ -306,13 +317,17 @@ proc buildHarfbuzz() =
       gShellEnv["PATH"] = llvmBin & ";" & basePath
 
     shell &"{clangExe} -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/harfbuzz.dll ./vendor/harfbuzz/src/harfbuzz.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz.lib"
+    shell &"{clangExe} -shared -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -L./build -lharfbuzz -o build/harfbuzz-subset.dll ./vendor/harfbuzz/src/harfbuzz-subset.cc -fuse-ld=lld-link -Xlinker /IMPLIB:build/harfbuzz-subset.lib"
 
     gShellEnv = prevEnv
     copyFile &"build/harfbuzz.dll", "./bin/harfbuzz.dll"
+    copyFile &"build/harfbuzz-subset.dll", "./bin/harfbuzz-subset.dll"
   else:
     requireProgram("clang++", "On Ubuntu: sudo apt install clang")
     shell "clang++ -shared -fPIC -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -o build/libharfbuzz.so ./vendor/harfbuzz/src/harfbuzz.cc"
+    shell "clang++ -shared -fPIC -std=c++17 -O3 -g -DHB_DLL_EXPORT -I./vendor/harfbuzz/src -L./build -lharfbuzz -Wl,-rpath,\\$ORIGIN -o build/libharfbuzz-subset.so ./vendor/harfbuzz/src/harfbuzz-subset.cc"
     copyFile "build/libharfbuzz.so", "bin/libharfbuzz.so"
+    copyFile "build/libharfbuzz-subset.so", "bin/libharfbuzz-subset.so"
 
 proc buildFribidi() =
   echo "buildFribidi"
@@ -357,11 +372,14 @@ proc buildFribidi() =
 
 proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
   let passthroughArgs = passthroughArgs.join(" ")
+  let useIc = compiler == Nim2Ic or (compiler == Nim2 and useNimIc)
   createDir("build")
   createDir("bin")
   let outFlag =
     if wasm: "-o:build/nuigi-demo.js"
-    elif staticDependencies: "-o:bin/demo-static.exe"
+    elif staticDependencies:
+      if useNimIc: "-o:bin/demo-static-ic.exe" else: "-o:bin/demo-static.exe"
+    elif useIc: "-o:bin/demo-ic.exe"
     else: "-o:bin/demo.exe"
   if wasm:
     if gEmscriptenEnv.len == 0:
@@ -379,9 +397,9 @@ proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
       "--passL:-Lbuild"
     else:
       "--passL:-Lbuild --passL:'-Wl,-rpath,\\$ORIGIN'"
-  let staticSdlSystemLink =
+  let sdlSystemLink =
     when defined(windows):
-      if staticDependencies:
+      if staticDependencies or compiler == NimonyLlvm:
         "--passL:-lkernel32 --passL:-luser32 --passL:-lgdi32 --passL:-lwinmm --passL:-limm32 --passL:-lole32 --passL:-loleaut32 --passL:-lversion --passL:-luuid --passL:-ladvapi32 --passL:-lsetupapi --passL:-lshell32 --passL:-lhid --passL:-lmincore --passL:-ldinput8"
       else:
         ""
@@ -390,19 +408,25 @@ proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
   let noHarfbuzz = if staticDependencies: "-d:nuiNoHarfbuzz" else: ""
   case compiler
   of Nim2:
-    shell &"nim c {outFlag} --cc:clang --lineDir:off -d:freetypeStatic -d:sdl3 {noHarfbuzz} {sdlLink} {staticSdlSystemLink} {passthroughArgs} examples/demo.nim"
+    shell nimCommand(&"c {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nim {noHarfbuzz} {sdlLink} {sdlSystemLink} {passthroughArgs} examples/demo.nim")
   of Nim2Ic:
-    shell &"nim ic {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} --nimcache:nimcacheic examples/demo.nim"
+    shell nimCommand(&"ic {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nim-ic {noHarfbuzz} {sdlLink} {sdlSystemLink} {passthroughArgs} examples/demo.nim")
   of Nimony:
     when defined(windows):
       buildFreetypeStaticNimony()
-      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 --passL:-Lbuild/freetype_nimony_static {sdlLink} {passthroughArgs} examples/demo.nim"
+      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nimony --passL:-Lbuild/freetype_nimony_static {sdlLink} {passthroughArgs} examples/demo.nim"
     else:
-      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
+      shell &"nimony c -o:bin/demo-nimony.exe --cc:gcc -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nimony {sdlLink} {passthroughArgs} examples/demo.nim"
+  of NimonyN:
+    when defined(windows):
+      buildFreetypeStaticNimony()
+      shell &"nimony n -o:bin/demo-nimony-n.exe --cc:gcc -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nimony-n --passL:-Lbuild/freetype_nimony_static {sdlLink} {passthroughArgs} examples/demo.nim"
+    else:
+      shell &"nimony n -o:bin/demo-nimony-n.exe --cc:gcc -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nimony-n {sdlLink} {passthroughArgs} examples/demo.nim"
   of NimonyLlvm:
-    shell &"nimony l -d:llvm {outFlag} -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nimony l -o:bin/demo-nimony-llvm.exe -d:llvm -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nimony-llvm {sdlLink} {sdlSystemLink} {passthroughArgs} examples/demo.nim"
   of Nlvm:
-    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} -d:sdl3 {sdlLink} {passthroughArgs} examples/demo.nim"
+    shell &"nlvm c --debuginfo:on --debugger:native {outFlag} -d:sdl3 --nimcache:build/nimcache-nlvm {sdlLink} {passthroughArgs} examples/demo.nim"
 
   if wasm:
     createDir("build")
@@ -414,11 +438,13 @@ proc buildTerminalDemo(compiler: NimCompiler) =
   echo "buildTerminalDemo"
   case compiler
   of Nim2:
-    shell &"nim c -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim"
+    shell nimCommand(&"c -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim")
   of Nim2Ic:
-    shell &"nim ic -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim"
+    shell nimCommand(&"ic -o:bin/terminal-demo.exe --cc:clang --path:src {passthroughArgs} examples/terminal_demo.nim")
   of Nimony:
     shell &"nimony c -o:bin/terminal-demo-nimony.exe --cc:gcc --path:src {passthroughArgs} examples/terminal_demo.nim"
+  of NimonyN:
+    shell &"nimony n -o:bin/terminal-demo-nimony-n.exe --cc:gcc --path:src {passthroughArgs} examples/terminal_demo.nim"
   of NimonyLlvm:
     shell &"nimony l -d:llvm -o:bin/terminal-demo-nimony.exe --path:src {passthroughArgs} examples/terminal_demo.nim"
   of Nlvm:
@@ -429,11 +455,11 @@ proc buildTerminalTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/terminal-unicode-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_unicode_test.nim",
+      nimCommand(&"c -r -o:bin/terminal-unicode-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_unicode_test.nim"),
       "terminal-unicode-test-nim2"
     )
     shellCapture(
-      &"nim c -r -o:bin/terminal-backend-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_backend_test.nim",
+      nimCommand(&"c -r -o:bin/terminal-backend-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/terminal_backend_test.nim"),
       "terminal-backend-test-nim2"
     )
   of Nimony:
@@ -453,12 +479,17 @@ proc buildCoreTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+      nimCommand(&"c -r -o:bin/ui-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim"),
       "ui-test-nim2"
     )
   of Nimony:
     shellCapture(
       &"nimony c -r -o:bin/ui-test-nimony.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
+      "ui-test-nimony"
+    )
+  of NimonyN:
+    shellCapture(
+      &"nimony n -r -o:bin/ui-test-nimony-n.exe --path:src {passthroughArgs} tests/ui_basic_flags_layout_test.nim",
       "ui-test-nimony"
     )
   else:
@@ -469,24 +500,24 @@ proc buildUiTestNim2() =
   let passthroughArgs = passthroughArgs.join(" ")
   createDir("build")
   shellCapture(
-    &"nim c -r -o:bin/ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
+    nimCommand(&"c -r -o:bin/ui-mesh-style-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_mesh_style_test.nim"),
     "ui-mesh-style-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim",
+    nimCommand(&"c -r -o:bin/ui-windows-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_windows_test.nim"),
     "ui-windows-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
+    nimCommand(&"c -r -o:bin/ui-dynamic-virtualist-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim"),
     "ui-dynamic-virtualist-test-nim2"
   )
   buildCoreTest(Nim2)
   shellCapture(
-    &"nim c -r -o:bin/ui-tree-table-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
+    nimCommand(&"c -r -o:bin/ui-tree-table-seek-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_seek_test.nim"),
     "ui-tree-table-seek-test-nim2"
   )
   shellCapture(
-    &"nim c -r -o:bin/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
+    nimCommand(&"c -r -o:bin/ui-bench-nim.exe --cc:clang --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim"),
     "ui-bench-nim2"
   )
 
@@ -496,12 +527,18 @@ proc buildFontWrappingTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/font-wrapping-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
+      nimCommand(&"c -r -o:bin/font-wrapping-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim"),
       "font-wrapping-test-nim2"
     )
   of Nimony:
+    let freetypeLink =
+      when defined(windows):
+        buildFreetypeStaticNimony()
+        "--passL:-Lbuild/freetype_nimony_static --passL:-Lbuild"
+      else:
+        "--passL:-Lbuild"
     shellCapture(
-      &"nimony c -r -o:bin/font-wrapping-test-nimony.exe --d:nuiNoHarfbuzz --d:freetypeStatic --passL:-Lbuild --path:src {passthroughArgs} tests/font_wrapping_test.nim",
+      &"nimony c -r -o:bin/font-wrapping-test-nimony.exe --d:nuiNoHarfbuzz --d:freetypeStatic {freetypeLink} --path:src {passthroughArgs} tests/font_wrapping_test.nim",
       "font-wrapping-test-nimony"
     )
   else:
@@ -512,7 +549,7 @@ proc buildTextFieldTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/textfield-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/textfield_test.nim",
+      nimCommand(&"c -r -o:bin/textfield-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/textfield_test.nim"),
       "textfield-test-nim2"
     )
   of Nimony:
@@ -528,7 +565,7 @@ proc buildFocusTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/ui-focus-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_focus_test.nim",
+      nimCommand(&"c -r -o:bin/ui-focus-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/ui_focus_test.nim"),
       "ui-focus-test-nim2"
     )
   of Nimony:
@@ -565,6 +602,32 @@ proc buildUiTestNimony() =
     "ui-bench-nimony"
   )
 
+proc buildUiTestNimonyN() =
+  echo "buildUiTestNimonyN"
+  let passthroughArgs = passthroughArgs.join(" ")
+  createDir("build")
+  shellCapture(
+    &"nimony n -r -o:bin/ui-mesh-style-test-nimony.exe --path:src {passthroughArgs} tests/ui_mesh_style_test.nim",
+    "ui-mesh-style-test-nimony"
+  )
+  shellCapture(
+    &"nimony n -r -o:bin/ui-windows-test-nimony.exe --path:src {passthroughArgs} tests/ui_windows_test.nim",
+    "ui-windows-test-nimony"
+  )
+  shellCapture(
+    &"nimony n -r -o:bin/ui-dynamic-virtualist-test-nimony.exe --path:src {passthroughArgs} tests/ui_dynamic_virtualist_test.nim",
+    "ui-dynamic-virtualist-test-nimony"
+  )
+  buildCoreTest(Nimony)
+  shellCapture(
+    &"nimony n -r -o:bin/ui-tree-table-seek-test-nimony.exe --path:src {passthroughArgs} tests/tree_table_seek_test.nim",
+    "ui-tree-table-seek-test-nimony"
+  )
+  shellCapture(
+    &"nimony n -r -o:bin/ui-bench-nimony.exe --d:release --path:src {passthroughArgs} tests/ui_node_creation_bench.nim",
+    "ui-bench-nimony"
+  )
+
 proc buildShader() =
   when defined(windows):
     requireProgram("dxc.exe", "Install the DirectX Shader Compiler and add it to PATH")
@@ -588,6 +651,8 @@ proc buildUiTest(compiler: NimCompiler) =
     echo "not implemented"
   of Nimony:
     buildUiTestNimony()
+  of NimonyN:
+    buildUiTestNimonyN()
   of NimonyLlvm:
     echo "not implemented"
   of Nlvm:
@@ -598,7 +663,7 @@ proc buildTreeTableRefreshTest(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/tree-table-refresh-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_refresh_test.nim",
+      nimCommand(&"c -r -o:bin/tree-table-refresh-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/tree_table_refresh_test.nim"),
       "tree-table-refresh-test-nim2"
     )
   of Nimony:
@@ -614,7 +679,7 @@ proc buildTreeTableRefreshBench(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/tree-table-refresh-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/tree_table_refresh_bench.nim",
+      nimCommand(&"c -r -o:bin/tree-table-refresh-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/tree_table_refresh_bench.nim"),
       "tree-table-refresh-bench-nim2"
     )
   of Nimony:
@@ -630,7 +695,7 @@ proc buildFileSystemCursorBench(compiler: NimCompiler) =
   case compiler
   of Nim2:
     shellCapture(
-      &"nim c -r -o:bin/file-system-cursor-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/file_system_cursor_bench.nim",
+      nimCommand(&"c -r -o:bin/file-system-cursor-bench-nim.exe --cc:clang -d:release --path:src {passthroughArgs} tests/file_system_cursor_bench.nim"),
       "file-system-cursor-bench-nim2"
     )
   of Nimony:
@@ -663,6 +728,8 @@ proc main() =
         compiler = Nim2Ic
       of "nimony":
         compiler = Nimony
+      of "nimonyn":
+        compiler = NimonyN
       of "nimony-llvm":
         compiler = NimonyLlvm
       of "nlvm":
@@ -670,6 +737,15 @@ proc main() =
 
       of "wasm":
         wasm = true
+
+      of "nim-path":
+        if val.len == 0:
+          echo "Option --nim-path requires a compiler executable path"
+          quit(1)
+        nimCompilerPath = val
+
+      of "ic":
+        useNimIc = true
 
       of "debug":
         debug = true
