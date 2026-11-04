@@ -127,15 +127,15 @@ jobs:
           path: |
             nimony/bin
             nimony/nimcache2
-            nimony/hastur.exe
+            nimony/bin/hastur.exe
           key: ${{ runner.os }}-nimony-90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Build Nimony
         if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }}
         working-directory: nimony
         run: |
-          nim c -o:hastur.exe .\src\hastur.nim
-          .\hastur.exe --release build all
+          nim c -o:bin/hastur.exe ./src/hastur/hastur.nim
+          ./bin/hastur.exe --release build all
 
       - name: Add Nimony to PATH
         run: Add-Content $env:GITHUB_PATH "${{ github.workspace }}\nimony\bin"
