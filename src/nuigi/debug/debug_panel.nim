@@ -659,8 +659,10 @@ proc debugPanel*(b: var UiBuilder, debugPanel: var DebugPanel): var UiBuilder {.
           let targetNodeIdx = b.currentNodeIndex(debugPanel.rowHoverTarget)
           if targetNodeIdx >= 0 and targetNodeIdx < cutoff:
             let targetItemIdx = dfsIndexOf(b.nodes, cutoff, targetNodeIdx)
-            if targetItemIdx >= 0 and not debugPanel.rowHoverFromTree and debugPanel.treeListStorage != nil:
-              debugPanel.treeListStorage.centerItem(targetItemIdx)
+            let treeListStorage = debugPanel.treeListStorage
+            if targetItemIdx >= 0 and not debugPanel.rowHoverFromTree and
+                treeListStorage != nil:
+              treeListStorage.centerItem(targetItemIdx)
         let rowHeight = b.themeTextStyle(UiStyleIndexDefaultText).fontSize * b.fontScale + 6
         b.layoutVertical("debug-panel-list-layout"):
           discard b.fill()

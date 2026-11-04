@@ -31,7 +31,10 @@ proc getOrCreateTextFieldStorage*(b: var UiBuilder, node: ptr UiNode): TextField
   return storage
 
 proc isWhitespaceAt(text: string, position: int): bool =
-  position >= 0 and position < text.len and text.runeAt(position).isWhiteSpace
+  if position >= 0 and position < text.len:
+    text.runeAt(position).isWhiteSpace
+  else:
+    false
 
 proc previousWordBoundary(text: string, position: int): int =
   result = text.graphemeBoundaryAtOrBefore(position)
@@ -59,12 +62,15 @@ type TextFieldCharacterClass = enum
   CharacterOther
 
 proc characterClassAt(text: string, position: int): TextFieldCharacterClass =
-  let rune = text.runeAt(position)
-  if rune.isWhiteSpace:
-    CharacterWhitespace
-  elif rune.isAlpha or (rune.int >= ord('0') and rune.int <= ord('9')) or
-      rune.int == ord('_'):
-    CharacterWord
+  if position >= 0 and position < text.len:
+    let rune = text.runeAt(position)
+    if rune.isWhiteSpace:
+      CharacterWhitespace
+    elif rune.isAlpha or (rune.int >= ord('0') and rune.int <= ord('9')) or
+        rune.int == ord('_'):
+      CharacterWord
+    else:
+      CharacterOther
   else:
     CharacterOther
 

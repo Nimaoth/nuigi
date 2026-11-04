@@ -77,7 +77,7 @@ proc applyLocation(c: FileSystemCursor, location: FileSystemCursorLocation) =
   c.index = location.index
 
 proc cursorAt(c: FileSystemCursor, location: FileSystemCursorLocation): FileSystemCursor =
-  result = FileSystemCursor(cache: c.cache)
+  result = FileSystemCursor(cache: c.cache, location: location)
   result.applyLocation(location)
 
 proc copyPathPrefix(path: seq[int], count: int): seq[int] =
@@ -314,14 +314,15 @@ method exitChild*(c: FileSystemCursor): bool =
 proc fileSystemCursor*(root: string = os.getCurrentDir(), cache: nil FileSystemCache = nil): FileSystemCursor =
   let name = extractFilename(root)
   let cursorCache = if cache != nil: cast[FileSystemCache](cache) else: newFileSystemCache()
-  result = FileSystemCursor(cache: cursorCache)
-  result.applyLocation(FileSystemCursorLocation(
+  let location = FileSystemCursorLocation(
     fullPath: root,
     parentPath: root.parentDir,
     fieldName: if name.len > 0: name else: ".",
     path: @[],
     index: 0,
-    kind: entryKind(cursorCache, root)))
+    kind: entryKind(cursorCache, root))
+  result = FileSystemCursor(cache: cursorCache, location: location)
+  result.applyLocation(location)
 
 proc canDropOn*(dragged, target: FileSystemCursor): bool =
   if dragged == nil or target == nil or target.kind != Folder:

@@ -6,6 +6,8 @@
 
 import nuigi, nuigi/layout/flex, nuigi/core/[arena, array_view, vecmath], nuigi/debug/profiler
 
+include nuigi/util/compat2
+
 type
   UiGridTrackKind* = enum
     GridTrackAuto
@@ -75,10 +77,20 @@ var defaultGridChildStorage* = UiNodeGridChild(
 )
 
 proc defaultGridParent*(): UiNodeGridParent =
-  defaultGridParentStorage
+  assumeSyncBlock:
+    return defaultGridParentStorage
 
 proc defaultGridChild*(): UiNodeGridChild =
-  defaultGridChildStorage
+  assumeSyncBlock:
+    return defaultGridChildStorage
+
+proc defaultGridParentPointer(): ptr UiNodeGridParent {.inline.} =
+  assumeSyncBlock:
+    result = addr(defaultGridParentStorage)
+
+proc defaultGridChildPointer(): ptr UiNodeGridChild {.inline.} =
+  assumeSyncBlock:
+    result = addr(defaultGridChildStorage)
 
 proc ensureNodeGridParent*(b: var UiBuilder, node: ptr UiNode): ptr UiNodeGridParent {.inline.} =
   let layout = b.ensureNodeCustomLayout(node).addr
@@ -104,9 +116,9 @@ proc nodeGridParent*(b: UiBuilder, idx: int): ptr UiNodeGridParent {.inline.} =
     if layout.userData != 0:
       cast[ptr UiNodeGridParent](layout.userData)
     else:
-      addr(defaultGridParentStorage)
+      defaultGridParentPointer()
   else:
-    addr(defaultGridParentStorage)
+    defaultGridParentPointer()
 
 proc nodeGridChild*(b: UiBuilder, idx: int): ptr UiNodeGridChild {.inline.} =
   let n = b.frame.nodes[idx]
@@ -116,9 +128,9 @@ proc nodeGridChild*(b: UiBuilder, idx: int): ptr UiNodeGridChild {.inline.} =
     if layout.userData != 0:
       cast[ptr UiNodeGridChild](layout.userData)
     else:
-      addr(defaultGridChildStorage)
+      defaultGridChildPointer()
   else:
-    addr(defaultGridChildStorage)
+    defaultGridChildPointer()
 
 proc nodeGridParent*(b: UiBuilder, node: ptr UiNode): ptr UiNodeGridParent {.inline.} =
   let slot = int(node.customLayoutIndex)
@@ -127,9 +139,9 @@ proc nodeGridParent*(b: UiBuilder, node: ptr UiNode): ptr UiNodeGridParent {.inl
     if layout.userData != 0:
       cast[ptr UiNodeGridParent](layout.userData)
     else:
-      addr(defaultGridParentStorage)
+      defaultGridParentPointer()
   else:
-    addr(defaultGridParentStorage)
+    defaultGridParentPointer()
 
 proc nodeGridChild*(b: UiBuilder, node: ptr UiNode): ptr UiNodeGridChild {.inline.} =
   let slot = int(node.customChildLayoutIndex)
@@ -138,9 +150,9 @@ proc nodeGridChild*(b: UiBuilder, node: ptr UiNode): ptr UiNodeGridChild {.inlin
     if layout.userData != 0:
       cast[ptr UiNodeGridChild](layout.userData)
     else:
-      addr(defaultGridChildStorage)
+      defaultGridChildPointer()
   else:
-    addr(defaultGridChildStorage)
+    defaultGridChildPointer()
 
 proc setNodeGridParent*(b: var UiBuilder, idx: int, value: UiNodeGridParent) {.inline.} =
   b.ensureNodeGridParent(b.frame.nodes[idx].addr)[] = value

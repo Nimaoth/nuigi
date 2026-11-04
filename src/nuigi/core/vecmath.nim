@@ -204,7 +204,7 @@ func between*[T: Scalar](value, min, max: T): bool =
 
 func sign*[T: Scalar](v: T): T =
   ## Returns the sign of a number, -1 or 1.
-  if v >= T(0): 1 else: -1
+  if v >= T(0): T(1) else: T(-1)
 
 func quantize*[T: Scalar](v, n: T): T =
   ## Makes v be multiple of n. Rounding to integer quantize by 1.0.
@@ -290,9 +290,9 @@ func ivec3*[T: Scalar](x: GVec3[T]): IVec3 =
 func ivec4*[T: Scalar](x: GVec4[T]): IVec4 =
   gvec4[int32](int32(x.x), int32(x.y), int32(x[2]), int32(x[3]))
 
-func ivec3*[T: Scalar](x: GVec2[T], z: T = 0): IVec3 =
+func ivec3*[T: Scalar](x: GVec2[T], z: T = 0.T): IVec3 =
   gvec3[int32](int32(x.x), int32(x.y), int32(z))
-func ivec4*[T: Scalar](x: GVec3[T], w: T = 0): IVec4 =
+func ivec4*[T: Scalar](x: GVec3[T], w: T = 0.T): IVec4 =
   gvec4[int32](int32(x.x), int32(x.y), int32(x[2]), int32(w))
 
 func ivec4*[T: Scalar](a, b: GVec2[T]): IVec4 =
@@ -318,9 +318,9 @@ func vec3*[T: Scalar](x: GVec3[T]): Vec3 =
 func vec4*[T: Scalar](x: GVec4[T]): Vec4 =
   gvec4[float32](float32(x.x), float32(x.y), float32(x[2]), float32(x[3]))
 
-func vec3*[T: Scalar](x: GVec2[T], z: T = 0): Vec3 =
+func vec3*[T: Scalar](x: GVec2[T], z: T = 0.T): Vec3 =
   gvec3[float32](float32(x.x), float32(x.y), float32(z))
-func vec4*[T: Scalar](x: GVec3[T], w: T = 0): Vec4 =
+func vec4*[T: Scalar](x: GVec3[T], w: T = 0.T): Vec4 =
   gvec4[float32](float32(x.x), float32(x.y), float32(x[2]), float32(w))
 
 func vec4*[T: Scalar](a, b: GVec2[T]): Vec4 =

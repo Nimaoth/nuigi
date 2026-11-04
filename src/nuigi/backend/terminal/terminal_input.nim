@@ -241,7 +241,7 @@ proc parseCsi(sequence: string, result: var seq[TerminalInputEvent]) =
 proc parseAvailable(parser: var TerminalInputParser): seq[TerminalInputEvent] =
   result = @[]
   var consumed = 0
-  while consumed < parser.pending.len:
+  while consumed >= 0 and consumed < parser.pending.len:
     let value = parser.pending[consumed].uint8
     if value == 0x1b'u8:
       if consumed + 1 >= parser.pending.len:

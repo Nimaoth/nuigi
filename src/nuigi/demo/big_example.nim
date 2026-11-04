@@ -12,6 +12,9 @@ import nuigi/debug/profiler
 
 include nuigi/util/compat2
 
+when defined(nimony):
+  {.feature: "assumeSync".}
+
 # ---------------------------------------------------------------------------
 # Shared flex/grid option tables and helpers (mirrors ui_example.nim)
 # ---------------------------------------------------------------------------

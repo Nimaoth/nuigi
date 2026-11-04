@@ -9,6 +9,8 @@ import nuigi/core/vecmath
 import nuigi/rendering/mesh
 import ./[terminal_input, terminal_unicode]
 
+include nuigi/util/compat2
+
 export terminal_input, terminal_unicode
 
 when defined(windows):
@@ -50,19 +52,21 @@ when defined(windows):
   proc terminalGetch(): cint {.cdecl, dynlib: "msvcrt", importc: "_getch".}
 
   proc initConsole() =
-    let inputHandle = getStdHandle(StdInputHandle)
-    let outputHandle = getStdHandle(StdOutputHandle)
-    if getConsoleMode(inputHandle, oldInputMode.addr) != 0:
-      discard setConsoleMode(inputHandle,
-        (oldInputMode or EnableVirtualTerminalInput) and not (EnableLineInput or EnableEchoInput))
-    if getConsoleMode(outputHandle, oldOutputMode.addr) != 0:
-      discard setConsoleMode(outputHandle, oldOutputMode or EnableVirtualTerminalProcessing)
+    assumeSyncBlock:
+      let inputHandle = getStdHandle(StdInputHandle)
+      let outputHandle = getStdHandle(StdOutputHandle)
+      if getConsoleMode(inputHandle, oldInputMode.addr) != 0:
+        discard setConsoleMode(inputHandle,
+          (oldInputMode or EnableVirtualTerminalInput) and not (EnableLineInput or EnableEchoInput))
+      if getConsoleMode(outputHandle, oldOutputMode.addr) != 0:
+        discard setConsoleMode(outputHandle, oldOutputMode or EnableVirtualTerminalProcessing)
 
   proc deinitConsole() =
-    if oldInputMode != 0:
-      discard setConsoleMode(getStdHandle(StdInputHandle), oldInputMode)
-    if oldOutputMode != 0:
-      discard setConsoleMode(getStdHandle(StdOutputHandle), oldOutputMode)
+    assumeSyncBlock:
+      if oldInputMode != 0:
+        discard setConsoleMode(getStdHandle(StdInputHandle), oldInputMode)
+      if oldOutputMode != 0:
+        discard setConsoleMode(getStdHandle(StdOutputHandle), oldOutputMode)
 else:
   import std/terminal
   import posix, termios

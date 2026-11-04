@@ -189,7 +189,8 @@ proc sameTitles(a, b: seq[string]): bool =
 proc windowSpaceChildRank(b: var UiBuilder, storage: WindowSpaceStorage, childIdx: int): int =
   ## Paint order group: other children, docked windows, dock splitters,
   ## floating windows, drop areas, dock preview.
-  if storage.dock == nil:
+  let dock = storage.dock
+  if dock == nil:
     return 0
   let id = b.nodes[childIdx].id
   if id == storage.dockChromeId:
@@ -225,7 +226,8 @@ proc windowSpaceDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
     orderedWindows.insert([childIdx], insertAt)
     orderKeys.insert([childKey], insertAt)
 
-  if storage.dock != nil and not sameTitles(storage.dock.submitted, storage.dock.visibleWindows):
+  let dock = storage.dock
+  if dock != nil and not sameTitles(dock.submitted, dock.visibleWindows):
     # The set of windows changed; build another frame so the dock layout
     # reflects it.
     b.anythingAnimating = true
@@ -602,16 +604,17 @@ proc updateDockSpace(b: var UiBuilder, dock: DockSpace, storage: WindowSpaceStor
 proc windowSpace*(b: var UiBuilder, dock: NullableDockSpace = nil) =
   ## Create the window space that hosts `window`s. When `dock` is given, its
   ## layout decides which windows are docked and which are floating.
+  let dockSpace = dock
   b.node("windows"):
     discard b.fillX().fillY().noHover()
     b.windows = b.currentNode.id
     let storage = b.getOrCreateWindowSpaceStorage(b.currentNode)
-    storage.dock = dock
+    storage.dock = dockSpace
     storage.dockChromeId = noneNodeId()
     storage.dockAreasId = noneNodeId()
     storage.dockPreviewId = noneNodeId()
-    if dock != nil:
-      b.updateDockSpace(dock, storage, b.stack[^1])
+    if dockSpace != nil:
+      b.updateDockSpace(dockSpace, storage, b.stack[^1])
     discard b.deferBuild(windowSpaceDeferredBuild)
 
 

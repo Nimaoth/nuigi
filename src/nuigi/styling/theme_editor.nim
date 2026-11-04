@@ -313,10 +313,11 @@ proc themeEditor*(b: var UiBuilder, themeEditor: var ThemeEditor): var UiBuilder
                 0.0'f32
 
             if themeEditor.highlightedStyleIndex > 0 and themeEditor.highlightedStyleIndex <= UiThemeStyleSlotCount:
+              let listStorage = themeEditor.listStorage
               if trackHoveredStyle and
                   themeEditor.highlightedStyleIndex != themeEditor.lastHighlightedStyleIndex and
-                  themeEditor.listStorage != nil:
-                themeEditor.listStorage.centerItem(
+                  listStorage != nil:
+                listStorage.centerItem(
                   themeEditor.highlightedStyleIndex - 1,
                   listViewportHeight)
               themeEditor.lastHighlightedStyleIndex = themeEditor.highlightedStyleIndex

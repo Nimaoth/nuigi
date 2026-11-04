@@ -7,6 +7,8 @@
 
 import nuigi, nuigi/core/[arena, array_view], nuigi/debug/profiler
 
+include nuigi/util/compat2
+
 type
   UiFlexAlign* = enum
     FlexAlignAuto
@@ -72,7 +74,12 @@ var defaultFlexStorage* = UiNodeFlex(
 )
 
 proc defaultFlex*(): UiNodeFlex =
-  defaultFlexStorage
+  assumeSyncBlock:
+    return defaultFlexStorage
+
+proc defaultFlexPointer(): ptr UiNodeFlex {.inline.} =
+  assumeSyncBlock:
+    result = addr(defaultFlexStorage)
 
 proc ensureNodeFlex*(b: var UiBuilder, node: ptr UiNode, childLayout = false): ptr UiNodeFlex {.inline.} =
   let layout = if childLayout: b.ensureNodeCustomChildLayout(node).addr else: b.ensureNodeCustomLayout(node).addr
@@ -90,9 +97,9 @@ proc nodeFlex*(b: UiBuilder, idx: int, childLayout = false): ptr UiNodeFlex {.in
     if layout.userData != 0:
       cast[ptr UiNodeFlex](layout.userData)
     else:
-      addr(defaultFlexStorage)
+      defaultFlexPointer()
   else:
-    addr(defaultFlexStorage)
+    defaultFlexPointer()
 
 proc nodeFlex*(b: UiBuilder, node: ptr UiNode, childLayout = false): ptr UiNodeFlex {.inline.} =
   let slot = if childLayout: int(node.customChildLayoutIndex) else: int(node.customLayoutIndex)
@@ -101,9 +108,9 @@ proc nodeFlex*(b: UiBuilder, node: ptr UiNode, childLayout = false): ptr UiNodeF
     if layout.userData != 0:
       cast[ptr UiNodeFlex](layout.userData)
     else:
-      addr(defaultFlexStorage)
+      defaultFlexPointer()
   else:
-    addr(defaultFlexStorage)
+    defaultFlexPointer()
 
 proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr UiNodeFlex) {.gcsafe, raises: [].}
 
@@ -361,7 +368,8 @@ proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr
       let main = max(0.0'f32, mainSize(child))
       lines[addedIdx].growSum += max(0.0'f32, childFlex.grow)
       lines[addedIdx].shrinkWeightSum += max(0.0'f32, childFlex.shrink) * max(0.0001'f32, main)
-      lines[addedIdx].crossSize = max(lines[addedIdx].crossSize, crossSize(child))
+      let updatedCrossSize = max(lines[addedIdx].crossSize, crossSize(child))
+      lines[addedIdx].crossSize = updatedCrossSize
   else:
     var lineStart = 0
     var lineCount = 0
@@ -387,7 +395,8 @@ proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr
           let main = max(0.0'f32, mainSize(child))
           lines[addedIdx].growSum += max(0.0'f32, childFlex.grow)
           lines[addedIdx].shrinkWeightSum += max(0.0'f32, childFlex.shrink) * max(0.0001'f32, main)
-          lines[addedIdx].crossSize = max(lines[addedIdx].crossSize, crossSize(child))
+          let updatedCrossSize = max(lines[addedIdx].crossSize, crossSize(child))
+          lines[addedIdx].crossSize = updatedCrossSize
         lineStart = i
         lineCount = 1
         usedMain = childMain
@@ -411,7 +420,8 @@ proc applyFlexLayoutToChildren(b: var UiBuilder, parentIdx: int, parentFlex: ptr
         let main = max(0.0'f32, mainSize(child))
         lines[addedIdx].growSum += max(0.0'f32, childFlex.grow)
         lines[addedIdx].shrinkWeightSum += max(0.0'f32, childFlex.shrink) * max(0.0001'f32, main)
-        lines[addedIdx].crossSize = max(lines[addedIdx].crossSize, crossSize(child))
+        let updatedCrossSize = max(lines[addedIdx].crossSize, crossSize(child))
+        lines[addedIdx].crossSize = updatedCrossSize
 
   if lines.len <= 0:
     return

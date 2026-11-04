@@ -30,6 +30,9 @@ proc `=destroy`(arena: Arena) =
   for i in 0..<arena.buckets.len:
     dealloc(arena.buckets[i].data)
 
+proc `=wasMoved`*(arena: var Arena) =
+  arena.bucketSize = 0
+
 proc align(address, alignment: int): int =
   if alignment == 0: # Actually, this is illegal. This branch exists to actively
                      # hide problems.

@@ -479,6 +479,7 @@ func cross2(a, b: Vec2): float32 {.inline.} =
   a.x * b.y - a.y * b.x
 
 func offsetChevronPolygon(points: array[6, Vec2], distance: float32): array[6, Vec2] =
+  result = default(array[6, Vec2])
   var signedArea = 0.0'f32
   for pointIndex in 0 ..< points.len:
     signedArea += points[pointIndex].cross2(points[(pointIndex + 1) mod points.len])
