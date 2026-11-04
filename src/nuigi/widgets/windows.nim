@@ -155,7 +155,8 @@ proc markWindowActive(storage: WindowSpaceStorage, windowId: UiNodeId, active: b
     storage.windows[activityIndex].lastActive = storage.activationCounter
 
 proc windowLastActive(storage: WindowSpaceStorage, windowId: UiNodeId): uint64 =
-  for activity in storage.windows:
+  for index in 0 ..< storage.windows.len:
+    let activity = storage.windows[index]
     if activity.windowId == windowId:
       return activity.lastActive
   0'u64
@@ -219,8 +220,11 @@ proc windowSpaceDeferredBuild(b: var UiBuilder, nodeIdx: int, rawData: int) =
           (previousKey[0] == childKey[0] and previousKey[1] <= childKey[1]):
         break
       dec insertAt
-    orderedWindows.insert([childIdx], insertAt)
-    orderKeys.insert([childKey], insertAt)
+    if insertAt >= 0:
+      orderedWindows.insert([childIdx], insertAt)
+      orderKeys.insert([childKey], insertAt)
+    else:
+      assert false, "window insertion index must not be negative"
 
   let dock = storage.dock
   if dock != nil and not sameTitles(dock.submitted, dock.visibleWindows):
@@ -371,7 +375,8 @@ proc computeDropTarget(dock: DockSpace, mouse: Vec2, terminal: bool): DockDropTa
   if mouse.y >= dock.bounds.y - edge:
     return makeDropTarget("", DockBottom, rootRatio, vec2(0.0'f32), dock.bounds)
 
-  for index, node in dock.layout.nodes:
+  for index in 0 ..< dock.layout.nodes.len:
+    let node = dock.layout.nodes[index].addr
     if node.kind != DockNodeTabs or index >= dock.rects.len or not dock.rects[index].visible:
       continue
     let rect = dock.rects[index]
@@ -522,7 +527,8 @@ proc buildDockAreas(b: var UiBuilder, dock: DockSpace, storage: WindowSpaceStora
   if empty:
     hovered = DockRect(size: dock.bounds, visible: true)
   else:
-    for index, node in dock.layout.nodes:
+    for index in 0 ..< dock.layout.nodes.len:
+      let node = dock.layout.nodes[index].addr
       if node.kind != DockNodeTabs or index >= dock.rects.len or not dock.rects[index].visible:
         continue
       let rect = dock.rects[index]

@@ -130,7 +130,7 @@ proc testMouseSequence() =
   require(events[0].buttonX == 3 and events[0].buttonY == 2, "mouse coordinates")
 
 proc testShouldRender() =
-  var builder = default(UiBuilder)
+  var builder = newTerminalBuilder()
   require(not builder.shouldRender(false), "idle builder should not render")
   require(builder.shouldRender(true), "host events should render")
   require(builder.shouldRender(false), "one frame after host events should render")

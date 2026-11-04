@@ -5,6 +5,8 @@ import nuigi, nuigi/widgets, nuigi/layout/[flex, grid], nuigi/core/[vecmath, are
 import nuigi/widgets/[tree_table, file_system_cursor]
 import nuigi/widgets/plot
 import nuigi/styling/theme
+when defined(nuigiProfiler):
+  import nuigi/debug/[profiler, profiler_ui]
 
 include nuigi/util/compat2
 
@@ -71,17 +73,86 @@ proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
   discard b.beginUiFrame(viewW, viewH)
   b
 
+block virtualTreeOwnership:
+  var source = newTestBuilder()
+  let nodeIndex = source.nodes.len
+  source.node:
+    discard source.size(20.0'f32, 20.0'f32)
+  var tree = extractVirtualTree(source.frame, nodeIndex)
+  tree.animations.add UiFieldAnimation(
+    currentValue: 0, targetValue: 10, speed: 30, fieldOffset: UiNodeFieldPosX)
+  let nodesAddress = tree.nodes[0].addr
+  var b = newTestBuilder()
+  b.virtualNodes.add UiVirtualTree()
+  b.virtualNodes.add move(tree)
+  b.insertVirtualTrees()
+  require(b.virtualNodes.len == 2 and b.virtualNodes[0].nodes.len == 0,
+    "inserting virtual trees should preserve empty entries")
+  require(b.virtualNodes[1].nodes[0].addr == nodesAddress,
+    "inserting virtual trees should retain node storage without copying")
+  require(approxEq(b.virtualNodes[1].animations[0].currentValue, 5) and
+    approxEq(b.virtualNodes[1].nodes[0].pos.x, 5),
+    "virtual tree animation progress should survive ownership transfer")
+  b.insertVirtualTrees()
+  require(approxEq(b.virtualNodes[1].animations[0].currentValue, 7.5),
+    "virtual tree animation should continue from its retained state")
+  b.frameCtx.animationTick = 1
+  b.insertVirtualTrees()
+  require(b.virtualNodes.len == 1,
+    "finished virtual trees should retire after ownership is restored")
+  require(approxEq(b.frame.nodes[^1].pos.x, 10),
+    "retiring virtual trees should leave the completed frame node")
+
+block nullableDefaults:
+  let drag = DragData()
+  require(drag.userData == nil and drag.uiCallback == nil,
+    "default drag payload and callback should be nil")
+  require(UiDeferredNode().buildProc == nil and UiNodeCustomLayout().layoutProc == nil,
+    "default deferred and custom layout callbacks should be nil")
+  require(UiRenderCommand().vertexData == nil and PlotSeries().fn == nil,
+    "default render data and plot callback should be nil")
+  let empty = ArrayView[int]()
+  require(empty.first() == nil and empty.last() == nil,
+    "empty array views should return nil pointers")
+  var payload: UiDragUserData = UiDragUserData()
+  require(payload != nil, "constructed drag payload should not be nil")
+  payload = nil
+  require(payload == nil, "ordinary ref types should accept nil")
+  let builder = newBuilder(fixedMeasureText)
+  require(builder.buildTextMesh == nil and builder.openUrlFn == nil and
+    builder.readClipboardFn == nil and builder.writeClipboardFn == nil,
+    "omitted platform callbacks should remain nil")
+
 var dragUiCallbackCalls = 0
-var dragUiCallbackUserData: nil UiDragUserData = nil
+var dragUiCallbackUserData: UiDragUserData = nil
 var dragUiCallbackCanDrop = false
 
 proc buildTestDragUi(b: var UiBuilder, userData: UiDragUserData, canDrop: bool) {.nimcall, gcsafe.} =
   gcsafeb:
-    inc dragUiCallbackCalls
-    dragUiCallbackUserData = userData
-    dragUiCallbackCanDrop = canDrop
-    b.node:
-      discard b.fit().text("drag")
+    assumeSyncBlock:
+      inc dragUiCallbackCalls
+      dragUiCallbackUserData = userData
+      dragUiCallbackCanDrop = canDrop
+      b.node:
+        discard b.fit().text("drag")
+
+proc resetDragUiCallbackState() =
+  assumeSyncBlock:
+    dragUiCallbackCalls = 0
+    dragUiCallbackUserData = nil
+    dragUiCallbackCanDrop = false
+
+proc dragUiCallbackCallCount(): int =
+  assumeSyncBlock:
+    result = dragUiCallbackCalls
+
+proc dragUiCallbackData(): UiDragUserData =
+  assumeSyncBlock:
+    result = dragUiCallbackUserData
+
+proc dragUiCallbackAcceptsDrop(): bool =
+  assumeSyncBlock:
+    result = dragUiCallbackCanDrop
 
 # --- property editor test scaffolding ---------------------------------------
 
@@ -175,8 +246,17 @@ proc plotTestValue(x: float32, userData: int): float32 {.gcsafe, raises: [].} =
   x + userData.float32
 
 proc plotTestTransform(x: float32): float32 {.gcsafe, raises: [].} =
-  inc plotTransformCalls
-  100.0'f32 * pow(100.0'f32, x)
+  assumeSyncBlock:
+    inc plotTransformCalls
+    result = 100.0'f32 * pow(100.0'f32, x)
+
+proc resetPlotTransformCalls() =
+  assumeSyncBlock:
+    plotTransformCalls = 0
+
+proc plotTransformCallCount(): int =
+  assumeSyncBlock:
+    result = plotTransformCalls
 
 proc testPlotHoverLabels() =
   let series = [
@@ -184,10 +264,12 @@ proc testPlotHoverLabels() =
     PlotSeries(fn: plotTestValue, userData: 1)]
   for mode in 0 .. 3:
     var b = newTestBuilder()
-    plotTransformCalls = 0
+    resetPlotTransformCalls()
     let before = b.frame.texts.len
     let mouse = if mode == 3: vec2(-1.0'f32, -1.0'f32) else: vec2(50.0'f32, 50.0'f32)
-    let callback = if mode == 0: PlotXTransformFn(nil) else: plotTestTransform
+    var callback: PlotXTransformFn = plotTestTransform
+    if mode == 0:
+      callback = nil
     let commands = b.buildPlotVertices(vec2(0.0'f32, 0.0'f32),
       vec2(100.0'f32, 100.0'f32), vec2(0.0'f32, 1.0'f32),
       vec2(0.0'f32, 2.0'f32), series, resolution = 16, mousePos = mouse,
@@ -203,7 +285,7 @@ proc testPlotHoverLabels() =
         "named series should display hovered values")
       require(b.frame.texts[before + 1].text.value == "1.50" & suffix,
         "unnamed series should display hovered values")
-    require(plotTransformCalls == (if mode == 1: 1 else: 0),
+    require(plotTransformCallCount() == (if mode == 1: 1 else: 0),
       "X transform should run once only when enabled and hovered")
 
 proc testFlagsAndMutators() =
@@ -389,7 +471,7 @@ proc testTerminalCatalogWidgetsAreOneRowHigh() =
   var selected = 0
   var menuOpen = false
   let options = ["One", "Two"]
-  var widgetNodes: seq[(string, int)]
+  var widgetNodes: seq[(string, int)] = @[]
 
   template capture(name: string, body: untyped) =
     block:
@@ -1323,9 +1405,7 @@ proc testPreviousNodesAndIndicesDoubleBuffered() =
 
 proc testDragUiCallbackAndDropState() =
   var b = newBuilder(fixedMeasureText)
-  dragUiCallbackCalls = 0
-  dragUiCallbackUserData = nil
-  dragUiCallbackCanDrop = false
+  resetDragUiCallbackState()
   let testUserData = UiDragUserData()
 
   discard b.beginUiFrame(220.0, 120.0, input = UiInputSnapshot(mouse: vec2(30.0'f32, 40.0'f32)))
@@ -1336,9 +1416,9 @@ proc testDragUiCallbackAndDropState() =
   require(b.dragData.canDrop, "endDrop should store acceptance while the mouse remains down")
   b.endUiFrame(buildRenderCommands = false)
 
-  require(dragUiCallbackCalls == 1, "endUiFrame should invoke the drag UI callback")
-  require(dragUiCallbackUserData == testUserData, "drag UI callback user data mismatch")
-  require(dragUiCallbackCanDrop, "drag UI callback should receive current target acceptance")
+  require(dragUiCallbackCallCount() == 1, "endUiFrame should invoke the drag UI callback")
+  require(dragUiCallbackData() == testUserData, "drag UI callback user data mismatch")
+  require(dragUiCallbackAcceptsDrop(), "drag UI callback should receive current target acceptance")
   require(b.nodes.len == 3, "drag tooltip and callback content should be added to the frame")
   require(b.dragData.nodeId != noneNodeId(), "drag should remain active before release")
 
@@ -1351,8 +1431,8 @@ proc testDragUiCallbackAndDropState() =
   require(not b.endDrop(false), "rejected target should not drop on release")
   b.endUiFrame(buildRenderCommands = false)
 
-  require(dragUiCallbackCalls == 2, "drag UI callback should run on the release frame")
-  require(not dragUiCallbackCanDrop, "release-frame callback should receive rejected target state")
+  require(dragUiCallbackCallCount() == 2, "drag UI callback should run on the release frame")
+  require(not dragUiCallbackAcceptsDrop(), "release-frame callback should receive rejected target state")
   require(b.dragData.nodeId == noneNodeId(), "drag data should clear after release-frame UI is built")
   require(b.dragData.uiCallback == nil, "drag UI callback should clear with released drag data")
 
@@ -1484,7 +1564,7 @@ proc testFileSystemCursorDragAndDrop() =
     var targetNav = FileSystemCursor(rootCursor.clone())
     require(targetNav.enterChild() and targetNav.moveNext(), "target folder should be reachable from root")
 
-    var tree = TreeTable(cursor: rootCursor)
+    var tree = newTreeTable(rootCursor)
     tree.toggleNode(rootCursor)
     tree.toggleNode(sourceNav)
     tree.toggleNode(sourceFolderNav)
@@ -1492,7 +1572,8 @@ proc testFileSystemCursorDragAndDrop() =
 
     proc expandedIndex(tree: TreeTable, key: string): int =
       for i in 0 .. tree.nodes.high:
-        if tree.nodes[i].cursor != nil and tree.nodes[i].cursor.cursorKey() == key:
+        let cursor = tree.nodes[i].cursor
+        if cursor != nil and cursor.cursorKey() == key:
           return i
       return -1
 
@@ -2235,8 +2316,7 @@ proc testTreeTableTreeTexts() =
     discard b.size(800.0, 800.0)
     var cursor = newTreeCursor(maxDepth, branching)
     # Pre-expand the whole tree by attaching an already-expanded editor storage.
-    var storage = TreeTable()
-    storage.cursor = cursor
+    var storage = newTreeTable(cursor)
     storage.initialized = true
     expandAll(storage)
     b.nodeStorage(b.currentNode, storage)
@@ -2282,8 +2362,8 @@ proc testTreeTableTreeTexts() =
         break
   require(rowNodeIdx >= 0, "expected at least one tree row node")
 
-  var colXs: seq[float32]
-  var colHeights: seq[float32]
+  var colXs: seq[float32] = @[]
+  var colHeights: seq[float32] = @[]
   var overlayFound = false
   for childIdx in b.children(rowNodeIdx):
     let child = b.nodes[childIdx].addr
@@ -2305,10 +2385,10 @@ proc testTreeTableTreeTexts() =
 
   # Cross-row alignment: every row's columns must start at the same x (table style),
   # so columns line up vertically regardless of row content.
-  var firstRowCols: seq[float32]
+  var firstRowCols: seq[float32] = @[]
   for i in 0 ..< b.nodes.len:
     if b.nodes[i].nodeDebugName() == "property-row":
-      var xs: seq[float32]
+      var xs: seq[float32] = @[]
       for childIdx in b.children(i):
         xs.add(b.nodes[childIdx].pos.x)
       if firstRowCols.len == 0:
@@ -2524,6 +2604,43 @@ proc testNamedThemeStyles() =
   require(separate.defaultStyle.paddingX == 13, "named default setter should update defaultStyle")
   require(separate.defaultText.fontSize == 27, "named default text setter should update defaultText")
 
+when defined(nuigiProfiler):
+  proc testProfiler() =
+    profilerAccess:
+      gprof.record = true
+      gprof.frameStart = eventHistoryIndex
+      let first = eventHistoryIndex
+      block:
+        prof("profiler-test")
+        block:
+          profd("dynamic-" & $first)
+      require(eventHistoryIndex == first + 4, "profiler should record nested begin/end events")
+      require((eventHistory[first].timestamp and TimestampEndBit) == 0, "begin timestamp must not have end bit")
+      require((eventHistory[first + 3].timestamp and TimestampEndBit) != 0, "end timestamp must have end bit")
+      require(eventHistory[first + 3].location.tag == "profiler-test", "scope end must retain tag")
+      gprof.frameStart = eventHistoryIndex
+      var frameCount = 0
+      for (index, depth, frame) in profileFrames():
+        require(frame.last >= frame.first, "profile duration must be nonnegative")
+        inc frameCount
+      require(frameCount == 2, "profiler should reconstruct nested scopes")
+      gprof.record = false
+      let paused = eventHistoryIndex
+      block:
+        prof("paused")
+      require(eventHistoryIndex == paused, "paused profiler must not record")
+      gprof.record = true
+      gprof.frameStart = eventHistoryIndex
+      profilerBeginFrame(false)
+      var profilerBuilder = newTestBuilder(900, 900)
+      discard profilerBuilder.beginUiFrame(900, 900)
+      profilerBuilder.buildNuiProfiler()
+      profilerBuilder.endUiFrame()
+      require(profilerBuilder.frame.nodes.len > 1, "profiler UI must build controls and graphs")
+      gprof.record = false
+      echo "Profiler recording and UI tests passed"
+
+
 when isMainModule:
   if paramCount() > 0:
     var builder = newBuilder(fixedMeasureText)
@@ -2538,6 +2655,8 @@ when isMainModule:
     quit "Expected named theme API to reject invalid input"
   testNamedThemeStyles()
   runTests()
+  when defined(nuigiProfiler):
+    testProfiler()
 
 # Intentionally no endUiFrame/render calls here: tests validate flags/layout only,
 # without generating render commands yet.

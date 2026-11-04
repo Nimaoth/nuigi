@@ -1662,10 +1662,10 @@ proc demoTreeCursor(root: DemoTreeNode): DemoTreeCursor =
 
 method clone*(c: DemoTreeCursor): TreeCursor {.gcsafe, raises: [].} =
   let copy = DemoTreeCursor(node: c.node, fieldName: c.fieldName, index: c.index)
-  for parent in c.parents:
-    copy.parents.add(parent)
-  for pathIndex in c.path:
-    copy.path.add(pathIndex)
+  for parentIndex in 0 ..< c.parents.len:
+    copy.parents.add(c.parents[parentIndex])
+  for pathIndex in 0 ..< c.path.len:
+    copy.path.add(c.path[pathIndex])
   return copy
 
 method cursorKey*(c: DemoTreeCursor): string =
@@ -1725,7 +1725,8 @@ method resolveChild*(c: DemoTreeCursor, child: TreeCursor): TreeCursor =
   if childIndex < 0 or childIndex >= c.node.children.len or
       c.node.children[childIndex].key != expected.node.key:
     childIndex = -1
-    for index, candidate in c.node.children:
+    for index in 0 ..< c.node.children.len:
+      let candidate = c.node.children[index]
       if candidate.key == expected.node.key:
         childIndex = index
         break
@@ -1740,14 +1741,20 @@ method resolveChild*(c: DemoTreeCursor, child: TreeCursor): TreeCursor =
   return resolved
 
 proc canMoveDemoTreeNodeBeside(source, target: DemoTreeNode): bool =
-  if source == nil or target == nil or source == target or
-      source.parent == nil or target.parent == nil:
+  if source == nil or target == nil or source == target:
     return false
-  var destinationAncestor = target.parent
+  let sourceParent = source.parent
+  let targetParent = target.parent
+  if sourceParent == nil or targetParent == nil:
+    return false
+  var destinationAncestor = targetParent
   while destinationAncestor != nil:
     if destinationAncestor == source:
       return false
-    destinationAncestor = destinationAncestor.parent
+    let parent = destinationAncestor.parent
+    if parent == nil:
+      break
+    destinationAncestor = parent
   return true
 
 proc moveDemoTreeNodeBeside(source, target: DemoTreeNode, insertAfter: bool) =
@@ -1755,13 +1762,17 @@ proc moveDemoTreeNodeBeside(source, target: DemoTreeNode, insertAfter: bool) =
     return
   let sourceParent = source.parent
   let targetParent = target.parent
+  if sourceParent == nil or targetParent == nil:
+    return
   var sourceIndex = -1
   var targetIndex = -1
-  for index, child in sourceParent.children:
+  for index in 0 ..< sourceParent.children.len:
+    let child = sourceParent.children[index]
     if child == source:
       sourceIndex = index
       break
-  for index, child in targetParent.children:
+  for index in 0 ..< targetParent.children.len:
+    let child = targetParent.children[index]
     if child == target:
       targetIndex = index
   if sourceIndex < 0 or targetIndex < 0:
@@ -1772,30 +1783,44 @@ proc moveDemoTreeNodeBeside(source, target: DemoTreeNode, insertAfter: bool) =
   if insertAfter:
     inc targetIndex
   source.parent = targetParent
-  targetParent.children.insert(source, targetIndex)
+  targetParent.children.add(source)
+  var childIndex = targetParent.children.high
+  while childIndex > targetIndex:
+    targetParent.children[childIndex] = targetParent.children[childIndex - 1]
+    dec childIndex
+  targetParent.children[targetIndex] = source
 
 proc canReparentDemoTreeNode(source, target: DemoTreeNode): bool =
-  if source == nil or target == nil or source == target or
-      source.parent == nil or source.parent == target:
+  if source == nil or target == nil or source == target:
+    return false
+  let sourceParent = source.parent
+  if sourceParent == nil or sourceParent == target:
     return false
   var ancestor = target
   while ancestor != nil:
     if ancestor == source:
       return false
-    ancestor = ancestor.parent
+    let parent = ancestor.parent
+    if parent == nil:
+      break
+    ancestor = parent
   return true
 
 proc reparentDemoTreeNode(source, target: DemoTreeNode) =
   if not source.canReparentDemoTreeNode(target):
     return
+  let sourceParent = source.parent
+  if sourceParent == nil:
+    return
   var sourceIndex = -1
-  for index, child in source.parent.children:
+  for index in 0 ..< sourceParent.children.len:
+    let child = sourceParent.children[index]
     if child == source:
       sourceIndex = index
       break
   if sourceIndex < 0:
     return
-  source.parent.children.delete(sourceIndex)
+  sourceParent.children.delete(sourceIndex)
   source.parent = target
   target.children.add(source)
 
@@ -2173,8 +2198,10 @@ proc acceptExternalDrop(b: var UiBuilder) =
   discard b.borderColor(accentVariation(b.themeStyle(UiStyleIndexAccent)[].fillColor, HGreen, 1.0)).borderWidth(2)
   if b.endDrop(true):
     externalDropItems.setLen(0)
-    for file in external.files: externalDropItems.add("File: " & file)
-    for text in external.texts: externalDropItems.add("Text: " & text)
+    for fileIndex in 0 ..< external.files.len:
+      externalDropItems.add("File: " & external.files[fileIndex])
+    for textIndex in 0 ..< external.texts.len:
+      externalDropItems.add("Text: " & external.texts[textIndex])
 
 proc buildExternalDropZone(b: var UiBuilder) =
   b.layoutVertical("dnd-external"):

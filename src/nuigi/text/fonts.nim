@@ -231,15 +231,17 @@ proc ensureFtPixelSize(r: var FontRender, fontIndex, fontSize: int): bool {.rais
   if fontIndex < 0 or fontIndex >= r.fonts.len:
     return false
   if r.fonts[fontIndex].children.len > 0:
-    for c in r.fonts[fontIndex].children:
+    for childIndex in 0 ..< r.fonts[fontIndex].children.len:
+      let c = r.fonts[fontIndex].children[childIndex]
       discard r.ensureFtPixelSize(c, fontSize)
     r.fonts[fontIndex].activePixelSize = fontSize
     return true
-  if r.fonts[fontIndex].face == nil:
+  let face = r.fonts[fontIndex].face
+  if face == nil:
     return false
   if r.fonts[fontIndex].activePixelSize == fontSize:
     return true
-  if FT_Set_Pixel_Sizes(r.fonts[fontIndex].face, fontSize.cuint, fontSize.cuint) != 0:
+  if FT_Set_Pixel_Sizes(face, fontSize.cuint, fontSize.cuint) != 0:
     return false
   r.fonts[fontIndex].activePixelSize = fontSize
   true
@@ -255,12 +257,15 @@ proc ftSetupSize(r: var FontRender, fontSize: int) {.raises: [].} =
     discard r.ensureFtPixelSize(i, fontSize)
 
 proc ftAscentDescent(r: var FontRender, primaryFont: int = 0): tuple[asc: cfloat, desc: cfloat] {.raises: [].} =
-  if r.fonts[primaryFont].children.len > 0:
-    return r.ftAscentDescent(r.fonts[primaryFont].children[0])
-  let faceIdx = if primaryFont >= 0 and primaryFont < r.fonts.len and r.fonts[primaryFont].face != nil: primaryFont else: 0
-  if r.fonts.len == 0 or r.fonts[faceIdx].face == nil or r.fonts[faceIdx].face.size == nil:
+  if r.fonts.len == 0:
     return (0, 0)
-  let m = r.fonts[faceIdx].face.size.metrics
+  let faceIdx = if primaryFont >= 0 and primaryFont < r.fonts.len: primaryFont else: 0
+  if r.fonts[faceIdx].children.len > 0:
+    return r.ftAscentDescent(r.fonts[faceIdx].children[0])
+  let face = r.fonts[faceIdx].face
+  if face == nil or face.size == nil:
+    return (0, 0)
+  let m = face.size.metrics
   return (m.ascender.cfloat / 64.0, m.descender.cfloat / 64.0)
 
 proc registerFontFamilyMember(r: var FontRender, fontId: FontId) {.raises: [].} =
@@ -292,10 +297,10 @@ proc styledFontId*(r: var FontRender, fontId: FontId, flags: UiTextFlags): FontI
     let cached = r.fonts[fontId].styleVariants[requested]
     if cached >= 0:
       return cached
-    let children = r.fonts[fontId].children
     var styledChildren: seq[FontId] = @[]
     var changed = false
-    for child in children:
+    for childIndex in 0 ..< r.fonts[fontId].children.len:
+      let child = r.fonts[fontId].children[childIndex]
       let styled = r.styledFontId(child, flags)
       if styled != child:
         changed = true
@@ -329,18 +334,21 @@ proc resolveFontIndex(r: var FontRender, codepoint: int, sizeIdx: int, primaryFo
   result = 0
   if r.fonts.len == 0:
     return
-  if primaryFont >= 0 and primaryFont < r.fonts.len and r.fonts[primaryFont].face != nil:
-    if r.ensureFtPixelSize(primaryFont, sizeIdx):
-      if FT_Get_Char_Index(r.fonts[primaryFont].face, codepoint.culong) != 0:
+  if primaryFont >= 0 and primaryFont < r.fonts.len:
+    let face = r.fonts[primaryFont].face
+    if face != nil:
+      if r.ensureFtPixelSize(primaryFont, sizeIdx) and
+          FT_Get_Char_Index(face, codepoint.culong) != 0:
         return primaryFont
   for i in 0 ..< r.fonts.len:
     if i == primaryFont:
       continue
-    if r.fonts[i].face == nil:
+    let face = r.fonts[i].face
+    if face == nil:
       continue
     if not r.ensureFtPixelSize(i, sizeIdx):
       continue
-    if FT_Get_Char_Index(r.fonts[i].face, codepoint.culong) != 0:
+    if FT_Get_Char_Index(face, codepoint.culong) != 0:
       return i
   if primaryFont >= 0 and primaryFont < r.fonts.len:
     result = primaryFont

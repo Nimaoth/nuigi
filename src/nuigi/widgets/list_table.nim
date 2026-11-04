@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 ## Virtualized table whose rows are built on demand.
 ##
 ## Each direct child created by the row renderer is treated as one table cell.
@@ -20,7 +23,7 @@ type
   ListTableLayout = object
     columnGap: float32
     columnCount: int
-    columns: nil ptr UncheckedArray[TableColumn]
+    columns: ptr UncheckedArray[TableColumn]
 
 proc defaultListTableOptions*(): ListTableOptions =
   ## Creates list-table options with fitted columns and a 24 px row hint.
@@ -135,7 +138,7 @@ proc listTable*(b: var UiBuilder,
     userData: int = 0): UiDynamicVirtualListStorage {.discardable.} =
   ## Builds a dynamic virtual list and aligns each row's direct children.
   var columnData: ArrayView[TableColumn]
-  var columns: nil ptr UncheckedArray[TableColumn] = nil
+  var columns: ptr UncheckedArray[TableColumn] = nil
   if options.columns.len > 0:
     columnData = b.frame.arena[].allocArray(options.columns.len, TableColumn)
     for columnIndex in 0 ..< options.columns.len:

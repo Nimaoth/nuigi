@@ -256,8 +256,8 @@ method cursorKey*(c: TreeCursor): string {.base, gcsafe, raises: [].} =
   ## Returns stable node identity used to preserve expansion state.
   ## Subtypes should override this, for example with a filesystem path.
   result = ""
-  for i in c.path:
-    result.add($i)
+  for pathIndex in 0 ..< c.path.len:
+    result.add($c.path[pathIndex])
     result.add("/")
 
 method moveNext*(c: TreeCursor, count: int = 1): bool {.base, gcsafe, raises: [].} =
@@ -342,12 +342,14 @@ proc stepForward(c: var TreeCursor, e: TreeTable, startIndex: int): bool =
 
 iterator expandedChildren*(e: TreeTable, nodeIndex: int): (int, ptr ExpandedNode) =
   ## Yields active expanded direct children in current sibling order.
-  if nodeIndex >= 0 and nodeIndex < e.nodes.len and e.nodes[nodeIndex].cursor != nil:
-    var childIndex = e.nodes[nodeIndex].firstChild
-    while childIndex >= 0:
-      let nextIndex = e.nodes[childIndex].nextSibling
-      yield (childIndex, e.nodes[childIndex].addr)
-      childIndex = nextIndex
+  if nodeIndex >= 0 and nodeIndex < e.nodes.len:
+    let cursor = e.nodes[nodeIndex].cursor
+    if cursor != nil:
+      var childIndex = e.nodes[nodeIndex].firstChild
+      while childIndex >= 0:
+        let nextIndex = e.nodes[childIndex].nextSibling
+        yield (childIndex, e.nodes[childIndex].addr)
+        childIndex = nextIndex
 
 proc allocateExpandedNode(e: TreeTable, node: ExpandedNode): int =
   ## Allocates a stable slot, preferring the free list, and indexes its key.
@@ -544,7 +546,8 @@ proc refreshRenderedNodes*(e: TreeTable) =
   ## unrelated branches.
   prof("refreshRenderedNodes")
   var refreshedIndexes = initTable[string, int]()
-  for renderedCursor in e.renderedCursors:
+  for renderedIndex in 0 ..< e.renderedCursors.len:
+    let renderedCursor = e.renderedCursors[renderedIndex]
     var chain: seq[TreeCursor] = @[]
     var chainCursor = renderedCursor.clone()
     var refreshedAncestorIndex = -1
@@ -914,10 +917,15 @@ proc continueExpandAll*(e: TreeTable,
   let started = getMonoTime()
   while e.expandAllWork.len > 0:
     let workIndex = e.expandAllWork.high
-    let child = e.expandAllWork[workIndex].nextChild.clone()
+    var nextChild = e.expandAllWork[workIndex].nextChild
+    if nextChild == nil:
+      quit "expand-all work item has no next child"
+    let child = nextChild.clone()
     let parentIndex = e.expandAllWork[workIndex].parentIndex
-    if not e.expandAllWork[workIndex].nextChild.moveNext():
+    if not nextChild.moveNext():
       e.expandAllWork.setLen(workIndex)
+    else:
+      e.expandAllWork[workIndex].nextChild = nextChild
 
     if child.childCount() > 0:
       let childIndex = e.addExpandedNode(child, parentIndex)
@@ -1440,9 +1448,6 @@ proc buildTreeTableRow(b: var UiBuilder, itemIndex: int, userData: int) {.gcsafe
   prof("buildTreeTableRow")
   try:
     var ctx = b.getOrCreateStorage(b.frame.nodes[userData].addr)
-    if ctx.walkCursor == nil:
-      ctx.walkCursor = ctx.cursor.clone()
-      ctx.walkIndex = 0
     let targetIndex = itemIndex + (if ctx.hideRoot: 1 else: 0)
     if ctx.walkIndex == 0:
       if not ctx.seek(targetIndex):
@@ -1474,7 +1479,8 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
     b.nodeStorageParent()
   ctx.cursor = cursor
   ctx.hideRoot = options.hideRoot
-  ctx.walkCursor = nil
+  ctx.walkCursor = cursor.clone()
+  ctx.walkIndex = 0
   ctx.rowRenderer = rowRenderer
   ctx.alternatingRowBackground = options.alternatingRowBackground
   ctx.alternatingColorEven = options.alternatingColorEven
@@ -1514,8 +1520,9 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   ctx.renderedCursors.setLen(0)
 
   try:
-    if ctx.pendingExpandCursor != nil:
-      ctx.expandNode(ctx.pendingExpandCursor)
+    let pendingExpandCursor = ctx.pendingExpandCursor
+    if pendingExpandCursor != nil:
+      ctx.expandNode(pendingExpandCursor)
       ctx.pendingExpandCursor = nil
       b.anythingAnimating = true
     let pendingToggleCursor = ctx.pendingToggleCursor
@@ -1546,12 +1553,13 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       b.anythingAnimating = true
 
   let count = ctx.countVisible()
-  if b.wasFocusChangedByKeyboard() and ctx.listStorage != nil and
+  let listStorage = ctx.listStorage
+  if b.wasFocusChangedByKeyboard() and listStorage != nil and
       ctx.focusCursors.hasKey(b.focusedNode.nodeIdValue()):
     let focusedCursor = ctx.focusCursors.getOrQuit(b.focusedNode.nodeIdValue())
     let focusedRow = ctx.visibleRowIndex(focusedCursor)
     if focusedRow >= 0:
-      ctx.listStorage.centerItem(focusedRow)
+      listStorage.centerItem(focusedRow)
   if options.expandCollapseButtons:
     b.label("Items: " & $count):
       discard b.fitX()
@@ -1561,7 +1569,7 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
   var layoutUserData = 0
   if hasColumns or hasColumnLines or hasIndentLines:
     var colArr: ArrayView[TableColumn]
-    var colPtr: nil ptr UncheckedArray[TableColumn] = nil
+    var colPtr: ptr UncheckedArray[TableColumn] = nil
     var colCount = 0
     if hasColumns:
       colArr = b.frame.arena[].allocArray(options.columns.len, TableColumn)

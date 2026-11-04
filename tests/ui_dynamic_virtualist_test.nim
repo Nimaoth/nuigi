@@ -829,10 +829,13 @@ proc testTransientHeightsFillViewport() =
       context.builtIndices.setLen(0)
       context.changedItemHeight = if frame mod 2 == 0: 40 else: 10
       discard b.beginUiFrame(200, 100)
-      storage = b.dynamicVirtualList(100, 30, buildTransientHeightItem,
-        cast[int](context.addr),
-        if customLayout: layoutTransientHeightItems else: nil,
-        cast[int](context.addr))
+      if customLayout:
+        storage = b.dynamicVirtualList(100, 30, buildTransientHeightItem,
+          cast[int](context.addr), layoutTransientHeightItems,
+          cast[int](context.addr))
+      else:
+        storage = b.dynamicVirtualList(100, 30, buildTransientHeightItem,
+          cast[int](context.addr))
       if frame == 1:
         storage.scrollOffsetY = storage.itemTop(2) - 20
       if frame > 0:

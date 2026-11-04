@@ -78,12 +78,22 @@ var testClipboard = ""
 
 proc readTestClipboard(): string {.nimcall, gcsafe, raises: [].} =
   gcsafeb:
-    testClipboard
+    assumeSyncBlock:
+      result = testClipboard
 
 proc writeTestClipboard(text: string): bool {.nimcall, gcsafe, raises: [].} =
   gcsafeb:
-    testClipboard = text
-    true
+    assumeSyncBlock:
+      testClipboard = text
+      result = true
+
+proc resetTestClipboard() =
+  assumeSyncBlock:
+    testClipboard = ""
+
+proc testClipboardContents(): string =
+  assumeSyncBlock:
+    result = testClipboard
 
 proc testTerminalTextFieldIsOneRowHigh() =
   var b = newBuilder(fixedTerminalMeasureText, backendType = UiBackendType.Terminal)
@@ -174,7 +184,7 @@ proc testClipboardShortcuts() =
   b.writeClipboardFn = writeTestClipboard
   var text = "copy me"
   let state = TextFieldStorage(cursorPos: text.len)
-  testClipboard = ""
+  resetTestClipboard()
 
   discard b.beginUiFrame(200.0, 120.0)
   discard b.textField(text, "Name", state)
@@ -188,7 +198,7 @@ proc testClipboardShortcuts() =
   discard b.beginUiFrame(200.0, 120.0,
     input = UiInputSnapshot(keysPressed: {KeyA, KeyC}, modsDown: {ModControl}))
   discard b.textField(text, "Name", state)
-  require(testClipboard == "copy me", "Ctrl+A then Ctrl+C should copy all text")
+  require(testClipboardContents() == "copy me", "Ctrl+A then Ctrl+C should copy all text")
   b.endUiFrame(buildRenderCommands = false)
 
   discard b.beginUiFrame(200.0, 120.0,

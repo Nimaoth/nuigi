@@ -55,8 +55,8 @@ proc benchmarkExitChild(depth, iterations: int) =
   try:
     let deepCursor = buildDeepCursor(root, depth)
     var rebasedPath: seq[int] = @[]
-    for index in deepCursor.path:
-      rebasedPath.add(index)
+    for index in 0 ..< deepCursor.path.len:
+      rebasedPath.add(deepCursor.path[index])
     rebasedPath[0] = 7
     var rebasedCursor = FileSystemCursor(deepCursor.clone())
     rebasedCursor.updatePath(rebasedPath)

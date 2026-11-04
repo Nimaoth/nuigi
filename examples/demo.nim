@@ -703,7 +703,8 @@ proc renderNewUi(b: var UiBuilder) =
 
   var transformStack: seq[UiAffine2] = @[identityAffine2()]
 
-  for cmd in b.frameOutput.commands:
+  for commandIndex in 0 ..< b.frameOutput.commands.len:
+    let cmd = b.frameOutput.commands[commandIndex].addr
     let transform = transformStack[^1]
     case cmd.kind
     of CmdTransformPush:
@@ -733,7 +734,7 @@ proc renderNewUi(b: var UiBuilder) =
         of imageGpuTexture:
           gpuTexture = cmd.imageId.imageIdToGpuTexture()
         discard gRender2D.drawVertices(
-          cast[ptr UncheckedArray[Render2DVertex]](cmd.vertexData[0].addr).toOpenArray(0, cmd.vertexCount - 1),
+          cast[ptr UncheckedArray[Render2DVertex]](cmd.vertexData).toOpenArray(0, cmd.vertexCount - 1),
           gpuTexture,
           cmd.samplerMode.toRender2DSamplerMode(),
           materialId = cmd.materialId,

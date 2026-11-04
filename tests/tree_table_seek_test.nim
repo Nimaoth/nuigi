@@ -86,7 +86,8 @@ proc newTreeCursor*(maxDepth, childrenPerNode: int): TestTreeCursor =
 proc isExpanded(e: TreeTable, c: TreeCursor, startIndex: int): bool =
   let key = c.cursorKey()
   for i in startIndex .. e.nodes.high:
-    if e.nodes[i].cursor != nil and e.nodes[i].cursor.cursorKey() == key:
+    let cursor = e.nodes[i].cursor
+    if cursor != nil and cursor.cursorKey() == key:
       return true
   return false
 
@@ -125,8 +126,7 @@ proc navigateTo(root: TreeCursor, path: seq[int]): TreeCursor =
         return
 
 proc newEditor(maxDepth, branching: int, expandedPaths: seq[seq[int]], full = false): TreeTable =
-  result = TreeTable()
-  result.cursor = newTreeCursor(maxDepth, branching)
+  result = newTreeTable(newTreeCursor(maxDepth, branching))
   if full:
     expandAll(result)
   else:
@@ -154,7 +154,7 @@ proc runScenario(name: string, maxDepth, branching: int, expandedPaths: seq[seq[
   # the seek lands on with the naive reference path for that row.
   proc checkRow(name: string, e: TreeTable, expected: seq[seq[int]], row: int) =
     # Reset the walk state so each seek is independent (seek requires walkIndex==0).
-    e.walkCursor = nil
+    e.walkCursor = e.cursor.clone()
     e.walkIndex = 0
     # echo "expect ", expected[row]
     let ok = e.seek(row)
@@ -177,7 +177,7 @@ proc runScenario(name: string, maxDepth, branching: int, expandedPaths: seq[seq[
   # entire visible preorder with no duplicates and no gaps.
   var seen: seq[seq[int]] = @[]
   for row in 0 ..< total:
-    e.walkCursor = nil
+    e.walkCursor = e.cursor.clone()
     e.walkIndex = 0
     discard e.seek(row)
     seen.add(e.walkCursor.path)

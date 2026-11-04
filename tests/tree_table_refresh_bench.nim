@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 import std/[monotimes, times]
 
 import nuigi/widgets/tree_table
@@ -55,7 +58,7 @@ method exitChild(cursor: BenchCursor): bool =
   if cursor.parents.len == 0:
     return false
   cursor.node = cursor.parents[^1]
-  cursor.parents.setLen(cursor.parents.len - 1)
+  discard cursor.parents.pop()
   cursor.path.setLen(cursor.path.len - 1)
   cursor.index = if cursor.path.len > 0: cursor.path[^1] else: 0
   return true
@@ -85,7 +88,7 @@ proc addChild(parent: BenchNode, key: string): BenchNode =
 
 proc cursorFor(node: BenchNode): BenchCursor =
   var nodes: seq[BenchNode] = @[]
-  var current: nil BenchNode = node
+  var current: BenchNode = node
   while current != nil:
     nodes.add(current)
     current = current.parent
@@ -111,13 +114,13 @@ proc buildScenario(prefixCount, depth: int): (TreeTable, TreeCursor) =
   var chainNode = root.addChild("chain-0")
   for level in 1 ..< depth:
     chainNode = chainNode.addChild("chain-" & $level)
-  let tree = TreeTable(cursor: cursorFor(root))
+  let tree = newTreeTable(cursorFor(root))
   tree.expandAll()
   return (tree, cursorFor(chainNode))
 
 proc benchmark(name: string, prefixCount, depth, iterations: int) =
   let (tree, visibleCursor) = buildScenario(prefixCount, depth)
-  tree.renderedCursors = @[visibleCursor]
+  tree.renderedCursors.add(visibleCursor)
   for warmup in 0 ..< 3:
     tree.refreshRenderedNodes()
 
@@ -136,15 +139,13 @@ proc benchmarkSharedChain(depth, leafCount, iterations: int) =
     parent = parent.addChild("chain-" & $level)
     expandedNodes.add(parent)
 
-  var visibleCursors: seq[TreeCursor] = @[]
+  var tree = newTreeTable(cursorFor(root))
   for index in 0 ..< leafCount:
     let leaf = parent.addChild("leaf-" & $index)
-    visibleCursors.add(cursorFor(leaf))
+    tree.renderedCursors.add(cursorFor(leaf))
 
-  var tree = TreeTable(cursor: cursorFor(root))
   for node in expandedNodes:
     tree.toggleNode(cursorFor(node))
-  tree.renderedCursors = visibleCursors
   for warmup in 0 ..< 3:
     tree.refreshRenderedNodes()
 
@@ -161,10 +162,10 @@ proc benchmarkShiftedSubtree(childCount, iterations: int) =
   for index in 0 ..< childCount:
     discard branch.addChild("child-" & $index).addChild("value-" & $index)
 
-  let tree = TreeTable(cursor: cursorFor(root))
+  let tree = newTreeTable(cursorFor(root))
   tree.expandAll()
   let visibleNode = branch.children[^1]
-  tree.renderedCursors = @[TreeCursor(cursorFor(visibleNode))]
+  tree.renderedCursors.add(cursorFor(visibleNode))
 
   let started = getMonoTime()
   for iteration in 0 ..< iterations:

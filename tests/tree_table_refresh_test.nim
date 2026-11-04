@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 import nuigi/widgets/tree_table
 import tree_table_seek_test
 
@@ -15,6 +18,8 @@ type
     key: string
     children: seq[MutableNode]
 
+
+type
   MutableTree = ref object
     resolveCalls: int
     exitCalls: int
@@ -32,13 +37,13 @@ proc copyPath(path: seq[int]): seq[int] =
     result.add(index)
 
 method clone(cursor: MutableCursor): TreeCursor {.gcsafe, raises: [].} =
-  let copy = MutableCursor()
-  copy.node = cursor.node
-  copy.parents = cursor.parents
-  copy.tree = cursor.tree
-  copy.fieldName = cursor.fieldName
-  copy.index = cursor.index
-  copy.path = copyPath(cursor.path)
+  let copy = MutableCursor(
+    node: cursor.node,
+    parents: cursor.parents,
+    tree: cursor.tree,
+    fieldName: cursor.fieldName,
+    index: cursor.index,
+    path: copyPath(cursor.path))
   return copy
 
 method cursorKey(cursor: MutableCursor): string =
@@ -51,33 +56,41 @@ method enterChild(cursor: MutableCursor): bool =
   if cursor.node.children.len == 0:
     return false
   cursor.parents.add(cursor.node)
-  cursor.node = cursor.node.children[0]
+  let child = cursor.node.children[0]
+  cursor.node = child
   cursor.index = 0
   cursor.path.add(0)
-  cursor.fieldName = cursor.node.key
+  cursor.fieldName = child.key
   return true
 
 method moveNext(cursor: MutableCursor, count: int = 1): bool =
   if cursor.parents.len == 0:
     return false
-  let siblings = cursor.parents[^1].children
+  let parent = cursor.parents[cursor.parents.len - 1]
+  if parent == nil:
+    return false
+  let siblings = parent.children
   if cursor.index + count >= siblings.len:
     return false
   cursor.index += count
   cursor.path[cursor.path.high] = cursor.index
-  cursor.node = siblings[cursor.index]
-  cursor.fieldName = cursor.node.key
+  let child = siblings[cursor.index]
+  cursor.node = child
+  cursor.fieldName = child.key
   return true
 
 method exitChild(cursor: MutableCursor): bool =
   inc cursor.tree.exitCalls
   if cursor.parents.len == 0:
     return false
-  cursor.node = cursor.parents[^1]
+  let parent = cursor.parents[cursor.parents.len - 1]
+  if parent == nil:
+    return false
+  cursor.node = parent
   cursor.parents.setLen(cursor.parents.len - 1)
   cursor.path.setLen(cursor.path.len - 1)
   cursor.index = if cursor.path.len > 0: cursor.path[^1] else: 0
-  cursor.fieldName = cursor.node.key
+  cursor.fieldName = parent.key
   return true
 
 method resolveChild(cursor: MutableCursor, child: TreeCursor): TreeCursor =
@@ -97,7 +110,13 @@ method resolveChild(cursor: MutableCursor, child: TreeCursor): TreeCursor =
   if foundIndex < 0:
     return nil
 
-  let resolved = MutableCursor(cursor.clone())
+  let resolved = MutableCursor(
+    node: cursor.node,
+    parents: cursor.parents,
+    tree: cursor.tree,
+    fieldName: cursor.fieldName,
+    index: cursor.index,
+    path: copyPath(cursor.path))
   resolved.parents.add(cursor.node)
   resolved.node = cursor.node.children[foundIndex]
   resolved.index = foundIndex
@@ -116,8 +135,8 @@ proc childCursor(parent: TreeCursor, index: int): TreeCursor =
 
 proc expandedIndex(treeTable: TreeTable, key: string): int =
   for index in 0 .. treeTable.nodes.high:
-    if treeTable.nodes[index].cursor != nil and
-        treeTable.nodes[index].cursor.cursorKey() == key:
+    let cursor = treeTable.nodes[index].cursor
+    if cursor != nil and cursor.cursorKey() == key:
       return index
   return -1
 
@@ -131,22 +150,25 @@ proc testVisibleChainRebasesShiftedIndices() =
   let branchCursor = rootCursor.childCursor(1)
   let leafCursor = branchCursor.childCursor(0)
 
-  var treeTable = TreeTable(cursor: rootCursor)
+  var treeTable = newTreeTable(rootCursor)
   treeTable.toggleNode(rootCursor)
   treeTable.toggleNode(branchCursor)
   treeTable.toggleNode(leafCursor)
 
-  root.children.insert(MutableNode(key: "inserted"), 0)
-  treeTable.renderedCursors = @[leafCursor]
+  root.children = @[MutableNode(key: "inserted"), first, branch]
+  treeTable.renderedCursors.setLen(0)
+  treeTable.renderedCursors.add(leafCursor)
   treeTable.refreshRenderedNodes()
 
   let branchIndex = treeTable.expandedIndex("branch")
   let leafIndex = treeTable.expandedIndex("leaf")
   require(branchIndex >= 0, "shifted branch should remain expanded")
   require(leafIndex >= 0, "shifted descendant should remain expanded")
-  require(treeTable.nodes[branchIndex].cursor.path == @[2],
+  let branchExpandedCursor = treeTable.nodes[branchIndex].cursor
+  let leafExpandedCursor = treeTable.nodes[leafIndex].cursor
+  require(branchExpandedCursor != nil and branchExpandedCursor.path == @[2],
     "branch path should use its current sibling index")
-  require(treeTable.nodes[leafIndex].cursor.path == @[2, 0],
+  require(leafExpandedCursor != nil and leafExpandedCursor.path == @[2, 0],
     "descendant path should be rebased with its parent")
   require(treeTable.nodes[0].totalChildren == 4,
     "visible count should include the inserted sibling")
@@ -172,13 +194,14 @@ proc testVisibleChainPrunesDeletedAncestor() =
   let branchCursor = rootCursor.childCursor(0)
   let leafCursor = branchCursor.childCursor(0)
 
-  var treeTable = TreeTable(cursor: rootCursor)
+  var treeTable = newTreeTable(rootCursor)
   treeTable.toggleNode(rootCursor)
   treeTable.toggleNode(branchCursor)
   treeTable.toggleNode(leafCursor)
 
   root.children.delete(0)
-  treeTable.renderedCursors = @[leafCursor]
+  treeTable.renderedCursors.setLen(0)
+  treeTable.renderedCursors.add(leafCursor)
   treeTable.refreshRenderedNodes()
 
   require(treeTable.expandedIndex("branch") < 0,
@@ -200,7 +223,7 @@ proc testExpandedSlotsRemainStableAndReuseFreeSlots() =
   let firstCursor = rootCursor.childCursor(0)
   let secondCursor = rootCursor.childCursor(1)
 
-  var treeTable = TreeTable(cursor: rootCursor)
+  var treeTable = newTreeTable(rootCursor)
   treeTable.toggleNode(rootCursor)
   treeTable.toggleNode(firstCursor)
   treeTable.toggleNode(secondCursor)
@@ -237,14 +260,16 @@ proc testSharedParentChainsResolveExpandedEdgesOnce() =
   let firstLeafCursor = parentCursor.childCursor(0)
   let secondLeafCursor = parentCursor.childCursor(1)
 
-  var treeTable = TreeTable(cursor: rootCursor)
+  var treeTable = newTreeTable(rootCursor)
   treeTable.toggleNode(rootCursor)
   treeTable.toggleNode(grandparentCursor)
   treeTable.toggleNode(parentCursor)
 
   mutableTree.resolveCalls = 0
   mutableTree.exitCalls = 0
-  treeTable.renderedCursors = @[firstLeafCursor, secondLeafCursor]
+  treeTable.renderedCursors.setLen(0)
+  treeTable.renderedCursors.add(firstLeafCursor)
+  treeTable.renderedCursors.add(secondLeafCursor)
   treeTable.refreshRenderedNodes()
 
   require(mutableTree.resolveCalls == 4,
@@ -254,10 +279,10 @@ proc testSharedParentChainsResolveExpandedEdgesOnce() =
 
 proc testIncrementalExpandAllCompletesAcrossBudgets() =
   let cursor = newTreeCursor(4, 4)
-  var expected = TreeTable(cursor: cursor)
+  var expected = newTreeTable(cursor)
   expected.expandAll()
 
-  var incremental = TreeTable(cursor: cursor)
+  var incremental = newTreeTable(cursor)
   incremental.startExpandAll()
   require(incremental.isExpandingAll(),
     "incremental expand all should retain work after initialization")
@@ -285,7 +310,7 @@ proc testExpandNodeIsIdempotent() =
   let mutableTree = MutableTree()
   let rootCursor = newCursor(root, mutableTree)
   let branchCursor = rootCursor.childCursor(0)
-  var treeTable = TreeTable(cursor: rootCursor)
+  var treeTable = newTreeTable(rootCursor)
 
   treeTable.expandNode(branchCursor)
   let expandedCount = treeTable.expandedCount
@@ -306,7 +331,8 @@ proc testHiddenRootRemainsExpanded() =
     MutableNode(key: "first"),
     MutableNode(key: "second")])
   let rootCursor = newCursor(root, MutableTree())
-  var treeTable = TreeTable(cursor: rootCursor, hideRoot: true)
+  var treeTable = newTreeTable(rootCursor)
+  treeTable.hideRoot = true
 
   treeTable.toggleNode(rootCursor)
   require(treeTable.rootNode >= 0,

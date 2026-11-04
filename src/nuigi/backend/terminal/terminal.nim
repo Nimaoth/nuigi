@@ -347,7 +347,8 @@ proc pollInput*(backend: var TerminalBackend,
   backend.hadEvents = false
   backend.lastEvents = backend.inputParser.parseInput(inputBytes)
   backend.hadEvents = backend.lastEvents.len > 0
-  for event in backend.lastEvents:
+  for eventIndex in 0 ..< backend.lastEvents.len:
+    let event = backend.lastEvents[eventIndex]
     backend.applyInputEvent(event)
 
   let size = terminalSize()

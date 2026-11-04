@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 ## Filesystem-backed `TreeCursor` implementation for tree-table widgets.
 ##
 ## Each cursor clone has independent navigation state while sharing a cache of
@@ -25,10 +28,7 @@ type
     kinds*: Table[string, FileSystemEntryKind]
 
   FileSystemCursorLocation = ref object
-    when defined(nimony):
-      parent: nil FileSystemCursorLocation
-    else:
-      parent: FileSystemCursorLocation
+    parent: FileSystemCursorLocation
     fullPath: string
     parentPath: string
     fieldName: string
@@ -87,7 +87,7 @@ proc copyPathPrefix(path: seq[int], count: int): seq[int] =
 
 proc rebaseLocation(location: FileSystemCursorLocation, path: seq[int], depth: int): FileSystemCursorLocation =
   let locationParent = location.parent
-  var parent: nil FileSystemCursorLocation = nil
+  var parent: FileSystemCursorLocation = nil
   if locationParent != nil:
     parent = rebaseLocation(locationParent, path, depth - 1)
   result = FileSystemCursorLocation(
@@ -311,7 +311,7 @@ method exitChild*(c: FileSystemCursor): bool =
 
 # Creates a cursor rooted at `root` (defaults to the current working directory).
 # `cache` is shared across all clones of a tree; a new one is allocated if nil.
-proc fileSystemCursor*(root: string = os.getCurrentDir(), cache: nil FileSystemCache = nil): FileSystemCursor =
+proc fileSystemCursor*(root: string = os.getCurrentDir(), cache: FileSystemCache = nil): FileSystemCursor =
   let name = extractFilename(root)
   let cursorCache = if cache != nil: cast[FileSystemCache](cache) else: newFileSystemCache()
   let location = FileSystemCursorLocation(

@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 
 ## Single-line text input with persistent cursor state.
 
@@ -214,7 +217,7 @@ proc textFieldDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall.}
       cursorOffset: style.paddingX + storage.cursorX - storage.scrollOffsetX)
 
 proc textField*(b: var UiBuilder, text: var string, hint: string = "",
-  state: nil TextFieldStorage = nil, maxWidth = 0.0'f32,
+  state: TextFieldStorage = nil, maxWidth = 0.0'f32,
   minWidth = 0.0'f32): bool =
   prof("textField")
   var submitted = false

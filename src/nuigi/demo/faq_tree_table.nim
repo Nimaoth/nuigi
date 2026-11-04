@@ -108,10 +108,10 @@ method clone*(cursor: FaqCursor): TreeCursor {.gcsafe, raises: [].} =
     fieldName: cursor.fieldName,
     index: cursor.index,
   )
-  for parent in cursor.parents:
-    copy.parents.add(parent)
-  for pathIndex in cursor.path:
-    copy.path.add(pathIndex)
+  for parentIndex in 0 ..< cursor.parents.len:
+    copy.parents.add(cursor.parents[parentIndex])
+  for pathIndex in 0 ..< cursor.path.len:
+    copy.path.add(cursor.path[pathIndex])
   copy
 
 method cursorKey*(cursor: FaqCursor): string =
@@ -167,7 +167,8 @@ method resolveChild*(cursor: FaqCursor, child: TreeCursor): TreeCursor =
   if childIndex < 0 or childIndex >= cursor.post.children.len or
       cursor.post.children[childIndex].key != expected.post.key:
     childIndex = -1
-    for index, candidate in cursor.post.children:
+    for index in 0 ..< cursor.post.children.len:
+      let candidate = cursor.post.children[index]
       if candidate.key == expected.post.key:
         childIndex = index
         break

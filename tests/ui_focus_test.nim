@@ -67,7 +67,8 @@ method clone(c: FocusTreeCursor): TreeCursor =
 
 method cursorKey(c: FocusTreeCursor): string =
   result = "root"
-  for childIndex in c.path:
+  for pathIndex in 0 ..< c.path.len:
+    let childIndex = c.path[pathIndex]
     result.add("/")
     result.add($childIndex)
 
@@ -116,7 +117,7 @@ proc testTreeTableFocusNavigation() =
     b.node("focus-tree-table"):
       discard b.size(400.0'f32, 400.0'f32)
       if not initialized:
-        treeStorage = TreeTable(cursor: root)
+        treeStorage = newTreeTable(root)
         treeStorage.expandAll()
         b.nodeStorage(b.currentNode, treeStorage)
         initialized = true

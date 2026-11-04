@@ -1,3 +1,6 @@
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 import nuigi, nuigi/widgets/windows, nuigi/core/vecmath
 
 {.passL: "-Lbuild".}
@@ -28,7 +31,7 @@ proc windowOrder(b: UiBuilder): seq[UiNodeId] =
   for childIndex in b.children(windowSpaceIndex):
     result.add b.frame.nodes[childIndex].id
 
-proc windowSpaceStorage(b: var UiBuilder): nil WindowSpaceStorage =
+proc windowSpaceStorage(b: var UiBuilder): WindowSpaceStorage =
   let windowSpaceIndex = b.currentNodeIndex(b.windows)
   if windowSpaceIndex < 0:
     return nil
@@ -43,7 +46,7 @@ proc requiredWindowSpaceStorage(b: var UiBuilder): WindowSpaceStorage =
     assert false, "window space storage is unavailable"
   return stored
 
-proc windowStorage(b: var UiBuilder, windowId: UiNodeId): nil WindowStorage =
+proc windowStorage(b: var UiBuilder, windowId: UiNodeId): WindowStorage =
   let windowIndex = b.currentNodeIndex(windowId)
   if windowIndex < 0:
     return nil

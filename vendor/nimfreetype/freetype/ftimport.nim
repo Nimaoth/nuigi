@@ -5,6 +5,9 @@
 #
 #-----------------------------------------
 
+when defined(nimony):
+  {.feature: "lenientnils".}
+
 when defined(MACOSX):
   const FT_LIB_NAME* = "libfreetype(-6|.6|).dylib"
 elif defined(UNIX):
@@ -15,6 +18,8 @@ else:
 when defined(emscripten):
   {.passL: "-sUSE_FREETYPE=1".}
   {.pragma: ftimport, cdecl, importc.}
+elif defined(nimNativeBackend):
+  {.pragma: ftimport, cdecl, importc, dynlib: FT_LIB_NAME.}
 elif defined(freetypeStatic):
   when defined(vcc):
     {.link: "freetype.lib".}

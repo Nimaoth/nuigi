@@ -1626,10 +1626,10 @@ iterator nodeStorageParents*(b: var UiBuilder): UiNodeStorageData =
   for index in countdown(b.storageParentStack.high, 0):
     let nodeId = b.storageParentStack[index].uint64
     if b.nodeStorage.hasKey(nodeId):
-      var found = b.nodeStorage.getOrQuit(nodeId).addr
-      found.lastAccess = b.frameCtx.input.frameIndex
-      if found.data != nil:
-        yield found.data
+      b.nodeStorage.getOrQuit(nodeId).lastAccess = b.frameCtx.input.frameIndex
+      let data = b.nodeStorage.getOrQuit(nodeId).data
+      if data != nil:
+        yield data
 
 proc ensureNodeText*(b: var UiBuilder, node: ptr UiNode): var UiNodeText {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's text data.
@@ -3601,10 +3601,11 @@ proc processKeyboardFocus(b: var UiBuilder, input: UiInputSnapshot) =
     target = b.frame.focusItems[current].shiftNavigationTargets[direction]
   if target == noneNodeId():
     target = b.frame.focusItems[current].navigationTargets[direction]
-  for item in b.frame.focusItems:
-    if item.nodeId == target and item.focusItemAvailable():
+  for focusIndex in 0 ..< b.frame.focusItems.len:
+    let item = b.frame.focusItems[focusIndex].addr
+    if item.nodeId == target and item[].focusItemAvailable():
       let previousFocusedNode = b.focusedNode
-      b.applyFocusedItem(item, input.frameIndex)
+      b.applyFocusedItem(item[], input.frameIndex)
       b.focusNavigationHandled = true
       b.focusChangedByKeyboard = b.focusedNode != previousFocusedNode
       return
@@ -3915,9 +3916,10 @@ proc insertVirtualTrees*(b: var UiBuilder) =
     return
 
   var finishedIndices: seq[int] = @[]
-  for vi, v in b.virtualNodes.mpairs:
-    if v.nodes.len == 0:
+  for vi in 0 ..< b.virtualNodes.len:
+    if b.virtualNodes[vi].nodes.len == 0:
       continue
+    var v = move(b.virtualNodes[vi])
 
     let parentIdx = b.nodeIndex(v.parent)
     let parentIndex = if parentIdx >= 0: parentIdx else: 0
@@ -4014,7 +4016,9 @@ proc insertVirtualTrees*(b: var UiBuilder) =
         a.currentValue = a.currentValue + (a.targetValue - a.currentValue) * blend
         if abs(a.targetValue - a.currentValue) <= 0.001'f32:
           a.currentValue = a.targetValue
-        setAnimatedFieldValue(b, b.frame.nodes[startIdx], a.fieldOffset, a.currentValue)
+        var animatedNode = b.frame.nodes[startIdx]
+        setAnimatedFieldValue(b, animatedNode, a.fieldOffset, a.currentValue)
+        b.frame.nodes[startIdx] = animatedNode
       syncVirtualTreeFromFrame(b, v, startIdx, baseStyle, baseGap, baseAnchor, baseTransform)
       var allFinished = true
       for a in v.animations:
@@ -4023,6 +4027,7 @@ proc insertVirtualTrees*(b: var UiBuilder) =
           break
       if allFinished:
         finishedIndices.add(vi)
+    b.virtualNodes[vi] = move(v)
 
   # Drop virtual nodes whose animations have all reached their target; their last
   # inserted frame node remains, but they are no longer re-spliced on future frames.
@@ -5232,6 +5237,12 @@ proc setAnimatedField[T](
   else:
     {.error: "Unsupported animated composite type".}
 
+template assignAnimatedField(b: var UiBuilder, destination: untyped,
+    nodeIdx, fieldOffset, value: untyped) =
+  block:
+    let animatedValue = b.setAnimatedField(nodeIdx, fieldOffset, value)
+    destination = animatedValue
+
 proc beginAnimation*(b: var UiBuilder, trigger = true) =
   ## Begin an animation block. When trigger is true, new animation tracks are created on first use.
   let idx = b.stack[^1]
@@ -5851,8 +5862,8 @@ proc sizeToParentXAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
 
   let parent = b.frame.nodes[parentIdx].addr
   let nodeStyle = b.nodeStyle(parent)
-  b.currentNode.minSize.x = b.setAnimatedField(idx, UiNodeFieldMinSizeX, parent.minSize.x - nodeStyle.paddingX * 2)
-  b.currentNode.maxSize.x = b.setAnimatedField(idx, UiNodeFieldMaxSizeX, parent.maxSize.x - nodeStyle.paddingX * 2)
+  assignAnimatedField(b, b.currentNode.minSize.x, idx, UiNodeFieldMinSizeX, parent.minSize.x - nodeStyle.paddingX * 2)
+  assignAnimatedField(b, b.currentNode.maxSize.x, idx, UiNodeFieldMaxSizeX, parent.maxSize.x - nodeStyle.paddingX * 2)
   let parentHasFillX = FillX in parent.flags
   let parentHasFitX = FitX in parent.flags
   if parentHasFillX:
@@ -5860,7 +5871,7 @@ proc sizeToParentXAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if parentHasFitX:
     discard b.fitX()
   if not parentHasFillX and not parentHasFitX:
-    b.currentNode.size.x = b.setAnimatedField(idx, UiNodeFieldSizeX, parent.size.x - nodeStyle.paddingX * 2)
+    assignAnimatedField(b, b.currentNode.size.x, idx, UiNodeFieldSizeX, parent.size.x - nodeStyle.paddingX * 2)
   b
 
 proc sizeToParentY*(b: var UiBuilder): var UiBuilder {.discardable.} =
@@ -5895,8 +5906,8 @@ proc sizeToParentYAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
 
   let parent = b.frame.nodes[parentIdx].addr
   let nodeStyle = b.nodeStyle(parent)
-  b.currentNode.minSize.y = b.setAnimatedField(idx, UiNodeFieldMinSizeY, parent.minSize.y - nodeStyle.paddingY * 2)
-  b.currentNode.maxSize.y = b.setAnimatedField(idx, UiNodeFieldMaxSizeY, parent.maxSize.y - nodeStyle.paddingY * 2)
+  assignAnimatedField(b, b.currentNode.minSize.y, idx, UiNodeFieldMinSizeY, parent.minSize.y - nodeStyle.paddingY * 2)
+  assignAnimatedField(b, b.currentNode.maxSize.y, idx, UiNodeFieldMaxSizeY, parent.maxSize.y - nodeStyle.paddingY * 2)
   let parentHasFillY = FillY in parent.flags
   let parentHasFitY = FitY in parent.flags
   if parentHasFillY:
@@ -5904,7 +5915,7 @@ proc sizeToParentYAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if parentHasFitY:
     discard b.fitY()
   if not parentHasFillY and not parentHasFitY:
-    b.currentNode.size.y = b.setAnimatedField(idx, UiNodeFieldSizeY, parent.size.y - nodeStyle.paddingY * 2)
+    assignAnimatedField(b, b.currentNode.size.y, idx, UiNodeFieldSizeY, parent.size.y - nodeStyle.paddingY * 2)
   b
 
 proc sizeToParent*(b: var UiBuilder): var UiBuilder {.discardable.} =
@@ -5947,10 +5958,10 @@ proc sizeToParentAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
 
   let parent = b.frame.nodes[parentIdx].addr
   let nodeStyle = b.nodeStyle(parent)
-  b.currentNode.minSize.x = b.setAnimatedField(idx, UiNodeFieldMinSizeX, parent.minSize.x - nodeStyle.paddingX * 2)
-  b.currentNode.maxSize.x = b.setAnimatedField(idx, UiNodeFieldMaxSizeX, parent.maxSize.x - nodeStyle.paddingX * 2)
-  b.currentNode.minSize.y = b.setAnimatedField(idx, UiNodeFieldMinSizeY, parent.minSize.y - nodeStyle.paddingY * 2)
-  b.currentNode.maxSize.y = b.setAnimatedField(idx, UiNodeFieldMaxSizeY, parent.maxSize.y - nodeStyle.paddingY * 2)
+  assignAnimatedField(b, b.currentNode.minSize.x, idx, UiNodeFieldMinSizeX, parent.minSize.x - nodeStyle.paddingX * 2)
+  assignAnimatedField(b, b.currentNode.maxSize.x, idx, UiNodeFieldMaxSizeX, parent.maxSize.x - nodeStyle.paddingX * 2)
+  assignAnimatedField(b, b.currentNode.minSize.y, idx, UiNodeFieldMinSizeY, parent.minSize.y - nodeStyle.paddingY * 2)
+  assignAnimatedField(b, b.currentNode.maxSize.y, idx, UiNodeFieldMaxSizeY, parent.maxSize.y - nodeStyle.paddingY * 2)
   let parentHasFillX = FillX in parent.flags
   let parentHasFillY = FillY in parent.flags
   let parentHasFitX = FitX in parent.flags
@@ -5964,9 +5975,9 @@ proc sizeToParentAnim*(b: var UiBuilder): var UiBuilder {.discardable.} =
   if parentHasFitY:
     discard b.fitY()
   if not parentHasFillX and not parentHasFitX:
-    b.currentNode.size.x = b.setAnimatedField(idx, UiNodeFieldSizeX, parent.size.x - nodeStyle.paddingX * 2)
+    assignAnimatedField(b, b.currentNode.size.x, idx, UiNodeFieldSizeX, parent.size.x - nodeStyle.paddingX * 2)
   if not parentHasFillY and not parentHasFitY:
-    b.currentNode.size.y = b.setAnimatedField(idx, UiNodeFieldSizeY, parent.size.y - nodeStyle.paddingY * 2)
+    assignAnimatedField(b, b.currentNode.size.y, idx, UiNodeFieldSizeY, parent.size.y - nodeStyle.paddingY * 2)
   b
 
 proc fillBackground*(b: var UiBuilder): var UiBuilder {.discardable.} =
@@ -6004,7 +6015,7 @@ proc backgroundColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.dis
   ## Animated version of backgroundColor. Smoothly transitions the fill color.
   let idx = b.stack[^1]
   b.currentNode.flags.incl FillBackground
-  b.ensureNodeStyle(b.currentNode).fillColor = b.setAnimatedField(idx, UiNodeFieldStyleFillColorR, value)
+  assignAnimatedField(b, b.ensureNodeStyle(b.currentNode).fillColor, idx, UiNodeFieldStyleFillColorR, value)
   b
 
 proc textColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
@@ -6024,7 +6035,7 @@ proc underlineThickness*(b: var UiBuilder, value: float32): var UiBuilder {.disc
 proc textColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
   ## Animated version of textColor. Smoothly transitions the text color.
   let idx = b.stack[^1]
-  b.ensureNodeText(b.currentNode).textColor = b.setAnimatedField(idx, UiNodeFieldStyleTextColorR, value)
+  assignAnimatedField(b, b.ensureNodeText(b.currentNode).textColor, idx, UiNodeFieldStyleTextColorR, value)
   b
 
 proc borderColor*(b: var UiBuilder, value: UiColor): var UiBuilder {.discardable.} =
@@ -6038,7 +6049,7 @@ proc borderColorAnim*(b: var UiBuilder, value: UiColor): var UiBuilder {.discard
   ## Animated version of borderColor. Smoothly transitions the border color.
   let idx = b.stack[^1]
   let style = b.ensureNodeStyle(b.currentNode).addr
-  style.borderColor = b.setAnimatedField(idx, UiNodeFieldStyleBorderColorR, value)
+  assignAnimatedField(b, style.borderColor, idx, UiNodeFieldStyleBorderColorR, value)
   style.borderColors = default(UiBorderColors)
   b
 
@@ -6086,7 +6097,7 @@ proc borderWidthAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discard
   ## Animated version of borderWidth. Smoothly transitions the border width.
   let idx = b.stack[^1]
   let style = b.ensureNodeStyle(b.currentNode).addr
-  style.borderWidth = b.setAnimatedField(idx, UiNodeFieldStyleBorderWidth, max(0.0'f32, value))
+  assignAnimatedField(b, style.borderWidth, idx, UiNodeFieldStyleBorderWidth, max(0.0'f32, value))
   style.borderWidths = default(UiBorderWidths)
   b
 
@@ -6111,7 +6122,7 @@ proc cornerRadiusAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discar
   ## Animated version of cornerRadius. Smoothly transitions the corner radius.
   let idx = b.stack[^1]
   let style = b.ensureNodeStyle(b.currentNode).addr
-  style.cornerRadius = b.setAnimatedField(idx, UiNodeFieldStyleCornerRadius, max(0.0'f32, value))
+  assignAnimatedField(b, style.cornerRadius, idx, UiNodeFieldStyleCornerRadius, max(0.0'f32, value))
   style.cornerRadii = default(UiCornerRadii)
   b
 
@@ -6206,7 +6217,7 @@ proc minSizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.
   ## Animated version of minSize. Smoothly transitions the minimum size constraint.
   let idx = b.stack[^1]
   let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
-  b.currentNode.minSize = b.setAnimatedField(idx, UiNodeFieldMinSizeX, target)
+  assignAnimatedField(b, b.currentNode.minSize, idx, UiNodeFieldMinSizeX, target)
   if b.currentNode.maxSize.x < b.currentNode.minSize.x:
     b.currentNode.maxSize.x = b.currentNode.minSize.x
   if b.currentNode.maxSize.y < b.currentNode.minSize.y:
@@ -6229,7 +6240,7 @@ proc maxSizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.
   ## Animated version of maxSize. Smoothly transitions the maximum size constraint.
   let idx = b.stack[^1]
   let target = vec2(max(0.0'f32, w), max(0.0'f32, h))
-  b.currentNode.maxSize = b.setAnimatedField(idx, UiNodeFieldMaxSizeX, target)
+  assignAnimatedField(b, b.currentNode.maxSize, idx, UiNodeFieldMaxSizeX, target)
   if b.currentNode.maxSize.x < b.currentNode.minSize.x:
     b.currentNode.maxSize.x = b.currentNode.minSize.x
   if b.currentNode.maxSize.y < b.currentNode.minSize.y:
@@ -6327,8 +6338,8 @@ proc anchorsAnim*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {
   b.currentNode.flags.incl AnchorX
   b.currentNode.flags.incl AnchorY
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeft = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftX, topLeft)
-  nodeAnchor.bottomRight = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightX, bottomRight)
+  assignAnimatedField(b, nodeAnchor.topLeft, idx, UiNodeFieldAnchorTopLeftX, topLeft)
+  assignAnimatedField(b, nodeAnchor.bottomRight, idx, UiNodeFieldAnchorBottomRightX, bottomRight)
   b.markParentForPostProcess()
   b
 
@@ -6348,8 +6359,8 @@ proc anchorsXAnim*(b: var UiBuilder, topLeftX, bottomRightX: float32): var UiBui
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorX
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeft.x = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftX, topLeftX)
-  nodeAnchor.bottomRight.x = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightX, bottomRightX)
+  assignAnimatedField(b, nodeAnchor.topLeft.x, idx, UiNodeFieldAnchorTopLeftX, topLeftX)
+  assignAnimatedField(b, nodeAnchor.bottomRight.x, idx, UiNodeFieldAnchorBottomRightX, bottomRightX)
   b.markParentForPostProcess()
   b
 
@@ -6369,8 +6380,8 @@ proc anchorsYAnim*(b: var UiBuilder, topLeftY, bottomRightY: float32): var UiBui
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorY
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeft.y = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftY, topLeftY)
-  nodeAnchor.bottomRight.y = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightY, bottomRightY)
+  assignAnimatedField(b, nodeAnchor.topLeft.y, idx, UiNodeFieldAnchorTopLeftY, topLeftY)
+  assignAnimatedField(b, nodeAnchor.bottomRight.y, idx, UiNodeFieldAnchorBottomRightY, bottomRightY)
   b.markParentForPostProcess()
   b
 
@@ -6415,8 +6426,8 @@ proc offsetsAnim*(b: var UiBuilder, topLeft, bottomRight: Vec2): var UiBuilder {
   b.currentNode.flags.incl AnchorX
   b.currentNode.flags.incl AnchorY
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeftOffset = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftOffsetX, topLeft)
-  nodeAnchor.bottomRightOffset = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightOffsetX, bottomRight)
+  assignAnimatedField(b, nodeAnchor.topLeftOffset, idx, UiNodeFieldAnchorTopLeftOffsetX, topLeft)
+  assignAnimatedField(b, nodeAnchor.bottomRightOffset, idx, UiNodeFieldAnchorBottomRightOffsetX, bottomRight)
   b.markParentForPostProcess()
   b
 
@@ -6436,8 +6447,8 @@ proc offsetsXAnim*(b: var UiBuilder, left, right: float32): var UiBuilder {.disc
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorX
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeftOffset.x = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftOffsetX, left)
-  nodeAnchor.bottomRightOffset.x = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightOffsetX, right)
+  assignAnimatedField(b, nodeAnchor.topLeftOffset.x, idx, UiNodeFieldAnchorTopLeftOffsetX, left)
+  assignAnimatedField(b, nodeAnchor.bottomRightOffset.x, idx, UiNodeFieldAnchorBottomRightOffsetX, right)
   b.markParentForPostProcess()
   b
 
@@ -6457,8 +6468,8 @@ proc offsetsYAnim*(b: var UiBuilder, top, bottom: float32): var UiBuilder {.disc
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorY
   let nodeAnchor = b.ensureNodeAnchor(b.currentNode).addr
-  nodeAnchor.topLeftOffset.y = b.setAnimatedField(idx, UiNodeFieldAnchorTopLeftOffsetY, top)
-  nodeAnchor.bottomRightOffset.y = b.setAnimatedField(idx, UiNodeFieldAnchorBottomRightOffsetY, bottom)
+  assignAnimatedField(b, nodeAnchor.topLeftOffset.y, idx, UiNodeFieldAnchorTopLeftOffsetY, top)
+  assignAnimatedField(b, nodeAnchor.bottomRightOffset.y, idx, UiNodeFieldAnchorBottomRightOffsetY, bottom)
   b.markParentForPostProcess()
   b
 
@@ -6489,7 +6500,7 @@ proc pivotAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorX
   b.currentNode.flags.incl AnchorY
-  b.ensureNodeAnchor(b.currentNode).pivot = b.setAnimatedField(idx, UiNodeFieldAnchorPivotX, value)
+  assignAnimatedField(b, b.ensureNodeAnchor(b.currentNode).pivot, idx, UiNodeFieldAnchorPivotX, value)
   b.markParentForPostProcess()
   b
 
@@ -6506,7 +6517,7 @@ proc pivotXAnim*(b: var UiBuilder, x: float32): var UiBuilder {.discardable.} =
   ## Call `finishAnchors` after configuring anchor properties for them to take effect.
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorX
-  b.ensureNodeAnchor(b.currentNode).pivot.x = b.setAnimatedField(idx, UiNodeFieldAnchorPivotX, x)
+  assignAnimatedField(b, b.ensureNodeAnchor(b.currentNode).pivot.x, idx, UiNodeFieldAnchorPivotX, x)
   b.markParentForPostProcess()
   b
 
@@ -6523,7 +6534,7 @@ proc pivotYAnim*(b: var UiBuilder, y: float32): var UiBuilder {.discardable.} =
   ## Call `finishAnchors` after configuring anchor properties for them to take effect.
   let idx = b.stack[^1]
   b.currentNode.flags.incl AnchorY
-  b.ensureNodeAnchor(b.currentNode).pivot.y = b.setAnimatedField(idx, UiNodeFieldAnchorPivotY, y)
+  assignAnimatedField(b, b.ensureNodeAnchor(b.currentNode).pivot.y, idx, UiNodeFieldAnchorPivotY, y)
   b.markParentForPostProcess()
   b
 
@@ -6545,7 +6556,7 @@ proc position*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
 proc positionAnim*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
   ## Animated version of position. Position is relative to parent. Smoothly transitions the node's position.
   let idx = b.stack[^1]
-  b.currentNode.pos = b.setAnimatedField(idx, UiNodeFieldPosX, vec2(x, y))
+  assignAnimatedField(b, b.currentNode.pos, idx, UiNodeFieldPosX, vec2(x, y))
   b
 
 proc animatePos*(b: var UiBuilder, speed = DefaultAnimationSpeed): var UiBuilder {.discardable.} =
@@ -6579,7 +6590,7 @@ proc transformOffset*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardabl
 proc transformOffsetAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
   ## Animated version of transformOffset. Smoothly transitions the offset.
   let idx = b.stack[^1]
-  b.ensureNodeTransform(b.currentNode).offset = b.setAnimatedField(idx, UiNodeFieldTransformOffsetX, value)
+  assignAnimatedField(b, b.ensureNodeTransform(b.currentNode).offset, idx, UiNodeFieldTransformOffsetX, value)
   b
 
 proc transformOffset*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
@@ -6600,7 +6611,7 @@ proc transformRotation*(b: var UiBuilder, value: float32): var UiBuilder {.disca
 proc transformRotationAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Animated version of transformRotation. Smoothly transitions the rotation.
   let idx = b.stack[^1]
-  b.ensureNodeTransform(b.currentNode).rotation = b.setAnimatedField(idx, UiNodeFieldTransformRotation, value)
+  assignAnimatedField(b, b.ensureNodeTransform(b.currentNode).rotation, idx, UiNodeFieldTransformRotation, value)
   b
 
 proc transformScale*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
@@ -6611,7 +6622,7 @@ proc transformScale*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable
 proc transformScaleAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
   ## Animated version of transformScale. Smoothly transitions the scale.
   let idx = b.stack[^1]
-  b.ensureNodeTransform(b.currentNode).scale = b.setAnimatedField(idx, UiNodeFieldTransformScaleX, value)
+  assignAnimatedField(b, b.ensureNodeTransform(b.currentNode).scale, idx, UiNodeFieldTransformScaleX, value)
   b
 
 proc transformScale*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
@@ -6642,7 +6653,7 @@ proc transformPivot*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable
 proc transformPivotAnim*(b: var UiBuilder, value: Vec2): var UiBuilder {.discardable.} =
   ## Animated version of transformPivot. Smoothly transitions the pivot point.
   let idx = b.stack[^1]
-  b.ensureNodeTransform(b.currentNode).pivot = b.setAnimatedField(idx, UiNodeFieldTransformPivotX, value)
+  assignAnimatedField(b, b.ensureNodeTransform(b.currentNode).pivot, idx, UiNodeFieldTransformPivotX, value)
   b
 
 proc transformPivot*(b: var UiBuilder, x, y: float32): var UiBuilder {.discardable.} =
@@ -6665,7 +6676,7 @@ proc width*(b: var UiBuilder, w: float32): var UiBuilder {.discardable.} =
 proc widthAnim*(b: var UiBuilder, w: float32): var UiBuilder {.discardable.} =
   ## Animated version of width. Smoothly transitions the node's width.
   let idx = b.stack[^1]
-  b.currentNode.size.x = b.setAnimatedField(idx, UiNodeFieldSizeX, w)
+  assignAnimatedField(b, b.currentNode.size.x, idx, UiNodeFieldSizeX, w)
   b.currentNode.flags.incl SizeXKnown
   b.clampNodeSize(b.currentNode)
   b
@@ -6680,7 +6691,7 @@ proc height*(b: var UiBuilder, h: float32): var UiBuilder {.discardable.} =
 proc heightAnim*(b: var UiBuilder, h: float32): var UiBuilder {.discardable.} =
   ## Animated version of height. Smoothly transitions the node's height.
   let idx = b.stack[^1]
-  b.currentNode.size.y = b.setAnimatedField(idx, UiNodeFieldSizeY, h)
+  assignAnimatedField(b, b.currentNode.size.y, idx, UiNodeFieldSizeY, h)
   b.currentNode.flags.incl SizeYKnown
   b.clampNodeSize(b.currentNode)
   b
@@ -6696,7 +6707,7 @@ proc size*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
 proc sizeAnim*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =
   ## Animated version of size. Smoothly transitions the node's size.
   let idx = b.stack[^1]
-  b.currentNode.size = b.setAnimatedField(idx, UiNodeFieldSizeX, vec2(w, h))
+  assignAnimatedField(b, b.currentNode.size, idx, UiNodeFieldSizeX, vec2(w, h))
   b.currentNode.flags.incl SizeXKnown
   b.currentNode.flags.incl SizeYKnown
   b.clampNodeSize(b.currentNode)
@@ -6830,8 +6841,8 @@ proc paddingAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable
   ## Animated version of padding. Smoothly transitions the padding value.
   let idx = b.stack[^1]
   let nodeStyle = b.ensureNodeStyle(b.currentNode).addr
-  nodeStyle.paddingX = b.setAnimatedField(idx, UiNodeFieldStylePaddingX, value)
-  nodeStyle.paddingY = b.setAnimatedField(idx, UiNodeFieldStylePaddingY, value)
+  assignAnimatedField(b, nodeStyle.paddingX, idx, UiNodeFieldStylePaddingX, value)
+  assignAnimatedField(b, nodeStyle.paddingY, idx, UiNodeFieldStylePaddingY, value)
   b.updateNodeFit(b.currentNode)
   b.frame.initCursorForLayout(b.currentNode)
   b
@@ -6852,7 +6863,7 @@ proc gapRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable
 proc gapAnim*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =
   ## Animated version of gap. Smoothly transitions the gap value.
   let idx = b.stack[^1]
-  b.ensureNodeGap(b.currentNode) = b.setAnimatedField(idx, UiNodeFieldGap, value)
+  assignAnimatedField(b, b.ensureNodeGap(b.currentNode), idx, UiNodeFieldGap, value)
   b
 
 proc gapAnimRelative*(b: var UiBuilder, value: float32): var UiBuilder {.discardable.} =

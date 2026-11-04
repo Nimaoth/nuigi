@@ -163,11 +163,6 @@ proc emptyRender2DMaterial(): Render2DMaterial =
     pipeline: nil,
   )
 
-proc copyRenderCommands(commands: seq[Command]): seq[Command] =
-  result = @[]
-  for command in commands:
-    result.add command
-
 proc deinitRender2D*(r: var Render2D)
 
 proc initRender2D*(r: var Render2D, fontRender: ptr FontRender, device: GPUDevice, targetFormat: GPUTextureFormat = render2DTargetFormat,
@@ -532,7 +527,7 @@ proc createPipeline(r: var Render2D, targetFormat: GPUTextureFormat, sample_coun
   r.pipelineFormat = targetFormat
   r.pipeline != nil
 
-proc buildMaterialPipeline(r: var Render2D, fragmentShader: GPUShader): GPUGraphicsPipeline =
+proc buildMaterialPipeline(r {.byref.}: Render2D, fragmentShader: GPUShader): GPUGraphicsPipeline =
   prof("Render2D.buildMaterialPipeline")
   if r.device == nil or r.vertexShader == nil or fragmentShader == nil:
     return nil
@@ -842,12 +837,12 @@ proc beginRender*(r: var Render2D, renderer: Renderer, targetWidth, targetHeight
   if r.pipelineFormat != targetFormat or r.sample_count != sample_count:
     if not createPipeline(r, targetFormat, sample_count):
       return false
-    for id, m in r.materials.mpairs:
-      let newPipe = r.buildMaterialPipeline(m.fragmentShader)
+    for id, material in r.materials.mpairs:
+      let newPipe = r.buildMaterialPipeline(material.fragmentShader)
       if newPipe != nil:
-        if m.pipeline != nil:
-          releaseGPUGraphicsPipeline(r.device, m.pipeline)
-        m.pipeline = newPipe
+        if material.pipeline != nil:
+          releaseGPUGraphicsPipeline(r.device, material.pipeline)
+        material.pipeline = newPipe
 
   # try:
   #   let (reload, newestSourceTime) = uiShaderSourcesNeedReload(r)
@@ -1446,8 +1441,8 @@ proc flush(r: var Render2D): bool =
       uploadToGPUBuffer(copyPass, src.addr, dst.addr, true)
     endGPUCopyPass(copyPass)
 
-  let commands = copyRenderCommands(r.commands)
-  for c in commands:
+  for commandIndex in 0 ..< r.commands.len:
+    let c = r.commands[commandIndex].addr
     case c.kind
     of cClear:
       prof("Render2D.clear")
