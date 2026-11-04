@@ -118,7 +118,7 @@ jobs:
       - name: Clone Nimony
         run: |
           git clone https://github.com/nim-lang/nimony
-          git -C nimony checkout a843b98c91d1c57eb5e1f9e21b23435a3ad898ee
+          git -C nimony checkout 90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Cache Nimony build
         id: nimony-cache
@@ -128,7 +128,7 @@ jobs:
             nimony/bin
             nimony/nimcache2
             nimony/hastur.exe
-          key: ${{ runner.os }}-nimony-a843b98c91d1c57eb5e1f9e21b23435a3ad898ee
+          key: ${{ runner.os }}-nimony-90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Build Nimony
         if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }}
