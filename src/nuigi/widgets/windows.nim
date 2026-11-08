@@ -798,6 +798,7 @@ proc buildWindowTitleBar(b: var UiBuilder, title: string, storage: WindowStorage
     result = b.currentNode.id
     discard b.copyStyleIndex(UiStyleIndexWindowTitleBar)
     discard b.copyTextStyleIndex(UiStyleIndexWindowTitleBarText)
+    discard b.semanticRole(SemanticTitleBar)
     let titleBarStyle = b.currentNodeStyle()
     titleBarStyle.cornerRadius = 0.0'f32
     titleBarStyle.cornerRadii = UiCornerRadii(
@@ -822,16 +823,31 @@ proc buildWindowTitleBar(b: var UiBuilder, title: string, storage: WindowStorage
     var collapseBtnId = noneNodeId()
     b.node:
       discard b.size(textHeight, textHeight).noChildHover()
+      discard b.semanticRole(SemanticButton)
+      discard b.semanticLabel(
+        if storage.collapsed: "Expand window" else: "Collapse window")
+      discard b.semanticState(
+        if storage.collapsed: {SemanticCollapsed} else: {SemanticExpanded})
       if b.wasHovered():
         discard b.copyStyleIndex(UiStyleIndexWindowTitleBarCollapseHover).fillBackground()
       collapseBtnId = b.currentNode.id
       b.node("window-collapse-btn"):
         discard b.copyTextStyleIndex(UiStyleIndexWindowTitleBarText)
+        # Decorative +/- glyph.
+        discard b.semanticHidden()
         discard b.fitX().fitY().alignCenter()
         discard b.text(if storage.collapsed: "+" else: "-")
 
     if b.previousOutput.clickedId == collapseBtnId:
       storage.collapsed = not storage.collapsed
+    var expanded = not storage.collapsed
+    discard b.applySemanticExpanded(collapseBtnId, expanded, activate = true)
+    storage.collapsed = not expanded
+    when not defined(nuiNoSemantics):
+      let collapseIndex = b.nodeIndex(collapseBtnId)
+      if collapseIndex >= 0:
+        b.ensureNodeSemantics(b.nodes[collapseIndex].addr).label =
+          (if storage.collapsed: "Expand window" else: "Collapse window").uiString
 
 proc buildDockTabBar(b: var UiBuilder, dock: DockSpace, title: string) =
   ## Tab bar shown instead of the title bar of a docked window. It lists the
@@ -839,6 +855,7 @@ proc buildDockTabBar(b: var UiBuilder, dock: DockSpace, title: string) =
   let terminal = b.backendType == UiBackendType.Terminal
   b.node("dock-tab-bar"):
     discard b.styleIndex(UiStyleIndexTabBarHeader)
+    discard b.semanticRole(SemanticTabList)
     let style = b.currentNodeStyle()
     style.cornerRadius = 0.0'f32
     style.cornerRadii = default(UiCornerRadii)
@@ -851,17 +868,38 @@ proc buildDockTabBar(b: var UiBuilder, dock: DockSpace, title: string) =
     discard b.fillBackground().maskChildren()
     let tabs = dock.layout.findTabs(title)
     let tabTitles = if tabs >= 0: dock.layout.nodes[tabs].windows else: @[title]
+    var renderedTitles: seq[string] = @[]
+    var renderedNodeIndices: seq[int] = @[]
     for tabTitle in tabTitles:
       if tabTitle != title and tabTitle notin dock.visibleWindows:
         continue
       let active = tabTitle == title
       b.nodeWithId(dockTabId(tabTitle)):
+        let tabNodeIdx = b.currentNodeIndex
         discard b.styleIndex(if active: UiStyleIndexTabBarItemActive else: UiStyleIndexTabBarItem)
         discard b.copyTextStyleIndex(if active: UiStyleIndexTabBarItemActiveText else: UiStyleIndexTabBarItemText)
+        discard b.semanticRole(SemanticTab)
+        discard b.semanticActions({SemanticSelect})
+        if active:
+          discard b.semanticState({SemanticSelected})
         if terminal:
           discard b.padding(0).borderWidth(0)
         discard b.fitX().fitY().fillBackground()
         discard b.text(tabTitle)
+        renderedTitles.add(tabTitle)
+        renderedNodeIndices.add(tabNodeIdx)
+        var request = default(UiSemanticRequest)
+        while b.takeSemanticRequest(dockTabId(tabTitle), {SemanticSelect}, request):
+          dock.layout.activateTab(tabTitle)
+
+    when not defined(nuiNoSemantics):
+      let activeTitle = if tabs >= 0: dock.visibleActiveWindow(tabs) else: title
+      for i in 0 ..< renderedNodeIndices.len:
+        if renderedNodeIndices[i] >= 0 and renderedNodeIndices[i] < b.nodes.len:
+          let semantics = b.ensureNodeSemantics(b.nodes[renderedNodeIndices[i]].addr).addr
+          semantics.states.excl {SemanticSelected}
+          if renderedTitles[i] == activeTitle:
+            semantics.states.incl SemanticSelected
 
 proc finishWindow(b: var UiBuilder, dock: DockSpace, title: string,
     storage: WindowStorage, placement: WindowPlacement, windowNodeIndex: int,
@@ -922,6 +960,8 @@ template window*(b: var UiBuilder, title: string, inX, inY, width, height: float
         b.configureHiddenWindowNode()
       else:
         b.configureWindowNode(windowStorage)
+        discard b.semanticRole(SemanticWindow)
+        discard b.semanticLabel(title)
         if placement == WindowDocked:
           let windowStyle = b.currentNodeStyle()
           windowStyle.cornerRadius = 0.0'f32

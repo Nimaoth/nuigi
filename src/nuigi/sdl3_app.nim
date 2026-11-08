@@ -1,20 +1,69 @@
-## SDL3/Nuigi desktop host. Keep the initialized app at a stable address until
-## deinit: the font callbacks and Render2D refer to its font renderer.
+## SDL3/Nuigi host. Keep the initialized app at a stable address until deinit:
+## font callbacks and rendering refer to its font renderer. Emscripten uses
+## SDL's browser renderer, an embedded default font, and requestAnimationFrame.
+## Browser run transfers control to Emscripten without returning normally;
+## the app must outlive all browser callbacks. Desktop run blocks until quit.
+## Font callbacks use a global renderer pointer; only one app may be active.
 import std/[os, math, strutils, tables, hashes]
 import nuigi
 import nuigi/backend/sdl3/sdl3
 import nuigi/core/vecmath
 import nuigi/rendering/render2d
+import nuigi/core/array_view
 import nuigi/text/fonts
 import nuigi/widgets
 import nuigi/widgets/[windows, plot]
-import nuigi/debug/[debug_panel, profiler, profiler_ui]
+import nuigi/debug/[debug_panel, profiler]
+when not defined(nimony):
+  import nuigi/debug/profiler_ui
 import nuigi/styling/theme_editor
 import nuigi/demo/[demo_window, gamepad_window]
+when defined(nuiAccessKit):
+  import nuigi/nuigi_accesskit
 
 include nuigi/util/compat2
 
+template appError(exceptionType: untyped, message: string) =
+  when defined(nimony):
+    quit message
+  else:
+    raise newException(exceptionType, message)
+
 const metricHistoryLength = 256
+
+var activeFontRender: ptr FontRender
+
+proc arrangeSdl3Text(text: openArray[char], fontId: UiFontId,
+    fontSize, maxWidth: float32,
+    flags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
+  var font: ptr FontRender
+  assumeSyncBlock:
+    font = activeFontRender
+  gcsafeb:
+    font[].arrangeText(text, fontSize, fontId, maxWidth, flags)
+
+proc meshSdl3Text(arrangement: UiTextArrangement, pos, offset: Vec2,
+    color: UiColor, transform: UiAffine2):
+    tuple[data: ptr UncheckedArray[UiVertex], count: int]
+    {.gcsafe, raises: [].} =
+  var font: ptr FontRender
+  assumeSyncBlock:
+    font = activeFontRender
+  let vertices = font[].buildTextMesh(arrangement, pos, offset, color,
+    transform)
+  (cast[ptr UncheckedArray[UiVertex]](vertices.data), vertices.count)
+
+proc listSdl3Fonts(): seq[(string, UiFontId)] {.gcsafe, raises: [].} =
+  var font: ptr FontRender
+  assumeSyncBlock:
+    font = activeFontRender
+  font[].listFontFaces()
+
+proc resolveSdl3Font(name: string): UiFontId {.gcsafe, raises: [].} =
+  var font: ptr FontRender
+  assumeSyncBlock:
+    font = activeFontRender
+  max(0'i16, font[].findFont(name))
 
 type
   Sdl3AppConfig* = object
@@ -69,6 +118,10 @@ type
 
   Sdl3App* = object
     window*: Window
+    when defined(emscripten):
+      renderer: Renderer
+      fontTexture: Texture
+      clips: seq[Rect]
     gpu*: GPUDevice
     render2D*: Render2D
     fontRender*: FontRender
@@ -104,6 +157,8 @@ type
     sdlInitialized: bool
     sdlInitializedFlags: uint32
     windowClaimed: bool
+    when defined(nuiAccessKit):
+      accessKit*: NuigiAccessKit
     lastTick: uint64
     idleDelayMs: uint32
     debugPanel, debugPanel2: DebugPanel
@@ -111,6 +166,11 @@ type
     gamepad: DemoGamepadInput
     inputAccum: UiInputSnapshot
     metrics: array[3, MetricHistory]
+
+proc textForRender(ui: var UiBuilder, textIndex: uint16):
+    tuple[arrangement: ptr UiTextArrangement, color: UiColor] =
+  let text = ui.frame.texts[textIndex - 1].addr
+  result = (ui.getTextArrangement(text, -1), text.textColor)
 
 proc defaultSdl3AppConfig*(title = "Nuigi", width = 1280,
     height = 720): Sdl3AppConfig =
@@ -122,7 +182,7 @@ proc defaultSdl3AppConfig*(title = "Nuigi", width = 1280,
     renderOnDemand: true, sampleCount: GPU_SAMPLECOUNT_8, idleDelayMs: 10)
 
 proc sdlFailure(operation: string) =
-  raise newException(IOError, operation & ": " & $getError())
+  appError(IOError, operation & ": " & $getError())
 
 func toUiKey*(key: Keycode): tuple[found: bool, uiKey: UiKey] =
   case key.uint32
@@ -182,6 +242,7 @@ func toUiKey*(key: Keycode): tuple[found: bool, uiKey: UiKey] =
   else: (false, default(UiKey))
 
 func toUiModifiers*(mods: Keymod): UiModifiers =
+  result = {}
   if (mods.uint32 and KMOD_SHIFT) != 0: result.incl ModShift
   if (mods.uint32 and KMOD_CTRL) != 0: result.incl ModControl
   if (mods.uint32 and KMOD_ALT) != 0: result.incl ModAlt
@@ -275,7 +336,7 @@ proc needsRender*(app: var Sdl3App, hadEvents: bool): bool =
     app.fontRender.glyphPackingDeferredCount > 0 or app.fontRender.fontAtlasNeedsReset)
   not app.renderOnDemand or activity
 
-func defaultTrayIconPixels*(size: int): seq[uint8] =
+proc defaultTrayIconPixels*(size: int): seq[uint8] =
   ## Generated RGBA32 icon: an accent-colored disc with a light center.
   result = newSeq[uint8](size * size * 4)
   let center = (size.float32 - 1) * 0.5'f32
@@ -367,7 +428,7 @@ proc addTrayAction*(app: var Sdl3App, label: string,
   ## between the built-in window entries and Quit. Returns its id. Without a
   ## tray the action is still recorded, so updates are harmless no-ops.
   if callback == nil:
-    raise newException(ValueError, "Tray action requires a callback")
+    appError(ValueError, "Tray action requires a callback")
   result = app.trayActions.len
   app.trayActions.add TrayAction(label: label, checkable: checkable,
     checked: checked, enabled: enabled, callback: callback)
@@ -385,7 +446,7 @@ proc addTrayAction*(app: var Sdl3App, label: string,
 
 proc checkTrayAction(app: Sdl3App, action: int) =
   if action notin 0 ..< app.trayActions.len:
-    raise newException(IndexDefect, "Unknown tray action: " & $action)
+    appError(IndexDefect, "Unknown tray action: " & $action)
 
 proc trayActionChecked*(app: Sdl3App, action: int): bool =
   app.checkTrayAction(action)
@@ -424,6 +485,7 @@ proc clickTrayAction*(app: var Sdl3App, action: int) =
 
 proc dispatchTrayActions(app: var Sdl3App): bool =
   ## Returns true if any action callback ran.
+  result = false
   var index = 0
   while index < app.trayActions.len:
     if app.trayActions[index].clicked:
@@ -437,7 +499,7 @@ proc createIconSurface(app: var Sdl3App, config: Sdl3AppConfig) =
   let generated = config.iconPixels.len == 0
   let size = if generated: 32 else: config.iconSize
   if not generated and (size <= 0 or config.iconPixels.len != size * size * 4):
-    raise newException(ValueError,
+    appError(ValueError,
       "iconPixels must contain iconSize x iconSize RGBA32 pixels")
   let pixels = if generated: defaultTrayIconPixels(size) else: config.iconPixels
   app.trayIcon = createSurface(size.cint, size.cint, PIXELFORMAT_RGBA32)
@@ -450,7 +512,7 @@ proc setTrayIconPixels*(app: var Sdl3App, pixels: openArray[uint8], size: int) =
   ## Replaces the tray icon with `size` x `size` RGBA32 pixels. No-op without a tray.
   if app.tray == nil: return
   if size <= 0 or pixels.len != size * size * 4:
-    raise newException(ValueError,
+    appError(ValueError,
       "pixels must contain size x size RGBA32 pixels")
   let surface = createSurface(size.cint, size.cint, PIXELFORMAT_RGBA32)
   if surface == nil: sdlFailure("Could not create icon surface")
@@ -466,10 +528,14 @@ proc initTray(app: var Sdl3App, tooltip: string) =
   let props = createProperties()
   if props == 0: sdlFailure("Could not create tray properties")
   var tip = tooltip
-  discard setPointerProperty(props, PROP_TRAY_CREATE_ICON_POINTER, app.trayIcon)
-  discard setStringProperty(props, PROP_TRAY_CREATE_TOOLTIP_STRING, toCString(tip))
-  discard setPointerProperty(props, PROP_TRAY_CREATE_USERDATA_POINTER, app.addr)
-  discard setPointerProperty(props, PROP_TRAY_CREATE_LEFTCLICK_CALLBACK_POINTER,
+  var iconProperty = PROP_TRAY_CREATE_ICON_POINTER
+  var tooltipProperty = PROP_TRAY_CREATE_TOOLTIP_STRING
+  var userDataProperty = PROP_TRAY_CREATE_USERDATA_POINTER
+  var callbackProperty = PROP_TRAY_CREATE_LEFTCLICK_CALLBACK_POINTER
+  discard setPointerProperty(props, toCString(iconProperty), app.trayIcon)
+  discard setStringProperty(props, toCString(tooltipProperty), toCString(tip))
+  discard setPointerProperty(props, toCString(userDataProperty), app.addr)
+  discard setPointerProperty(props, toCString(callbackProperty),
     cast[pointer](trayLeftClicked))
   app.tray = createTrayWithProperties(props)
   destroyProperties(props)
@@ -503,7 +569,8 @@ proc initTray(app: var Sdl3App, tooltip: string) =
   discard entry("Quit", TRAYENTRY_BUTTON, trayQuitClicked)
   app.trayMenu = menu
   # Close requests are handled by the app, which decides whether to hide.
-  discard setHint(HINT_QUIT_ON_LAST_WINDOW_CLOSE, "0")
+  var hint = HINT_QUIT_ON_LAST_WINDOW_CLOSE
+  discard setHint(toCString(hint), cstring"0")
 
 proc deinit*(app: var Sdl3App) =
   app.running = false
@@ -513,10 +580,18 @@ proc deinit*(app: var Sdl3App) =
     app.tray = nil
     app.trayToggleEntry = nil
     app.trayCloseEntry = nil
-    discard resetHint(HINT_QUIT_ON_LAST_WINDOW_CLOSE)
+    var hint = HINT_QUIT_ON_LAST_WINDOW_CLOSE
+    discard resetHint(toCString(hint))
   app.trayMenu = nil
   app.trayActions.setLen(0)
   app.trayRequests = {}
+  when defined(emscripten):
+    if app.fontTexture != nil:
+      destroyTexture(app.fontTexture)
+      app.fontTexture = nil
+    if app.renderer != nil:
+      destroyRenderer(app.renderer)
+      app.renderer = nil
   if app.gpu != nil:
     discard waitForGPUIdle(app.gpu)
     app.render2D.deinitRender2D()
@@ -525,7 +600,12 @@ proc deinit*(app: var Sdl3App) =
       app.windowClaimed = false
     destroyGPUDevice(app.gpu)
     app.gpu = nil
+  assumeSyncBlock:
+    if activeFontRender == app.fontRender.addr:
+      activeFontRender = nil
   app.fontRender.deinit()
+  when defined(nuiAccessKit):
+    app.accessKit.deinit()
   if app.window != nil:
     destroyWindow(app.window)
     app.window = nil
@@ -541,11 +621,11 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
     renderUi: Sdl3RenderUiCallback, update: Sdl3UpdateCallback = nil,
     handleEvent: Sdl3EventCallback = nil) =
   if app.initialized or app.sdlInitialized:
-    raise newException(ValueError, "SDL3 app is already initialized")
+    appError(ValueError, "SDL3 app is already initialized")
   if config.width <= 0 or config.height <= 0:
-    raise newException(ValueError, "SDL3 window dimensions must be positive")
+    appError(ValueError, "SDL3 window dimensions must be positive")
   if renderUi == nil:
-    raise newException(ValueError, "SDL3 app requires a UI render callback")
+    appError(ValueError, "SDL3 app requires a UI render callback")
   app.onRenderUi = renderUi
   app.onUpdate = update
   app.onEvent = handleEvent
@@ -561,8 +641,14 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
     app.sdlInitialized = true
     app.sdlInitializedFlags = config.initFlags or INIT_VIDEO or INIT_EVENTS
     var title = config.title
+    var windowFlags = config.windowFlags
+    when defined(nuiAccessKit):
+      # The AccessKit subclassing adapter must be installed before the window
+      # is shown for the first time, so create the window hidden and show it
+      # once the adapter exists.
+      windowFlags = windowFlags or WINDOW_HIDDEN
     app.window = createWindow(toCString(title), config.width.cint,
-      config.height.cint, config.windowFlags)
+      config.height.cint, windowFlags)
     if app.window == nil: sdlFailure("Could not create SDL window")
     if config.trayEnabled or config.iconPixels.len > 0:
       app.createIconSurface(config)
@@ -570,63 +656,78 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
         sdlFailure("Could not set window icon")
     if config.trayEnabled:
       app.initTray(if config.trayTooltip.len > 0: config.trayTooltip else: config.title)
-    when defined(linux):
+    when defined(emscripten):
+      app.renderer = createRenderer(app.window, nil)
+      if app.renderer == nil: sdlFailure("Could not create SDL renderer")
+      if not app.renderer.setRenderDrawBlendMode(BLENDMODE_BLEND):
+        sdlFailure("Could not enable renderer blending")
+      if not app.renderer.setRenderVSync(1):
+        sdlFailure("Could not enable renderer vsync")
+    elif defined(linux):
       app.gpu = createGPUDevice(render2DShaderFormat, defined(sdlDebug), "vulkan")
     else:
       app.gpu = createGPUDevice(render2DShaderFormat, defined(sdlDebug), "direct3d12")
-    if app.gpu == nil: sdlFailure("Could not create SDL GPU device")
-    if not claimWindowForGPUDevice(app.gpu, app.window):
-      sdlFailure("Could not claim SDL window")
-    app.windowClaimed = true
-    if not setGPUSwapchainParameters(app.gpu, app.window,
-        GPU_SWAPCHAINCOMPOSITION_SDR, GPU_PRESENTMODE_VSYNC):
-      sdlFailure("Could not enable GPU vsync")
+    when not defined(emscripten):
+      if app.gpu == nil: sdlFailure("Could not create SDL GPU device")
+      if not claimWindowForGPUDevice(app.gpu, app.window):
+        sdlFailure("Could not claim SDL window")
+      app.windowClaimed = true
+      if not setGPUSwapchainParameters(app.gpu, app.window,
+          GPU_SWAPCHAINCOMPOSITION_SDR, GPU_PRESENTMODE_VSYNC):
+        sdlFailure("Could not enable GPU vsync")
     if not app.fontRender.init():
-      raise newException(IOError, "Could not initialize Nuigi font rendering")
-    if config.systemFonts: discard app.fontRender.addSystemDefaultFonts()
+      appError(IOError, "Could not initialize Nuigi font rendering")
+    when defined(emscripten):
+      if config.systemFonts:
+        const browserFont = staticRead("../../assets/dontuse/fonts/DejaVuSansMono.ttf")
+        if app.fontRender.addFontFace("DejaVuSansMono", browserFont) < 0:
+          appError(IOError, "Could not load embedded browser font")
+    else:
+      if config.systemFonts: discard app.fontRender.addSystemDefaultFonts()
     for path in config.fontPaths:
       if app.fontRender.addFontFace(path) < 0:
-        raise newException(IOError, "Could not load font: " & path)
+        appError(IOError, "Could not load font: " & path)
     if app.fontRender.fonts.len == 0:
-      raise newException(IOError, "No fonts loaded; configure fontPaths or systemFonts")
-    for path in [basicVertShaderPath, basicFragShaderPath]:
-      let resolved = config.shaderDirectory / extractFilename(path)
-      if not fileExists(resolved):
-        raise newException(IOError, "Missing Render2D shader: " & resolved)
-    if not app.render2D.initRender2D(app.fontRender.addr, app.gpu,
-        shaderDirectory = config.shaderDirectory):
-      sdlFailure("Could not initialize Render2D")
-    let font = app.fontRender.addr
-    proc arrange(text: openArray[char], fontId: UiFontId, fontSize, maxWidth: float32,
-        flags: UiTextFlags): UiTextArrangement {.gcsafe, raises: [].} =
-      font[].arrangeText(text, fontSize, fontId, maxWidth, flags)
-    proc mesh(arrangement: UiTextArrangement, pos, offset: Vec2, color: UiColor,
-        transform: UiAffine2): tuple[data: ptr UncheckedArray[UiVertex], count: int]
-        {.gcsafe, raises: [].} =
-      let vertices = font[].buildTextMesh(arrangement, pos, offset, color, transform)
-      (cast[ptr UncheckedArray[UiVertex]](vertices.data), vertices.count)
-    proc listFonts(): seq[(string, UiFontId)] {.gcsafe, raises: [].} =
-      font[].listFontFaces()
-    proc resolveFont(name: string): UiFontId {.gcsafe, raises: [].} =
-      max(0'i16, font[].findFont(name))
+      appError(IOError, "No fonts loaded; configure fontPaths or systemFonts")
+    when not defined(emscripten):
+      for path in [basicVertShaderPath, basicFragShaderPath]:
+        let resolved = config.shaderDirectory / extractFilename(path)
+        if not fileExists(resolved):
+          appError(IOError, "Missing Render2D shader: " & resolved)
+      if not app.render2D.initRender2D(app.fontRender.addr, app.gpu,
+          shaderDirectory = config.shaderDirectory):
+        sdlFailure("Could not initialize Render2D")
+    assumeSyncBlock:
+      activeFontRender = app.fontRender.addr
+    app.ui = newBuilder(arrangeSdl3Text, meshSdl3Text)
+    app.themeEditor.listFonts = listSdl3Fonts
+    app.themeEditor.resolveFont = resolveSdl3Font
     proc openUrl(url: string): bool {.nimcall, raises: [].} =
       var value = url
-      sdl3.openURL(toCString(value))
+      result = sdl3.openURL(toCString(value))
     proc readClipboard(): string {.nimcall, raises: [].} =
+      result = ""
       let text = sdl3.getClipboardText()
       if text != nil:
         result = $text
         sdl3.sdlFree(text)
     proc writeClipboard(text: string): bool {.nimcall, raises: [].} =
       var value = text
-      sdl3.setClipboardText(toCString(value))
-    app.ui = newBuilder(arrange, mesh)
+      result = sdl3.setClipboardText(toCString(value))
     app.ui.openUrlFn = openUrl
     app.ui.readClipboardFn = readClipboard
     app.ui.writeClipboardFn = writeClipboard
-    app.themeEditor.listFonts = listFonts
-    app.themeEditor.resolveFont = resolveFont
     for (name, id) in app.fontRender.listFontFaces(): app.ui.fonts[name] = id
+    when defined(nuiAccessKit):
+      # The window is still hidden (see createWindow above); install the
+      # adapter now that the builder exists, then show the window.
+      var hwndProperty = PROP_WINDOW_WIN32_HWND_POINTER
+      let hwnd = getPointerProperty(getWindowProperties(app.window),
+        toCString(hwndProperty), nil)
+      if not app.accessKit.init(hwnd, app.ui.addr):
+        appError(IOError, app.accessKit.error)
+      if (config.windowFlags and WINDOW_HIDDEN) == 0:
+        if not showWindow(app.window): sdlFailure("Could not show window")
     app.lastTick = sdl3.getTicksNS()
     app.fps = 60
     app.dirty = true
@@ -634,7 +735,10 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
     app.initialized = true
   except:
     app.deinit()
-    raise
+    when defined(nimony):
+      quit "SDL3 app initialization failed"
+    else:
+      raise
 
 proc metricPoint(x: float32, userData: int): float32 {.gcsafe, raises: [].} =
   let history = cast[ptr MetricHistory](userData)
@@ -680,36 +784,73 @@ proc buildSettingsWindow*(app: var Sdl3App) =
         b.tableLayout([tableColumnFit(), tableColumnFill()], 14, 10):
           discard b.fillX().fitY()
           b.label("MSAA Samples")
+          let msaaLabelId = b.lastNode.id
           var msaaSelected = ord(app.sampleCount)
-          if b.dropdown(["1x", "2x", "4x", "8x"], msaaSelected):
+          if b.dropdown(["1x", "2x", "4x", "8x"], msaaSelected,
+              labelledBy = msaaLabelId):
             app.sampleCount = GPUSampleCount(msaaSelected)
           b.label("Mesh AA Width")
-          discard b.dragFloat(b.antialiasMeshWidth, 0.0'f32, 0.0'f32, 4.0'f32)
+          let meshAaLabelId = b.lastNode.id
+          var antialiasMeshWidth = b.antialiasMeshWidth
+          discard b.dragFloat(antialiasMeshWidth, 0.0'f32, 0.0'f32, 4.0'f32,
+            labelledBy = meshAaLabelId)
+          b.antialiasMeshWidth = antialiasMeshWidth
           b.label("Render On Demand")
-          discard b.checkbox("", app.renderOnDemand)
+          let renderOnDemandLabelId = b.lastNode.id
+          var renderOnDemand = app.renderOnDemand
+          discard b.checkbox("", renderOnDemand,
+            labelledBy = renderOnDemandLabelId)
+          app.renderOnDemand = renderOnDemand
           b.label("Profiler Overlay")
-          discard b.checkbox("", gShowNuiProfiler)
+          when not defined(nimony):
+            discard b.checkbox("", gShowNuiProfiler,
+              labelledBy = b.lastNode.id)
           b.label("Demo")
-          discard b.checkbox("", app.showDemoWindow)
+          let demoLabelId = b.lastNode.id
+          var showDemoWindow = app.showDemoWindow
+          discard b.checkbox("", showDemoWindow, labelledBy = demoLabelId)
+          app.showDemoWindow = showDemoWindow
           b.label("Gamepad Input")
-          discard b.checkbox("", app.showGamepadWindow)
+          let gamepadLabelId = b.lastNode.id
+          var showGamepadWindow = app.showGamepadWindow
+          discard b.checkbox("", showGamepadWindow,
+            labelledBy = gamepadLabelId)
+          app.showGamepadWindow = showGamepadWindow
           b.label("Theme Editor")
-          discard b.checkbox("", b.showThemeEditor)
+          let themeEditorLabelId = b.lastNode.id
+          var showThemeEditor = b.showThemeEditor
+          discard b.checkbox("", showThemeEditor,
+            labelledBy = themeEditorLabelId)
+          b.showThemeEditor = showThemeEditor
           b.label("Debug Panel")
-          discard b.checkbox("", b.showDebugPanel)
+          let debugPanelLabelId = b.lastNode.id
+          var showDebugPanel = b.showDebugPanel
+          discard b.checkbox("", showDebugPanel,
+            labelledBy = debugPanelLabelId)
+          b.showDebugPanel = showDebugPanel
           b.label("Debug Panel 2")
-          discard b.checkbox("", b.showDebugPanel2)
+          let debugPanel2LabelId = b.lastNode.id
+          var showDebugPanel2 = b.showDebugPanel2
+          discard b.checkbox("", showDebugPanel2,
+            labelledBy = debugPanel2LabelId)
+          b.showDebugPanel2 = showDebugPanel2
           if app.hasTray:
             b.label("Close to Tray")
-            discard b.checkbox("", app.closeToTray)
+            let closeToTrayLabelId = b.lastNode.id
+            var closeToTray = app.closeToTray
+            discard b.checkbox("", closeToTray,
+              labelledBy = closeToTrayLabelId)
+            app.closeToTray = closeToTray
         if app.trayError.len > 0:
           b.label(app.trayError)
         b.label("Text")
         b.label("Font Hinting")
+        let fontHintingLabelId = b.lastNode.id
         var fontSelected = if FontRenderFlag.SubpixelPhasing in app.fontRender.flags: 0
           elif FontRenderFlag.PixelSnapping in app.fontRender.flags: 1
           else: 2
-        if b.dropdown(["Subpixel", "Pixel snapped", "Fractional"], fontSelected):
+        if b.dropdown(["Subpixel", "Pixel snapped", "Fractional"], fontSelected,
+            labelledBy = fontHintingLabelId):
           case fontSelected
           of 0: app.fontRender.flags = {FontRenderFlag.SubpixelPhasing, FontRenderFlag.PixelSnapping}
           of 1: app.fontRender.flags = {FontRenderFlag.PixelSnapping}
@@ -721,8 +862,9 @@ proc buildTools(app: var Sdl3App) =
   if app.showDemoWindow:
     b.window("Demo", 400, 100, 800, 900): b.buildDemoUi()
   if app.showGamepadWindow: app.gamepad.buildGamepadWindow(b)
-  if gShowNuiProfiler:
-    b.window("Profiler", 1200, 100, 700, 1000): b.buildNuiProfiler()
+  when not defined(nimony):
+    if gShowNuiProfiler:
+      b.window("Profiler", 1200, 100, 700, 1000): b.buildNuiProfiler()
   if b.showThemeEditor: discard b.themeEditor(app.themeEditor)
   if b.showDebugPanel:
     let viewport = b.frameCtx.viewportSize
@@ -767,24 +909,68 @@ func sampler(mode: TextureSamplerMode): Render2DSamplerMode =
   if mode == TextureSamplerMode.Linear: Render2DSamplerMode.Linear
   else: Render2DSamplerMode.Nearest
 
+proc drawUiVertices(app: var Sdl3App, vertices: ptr UncheckedArray[UiVertex],
+    count: int, image = UiImageId(0), mode = TextureSamplerMode.Linear,
+    materialId: MaterialId = 0,
+    materialUniform: ArrayView[uint8] = default(ArrayView[uint8])): bool =
+  when defined(emscripten):
+    var texture: Texture
+    if image.uint64 == 1:
+      texture = app.fontTexture
+    else:
+      texture = cast[Texture](image.uint64 and not (3'u64 shl 62))
+    if texture != nil:
+      let scale = if mode == TextureSamplerMode.Linear: SCALEMODE_LINEAR else: SCALEMODE_NEAREST
+      if not texture.setTextureScaleMode(scale): sdlFailure("Could not set texture scale mode")
+    let stride = sizeof(UiVertex).cint
+    app.renderer.renderGeometryRaw(texture, cast[ptr cfloat](vertices), stride,
+      cast[ptr FColor](cast[uint](vertices) + 16), stride,
+      cast[ptr cfloat](cast[uint](vertices) + 8), stride, count.cint, nil, 0, 0)
+  else:
+    app.render2D.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](vertices)
+      .toOpenArray(0, count - 1), resolveTexture(image), sampler(mode),
+      materialId, materialUniform)
+
+when defined(emscripten):
+  proc syncBrowserFontAtlas(app: var Sdl3App) =
+    if app.fontRender.fontAtlasNeedsReset:
+      let grow = app.fontRender.fontAtlasNeedsResize and app.fontRender.canGrowFontAtlas()
+      if grow and app.fontTexture != nil:
+        destroyTexture(app.fontTexture)
+        app.fontTexture = nil
+      app.fontRender.resetFontAtlas(grow)
+    if app.fontTexture == nil:
+      app.fontTexture = createTexture(app.renderer, PIXELFORMAT_RGBA32,
+        TEXTUREACCESS_STATIC, app.fontRender.fontAtlasWidth.cint,
+        app.fontRender.fontAtlasHeight.cint)
+      if app.fontTexture == nil: sdlFailure("Could not create font atlas texture")
+      if not app.fontTexture.setTextureBlendMode(BLENDMODE_BLEND):
+        sdlFailure("Could not enable font texture blending")
+    if app.fontRender.fontAtlasDirty:
+      if not updateTexture(app.fontTexture, nil,
+          app.fontRender.fontAtlasPixels[0].addr, (app.fontRender.fontAtlasWidth * 4).cint):
+        sdlFailure("Could not upload font atlas")
+      app.fontRender.clearFontAtlasDirty()
+
+proc drawQuad(app: var Sdl3App, transform: UiAffine2, pos, size: Vec2,
+    color: UiColor, image = UiImageId(0), uv0 = vec2(0), uv1 = vec2(1),
+    mode = TextureSamplerMode.Linear) =
+  if size.x <= 0 or size.y <= 0: return
+  let points = [pos, pos + vec2(size.x, 0), pos + size, pos + vec2(0, size.y)]
+  let uvs = [uv0, vec2(uv1.x, uv0.y), uv1, vec2(uv0.x, uv1.y)]
+  const indices = [0, 1, 2, 0, 2, 3]
+  var vertices = default(array[6, UiVertex])
+  for i, index in indices:
+    vertices[i] = UiVertex(pos: transform.transformPoint2(points[index]),
+      uv: uvs[index], color: color)
+  if not app.drawUiVertices(cast[ptr UncheckedArray[UiVertex]](vertices[0].addr),
+      6, image, mode):
+    sdlFailure("Could not draw UI quad")
+
 proc renderCommands(app: var Sdl3App) =
   var transforms = @[identityAffine2()]
-  let renderer = app.render2D.addr
-  template r: untyped = renderer[]
-  proc quad(transform: UiAffine2, pos, size: Vec2, color: UiColor,
-      image = UiImageId(0), uv0 = vec2(0), uv1 = vec2(1),
-      mode = TextureSamplerMode.Linear) =
-    if size.x <= 0 or size.y <= 0: return
-    let points = [pos, pos + vec2(size.x, 0), pos + size, pos + vec2(0, size.y)]
-    let uvs = [uv0, vec2(uv1.x, uv0.y), uv1, vec2(uv0.x, uv1.y)]
-    const indices = [0, 1, 2, 0, 2, 3]
-    var vertices: array[6, UiVertex]
-    for i, index in indices:
-      vertices[i] = UiVertex(pos: transform.transformPoint2(points[index]), uv: uvs[index], color: color)
-    if not r.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](vertices[0].addr).toOpenArray(0, 5),
-        resolveTexture(image), sampler(mode)):
-      sdlFailure("Could not draw UI quad")
-  for command in app.ui.frameOutput.commands:
+  for index in 0 ..< app.ui.frameOutput.commands.len:
+    let command {.cursor.} = app.ui.frameOutput.commands[index]
     let transform = transforms[^1]
     case command.kind
     of CmdTransformPush:
@@ -794,58 +980,84 @@ proc renderCommands(app: var Sdl3App) =
       if transforms.len > 1: discard transforms.pop()
     of CmdRawVertices:
       if command.vertexData != nil and command.vertexCount > 0:
-        if not r.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](command.vertexData)
-            .toOpenArray(0, command.vertexCount - 1), resolveTexture(command.imageId),
-            sampler(command.samplerMode), command.materialId, command.materialUniform):
+        if not app.drawUiVertices(command.vertexData, command.vertexCount,
+            command.imageId, command.samplerMode, command.materialId, command.materialUniform):
           sdlFailure("Could not draw UI vertices")
-    of CmdRectFill: quad(transform, command.pos, command.size, command.color)
+    of CmdRectFill:
+      app.drawQuad(transform, command.pos, command.size, command.color)
     of CmdRectStroke:
       let thickness = min(max(1.0'f32, command.thickness), min(command.size.x, command.size.y) * 0.5'f32)
       let innerHeight = max(0.0'f32, command.size.y - thickness * 2)
-      quad(transform, command.pos, vec2(command.size.x, thickness), command.color)
-      quad(transform, command.pos + vec2(0, command.size.y - thickness),
+      app.drawQuad(transform, command.pos, vec2(command.size.x, thickness), command.color)
+      app.drawQuad(transform, command.pos + vec2(0, command.size.y - thickness),
         vec2(command.size.x, thickness), command.color)
-      quad(transform, command.pos + vec2(0, thickness), vec2(thickness, innerHeight), command.color)
-      quad(transform, command.pos + vec2(command.size.x - thickness, thickness),
+      app.drawQuad(transform, command.pos + vec2(0, thickness), vec2(thickness, innerHeight), command.color)
+      app.drawQuad(transform, command.pos + vec2(command.size.x - thickness, thickness),
         vec2(thickness, innerHeight), command.color)
     of CmdClipPush:
       let rect = transformedRectAabb(transform, command.pos, command.size)
-      r.pushClipRect(floor(rect.pos.x).cint, floor(rect.pos.y).cint,
-        max(0.0'f32, ceil(rect.size.x)).cint, max(0.0'f32, ceil(rect.size.y)).cint)
-    of CmdClipPop: r.popClipRect()
+      when defined(emscripten):
+        var clip = Rect(x: floor(rect.pos.x).cint, y: floor(rect.pos.y).cint,
+          w: max(0.0'f32, ceil(rect.size.x)).cint, h: max(0.0'f32, ceil(rect.size.y)).cint)
+        if app.clips.len > 0: clip = intersectRect(app.clips[^1], clip)
+        app.clips.add clip
+        if not app.renderer.setRenderClipRect(clip): sdlFailure("Could not set UI clip")
+      else:
+        app.render2D.pushClipRect(floor(rect.pos.x).cint, floor(rect.pos.y).cint,
+          max(0.0'f32, ceil(rect.size.x)).cint, max(0.0'f32, ceil(rect.size.y)).cint)
+    of CmdClipPop:
+      when defined(emscripten):
+        if app.clips.len > 0: discard app.clips.pop()
+        if app.clips.len > 0:
+          if not app.renderer.setRenderClipRect(app.clips[^1]): sdlFailure("Could not restore UI clip")
+        elif not app.renderer.setRenderClipRect(nil): sdlFailure("Could not reset UI clip")
+      else:
+        app.render2D.popClipRect()
     of CmdLine:
       let start = transform.transformPoint2(command.pos)
       let finish = transform.transformPoint2(command.pos2)
-      if (finish - start).length > 0.0001'f32 and not r.drawLine(start, finish,
-          command.thickness, FColor(r: command.color.r, g: command.color.g, b: command.color.b, a: command.color.a)):
-        sdlFailure("Could not draw UI line")
+      when defined(emscripten):
+        let length = (finish - start).length
+        if length > 0.0001'f32:
+          let normal = vec2(-(finish.y - start.y), finish.x - start.x) *
+            (command.thickness * 0.5'f32 / length)
+          let points = [start + normal, finish + normal, finish - normal,
+            start + normal, finish - normal, start - normal]
+          var vertices: array[6, UiVertex]
+          for i in 0 ..< 6: vertices[i] = UiVertex(pos: points[i], color: command.color)
+          if not app.drawUiVertices(cast[ptr UncheckedArray[UiVertex]](vertices[0].addr), 6):
+            sdlFailure("Could not draw UI line")
+      else:
+        if (finish - start).length > 0.0001'f32 and not app.render2D.drawLine(start, finish,
+            command.thickness, FColor(r: command.color.r, g: command.color.g, b: command.color.b, a: command.color.a)):
+          sdlFailure("Could not draw UI line")
     of CmdImage:
-      quad(transform, command.pos, command.size, command.color,
+      app.drawQuad(transform, command.pos, command.size, command.color,
         command.imageId, command.uv0, command.uv1, command.samplerMode)
     of CmdText:
       if command.textIndex > 0:
-        let text = app.ui.frame.texts[command.textIndex - 1].addr
-        let arrangement = app.ui.getTextArrangement(text, -1)
-        let mesh = app.fontRender.buildTextMesh(arrangement[], command.pos, vec2(0), text.textColor, transform)
+        let text = app.ui.textForRender(command.textIndex)
+        let mesh = app.fontRender.buildTextMesh(text.arrangement[], command.pos,
+          vec2(0), text.color, transform)
         if mesh.count > 0:
-          if not r.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](mesh.data)
-              .toOpenArray(0, mesh.count - 1), cast[GPUTexture](1), sampler(command.samplerMode)):
+          if not app.drawUiVertices(cast[ptr UncheckedArray[UiVertex]](mesh.data),
+              mesh.count, UiImageId(1), command.samplerMode):
             sdlFailure("Could not draw UI text")
     of CmdCircleFill:
-      var vertices: array[72, UiVertex]
+      var vertices = default(array[72, UiVertex])
       for i in 0 ..< 24:
         vertices[i * 3] = UiVertex(pos: transform.transformPoint2(command.pos), color: command.color)
         for j in 0..1:
           let angle = 2 * PI.float32 * (i + j).float32 / 24
           vertices[i * 3 + j + 1] = UiVertex(pos: transform.transformPoint2(
             command.pos + vec2(cos(angle), sin(angle)) * command.radius), color: command.color)
-      if not r.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](vertices[0].addr).toOpenArray(0, 71)):
+      if not app.drawUiVertices(cast[ptr UncheckedArray[UiVertex]](vertices[0].addr), 72):
         sdlFailure("Could not draw UI circle")
 
 proc tick*(app: var Sdl3App): bool =
   ## Pump events and update once. Returns true if a frame was presented.
   if not app.initialized:
-    raise newException(ValueError, "SDL3 app is not initialized")
+    appError(ValueError, "SDL3 app is not initialized")
   if not app.running: return false
   let started = sdl3.getTicksNS()
   # The profiler UI derives frame times from the "frame" scope and plots the
@@ -865,7 +1077,7 @@ proc tick*(app: var Sdl3App): bool =
       prof("events")
       app.inputAccum.beginInputFrame()
       app.gamepad.beginFrame()
-      var event: Event
+      var event = Event()
       while pollEvent(event):
         let eventWindow = getWindowFromEvent(event.addr)
         if eventWindow != nil and eventWindow != app.window: continue
@@ -899,25 +1111,47 @@ proc tick*(app: var Sdl3App): bool =
       prof("update")
       update(app, dt)
     if not app.running: return false
+  when defined(nuiAccessKit):
+    if app.accessKit.pendingActions():
+      app.requestRender()
   if not app.needsRender(hadEvents):
     prof("idle")
-    sdl3.delay(app.idleDelayMs)
+    when not defined(emscripten):
+      sdl3.delay(app.idleDelayMs)
     return false
-  var width, height: cint
+  var width = 0.cint
+  var height = 0.cint
   if not app.window.getWindowSize(width, height): sdlFailure("Could not read window size")
   if width <= 0 or height <= 0 or
       (getWindowFlags(app.window) and (WINDOW_MINIMIZED or WINDOW_HIDDEN)) != 0:
-    sdl3.delay(app.idleDelayMs)
+    when not defined(emscripten):
+      sdl3.delay(app.idleDelayMs)
     return false
   app.dirty = false
+
   prof("render")
-  if not app.render2D.beginRender(nil, width.uint32, height.uint32,
-      sample_count = app.sampleCount):
-    sdlFailure("Could not begin UI render")
+  when not defined(emscripten):
+    if not app.render2D.beginRender(nil, width.uint32, height.uint32,
+        sample_count = app.sampleCount):
+      sdlFailure("Could not begin UI render")
+
   block:
     prof("buildUi")
-    app.ui.fontAtlasImageId = gpuTextureToImageId(app.render2D.fontTexture)
+    when defined(emscripten):
+      app.ui.fontAtlasImageId = UiImageId(1)
+    else:
+      app.ui.fontAtlasImageId = gpuTextureToImageId(app.render2D.fontTexture)
+    when defined(nuiAccessKit):
+      app.accessKit.prepareFrame()
     discard app.ui.beginUiFrame(width.float32, height.float32, app.input)
+    when defined(nuiAccessKit):
+      # Name the frame root after the window so assistive technology
+      # announces a sensible window title; apps can override it later in
+      # the frame via semanticLabel on the root.
+      discard app.ui.semanticRole(SemanticWindow)
+      let windowTitle = getWindowTitle(app.window)
+      if windowTitle != nil:
+        discard app.ui.semanticLabel($windowTitle)
     app.ui.windowSpace(app.dockSpace)
     app.ui.node:
       discard app.ui.fill().noHover()
@@ -931,34 +1165,56 @@ proc tick*(app: var Sdl3App): bool =
     block:
       prof("endUiFrame")
       app.ui.endUiFrame(buildMeshRenderCommands = true)
+    when defined(nuiAccessKit):
+      block:
+        prof("accessKit")
+        app.accessKit.update()
     app.syncTextInput()
-  app.render2D.clear()
-  var background = [
-    Render2DVertex(x: 0, y: 0),
-    Render2DVertex(x: width.float32, y: 0),
-    Render2DVertex(x: width.float32, y: height.float32),
-    Render2DVertex(x: 0, y: 0),
-    Render2DVertex(x: width.float32, y: height.float32),
-    Render2DVertex(x: 0, y: height.float32),
-  ]
-  for vertex in background.mitems:
-    vertex.r = app.backgroundColor.r
-    vertex.g = app.backgroundColor.g
-    vertex.b = app.backgroundColor.b
-    vertex.a = app.backgroundColor.a
-  if not app.render2D.drawVertices(background): sdlFailure("Could not draw UI background")
+
+  when defined(emscripten):
+    app.syncBrowserFontAtlas()
+    if not app.renderer.setRenderDrawColorFloat(app.backgroundColor.r,
+        app.backgroundColor.g, app.backgroundColor.b, app.backgroundColor.a):
+      sdlFailure("Could not set background color")
+    if not app.renderer.renderClear(): sdlFailure("Could not clear UI renderer")
+  else:
+    app.render2D.clear()
+
+  when not defined(emscripten):
+    var background = [
+      Render2DVertex(x: 0, y: 0),
+      Render2DVertex(x: width.float32, y: 0),
+      Render2DVertex(x: width.float32, y: height.float32),
+      Render2DVertex(x: 0, y: 0),
+      Render2DVertex(x: width.float32, y: height.float32),
+      Render2DVertex(x: 0, y: height.float32),
+    ]
+    for vertex in background.mitems:
+      vertex.r = app.backgroundColor.r
+      vertex.g = app.backgroundColor.g
+      vertex.b = app.backgroundColor.b
+      vertex.a = app.backgroundColor.a
+    if not app.render2D.drawVertices(background): sdlFailure("Could not draw UI background")
+
   block:
     prof("renderCommands")
     app.renderCommands()
+
   let deferred = app.fontRender.glyphPackingDeferredCount
   app.tickMs = (sdl3.getTicksNS() - started).float64 / 1_000_000.0
   let atlasReset = app.fontRender.fontAtlasNeedsReset
   block:
     prof("submit")
-    if not app.render2D.endRender(): sdlFailure("Could not submit UI render")
+    when not defined(emscripten):
+      if not app.render2D.endRender(): sdlFailure("Could not submit UI render")
+
   block:
     prof("present")
-    if not app.render2D.presentToSwapchain(app.window): sdlFailure("Could not present UI render")
+    when defined(emscripten):
+      if not app.renderer.renderPresent(): sdlFailure("Could not present UI render")
+    else:
+      if not app.render2D.presentToSwapchain(app.window): sdlFailure("Could not present UI render")
+
   if atlasReset or deferred > 0: app.requestRender()
   app.frameMs = (sdl3.getTicksNS() - started).float64 / 1_000_000.0
   if dt > 0: app.fps = app.fps * 0.5 + 0.5 / dt
@@ -969,7 +1225,28 @@ proc tick*(app: var Sdl3App): bool =
   inc app.renderedFrames
   true
 
+when defined(emscripten):
+  proc emscripten_set_main_loop_arg(callback: proc(data: pointer) {.cdecl.},
+      data: pointer, fps: cint, simulateInfiniteLoop: cint)
+      {.importc, header: "<emscripten.h>".}
+
+  proc browserTick(data: pointer) {.cdecl.} =
+    let app = cast[ptr Sdl3App](data)
+    try:
+      discard app[].tick()
+      if not app[].running:
+        emscripten_cancel_main_loop()
+        app[].deinit()
+    except CatchableError:
+      echo "SDL3 browser loop failed: ", getCurrentExceptionMsg()
+      emscripten_cancel_main_loop()
+      app[].deinit()
+
 proc run*(app: var Sdl3App) =
   if not app.initialized:
-    raise newException(ValueError, "SDL3 app is not initialized")
-  while app.running: discard app.tick()
+    appError(ValueError, "SDL3 app is not initialized")
+  when defined(emscripten):
+    # Unwind to the browser without running Nim's shutdown/global destructors.
+    emscripten_set_main_loop_arg(browserTick, addr app, 0, 1)
+  else:
+    while app.running: discard app.tick()

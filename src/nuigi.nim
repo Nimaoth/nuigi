@@ -412,6 +412,95 @@ type
   UiFontId* = int16
     ## Handle identifying a loaded font face within the font atlas.
 
+  UiSemanticRole* = enum
+    ## Toolkit-agnostic semantic role of a node, used to build accessibility
+    ## trees (see docs/accessibility.md). The core only stores these; mapping
+    ## to concrete backend roles (e.g. AccessKit) happens outside the core.
+    SemanticNone
+      ## No explicit role; the accessibility backend may infer one.
+    SemanticGroup
+      ## Meaningful container (e.g. a form section).
+    SemanticWindow
+    SemanticDialog
+    SemanticTooltip
+    SemanticTitleBar
+    SemanticLabel
+    SemanticButton
+    SemanticCheckBox
+    SemanticRadioButton
+    SemanticSwitch
+    SemanticSlider
+    SemanticSpinButton
+    SemanticProgressIndicator
+    SemanticTextInput
+    SemanticMultilineTextInput
+    SemanticComboBox
+    SemanticListBox
+    SemanticListItem
+    SemanticTabList
+    SemanticTab
+    SemanticTabPanel
+    SemanticTree
+    SemanticTreeItem
+    SemanticTable
+    SemanticRow
+    SemanticCell
+    SemanticColumnHeader
+    SemanticMenu
+    SemanticMenuBar
+    SemanticMenuItem
+    SemanticScrollView
+    SemanticImage
+    SemanticCanvas
+
+  UiSemanticState* = enum
+    ## Accessibility-relevant states declared by a node for the current frame.
+    SemanticChecked
+    SemanticCheckedMixed
+    SemanticSelected
+    SemanticExpanded
+    SemanticCollapsed
+    SemanticDisabled
+    SemanticReadOnly
+    SemanticRequired
+    SemanticModal
+    SemanticHideSubtree
+      ## Exclude this node and all of its descendants from accessibility.
+    SemanticLiveRegion
+      ## Content changes should be announced (politely).
+
+  UiSemanticStates* = set[UiSemanticState]
+
+  UiSemanticAction* = enum
+    SemanticFocus, SemanticActivate, SemanticExpand, SemanticCollapse,
+    SemanticSetNumericValue, SemanticSetTextValue, SemanticSelect
+  UiSemanticActions* = set[UiSemanticAction]
+  UiSemanticRequest* = object
+    target*: UiNodeId
+    action*: UiSemanticAction
+    numericValue*: float64
+    textValue*: string
+
+  UiSemantics* = object
+    ## Semantic metadata attached to a node (lazily created via
+    ## `ensureNodeSemantics`). Stored per frame like `UiNodeText`; nothing in
+    ## layout or rendering reads it.
+    role*: UiSemanticRole
+    states*: UiSemanticStates
+    label*: UiString
+      ## Explicit accessible name (overrides all other name sources).
+    description*: UiString
+      ## Longer help/description text.
+    valueText*: UiString
+      ## Textual value (text input content, combo box selection).
+    labelledBy*: UiNodeId
+      ## Node whose text names this control.
+    numericValue*, numericMin*, numericMax*, numericStep*: float32
+      ## Numeric value and range (sliders, progress bars); only meaningful
+      ## when `hasNumericValue` is set.
+    hasNumericValue*: bool
+    actions*: UiSemanticActions
+
   UiNodeText* = object
     ## Text payload attached to a node (lazily created via `ensureNodeText`).
     text*: UiString
@@ -522,6 +611,8 @@ type
       ## Side-array: custom render commands referenced by 1-based `commandsIndex`.
     customLayouts*: seq[UiNodeCustomLayout]
       ## Side-array: custom layouts referenced by 1-based `customLayoutIndex`/`customChildLayoutIndex`.
+    semantics*: seq[UiSemantics]
+      ## Side-array: semantic accessibility metadata referenced by 1-based `semanticsIndex`.
     # Persistent (frame-independent) copies of custom render command data and the
     # vertex buffers they reference. Required because a virtual node outlives the
     # frame arena the original commands/vertices were allocated in; the
@@ -734,6 +825,8 @@ type
       ## 1-based index into `UiFrame.customLayouts`; 0 = none.
     customChildLayoutIndex*: uint16
       ## 1-based index into `UiFrame.customLayouts` for child layout; 0 = none.
+    semanticsIndex*: uint16
+      ## 1-based index into `UiFrame.semantics`; 0 = none.
 
     when defined(nuiDebug):
       debugName*: string
@@ -775,6 +868,8 @@ type
       ## Side-array: custom render commands (1-based `commandsIndex`).
     customLayouts*: seq[UiNodeCustomLayout]
       ## Side-array: custom layouts (1-based `customLayoutIndex`/`customChildLayoutIndex`).
+    semantics*: seq[UiSemantics]
+      ## Side-array: semantic accessibility metadata (1-based `semanticsIndex`).
     focusItems*: seq[UiFocusItem]
       ## Focusable nodes in deterministic build order for this frame.
     focusScopes*: seq[UiFocusScope]
@@ -914,6 +1009,9 @@ type
     focusChangedByKeyboard: bool
       ## Whether Tab or directional keyboard navigation changed focus this frame.
     nextFrameActions: seq[UiNextFrameAction]
+    pendingSemanticRequests: seq[UiSemanticRequest]
+    semanticRequests: seq[UiSemanticRequest]
+    semanticRequestConsumed: seq[bool]
       ## Application actions queued during construction and run before next-frame interaction.
     debugDrawGridLines*: bool
       ## When true, draw layout grid/debug guides.
@@ -1666,6 +1764,26 @@ proc ensureNodeGap*(b: var UiBuilder, node: ptr UiNode): var float32 {.inline.} 
     b.frame.gaps.add(0.0'f32)
     return b.frame.gaps[^1]
   b.frame.gaps[node.gapIndex - 1]
+
+proc ensureNodeSemantics*(b: var UiBuilder, node: ptr UiNode): var UiSemantics {.inline.} =
+  ## Lazily initialize and return a mutable reference to the node's semantic
+  ## accessibility metadata (see docs/accessibility.md).
+  if node.semanticsIndex == 0:
+    node.semanticsIndex = (b.frame.semantics.len + 1).uint16
+    b.frame.semantics.add(UiSemantics())
+    return b.frame.semantics[^1]
+  b.frame.semantics[node.semanticsIndex - 1]
+
+proc nodeSemantics*(b: UiBuilder, idx: int): ptr UiSemantics {.inline.} =
+  ## Semantic metadata of the node at `idx` in the current frame, or nil if
+  ## the node has none.
+  if idx < 0 or idx >= b.frame.nodes.len:
+    return nil
+  let slot = int(b.frame.nodes[idx].semanticsIndex)
+  if slot > 0 and slot <= b.frame.semantics.len:
+    addr(b.frame.semantics[slot - 1])
+  else:
+    nil
 
 proc ensureNodeAnchor*(b: var UiBuilder, node: ptr UiNode): var UiNodeAnchor {.inline.} =
   ## Lazily initialize and return a mutable reference to the node's anchor data.
@@ -3016,7 +3134,7 @@ proc newBuilder*(measureText: UiMeasureTextFn, buildTextMesh: UiBuildTextMeshFn 
 proc shouldRender*(b: var UiBuilder, hadEvents: bool): bool =
   ## Return whether an on-demand host should render, including one grace frame
   ## after the last frame with a real activity trigger.
-  var hasActivity = hadEvents or b.anythingAnimating or b.virtualNodes.len > 0 or
+  var hasActivity = hadEvents or b.anythingAnimating or b.pendingSemanticRequests.len > 0 or b.virtualNodes.len > 0 or
     b.middleDragScroll != vec2(0.0'f32, 0.0'f32)
 
   if not hasActivity:
@@ -3210,6 +3328,133 @@ proc requestFocus*(b: var UiBuilder, nodeId: UiNodeId): bool =
       scopeId = parentScopeId
     return true
   false
+
+proc enqueueSemanticRequest*(b: var UiBuilder, request: UiSemanticRequest) =
+  ## UI-thread-only. Requests expire after the next actual build.
+  when not defined(nuiNoSemantics):
+    if request.target == noneNodeId():
+      echo "Nuigi accessibility: rejected empty target"
+      return
+    b.pendingSemanticRequests.add request
+
+proc semanticActions*(b: var UiBuilder, actions: UiSemanticActions): var UiBuilder {.discardable.} =
+  when not defined(nuiNoSemantics):
+    let sem = b.ensureNodeSemantics(b.currentNode).addr
+    sem.actions.incl actions
+  b
+
+proc semanticActionAllowed*(b: UiBuilder, index: int, action: UiSemanticAction): bool =
+  when defined(nuiNoSemantics):
+    return false
+  else:
+    if index < 0 or index >= b.frame.nodes.len:
+      return false
+    if b.frame.duplicateNodeIds.hasKey(uint64(b.frame.nodes[index].id)):
+      return false
+    var current = index
+    while current >= 0:
+      if VirtualTree in b.frame.nodes[current].flags:
+        return false
+      let sem = b.nodeSemantics(current)
+      if sem != nil:
+        if SemanticDisabled in sem.states or SemanticHideSubtree in sem.states:
+          return false
+        if action != SemanticFocus and SemanticReadOnly in sem.states:
+          return false
+      current = int(b.frame.nodes[current].parent)
+    for item in b.frame.focusItems:
+      if item.nodeIndex == index and FocusDisabled in item.flags:
+        return false
+    true
+
+proc takeSemanticRequest*(b: var UiBuilder, nodeId: UiNodeId,
+    supported: UiSemanticActions, request: var UiSemanticRequest): bool =
+  when not defined(nuiNoSemantics):
+    let index = b.nodeIndex(nodeId)
+    if index < 0:
+      return false
+    let sem = b.ensureNodeSemantics(b.frame.nodes[index].addr).addr
+    sem.actions.incl supported
+    for i in 0 ..< b.semanticRequests.len:
+      if b.semanticRequestConsumed[i] or b.semanticRequests[i].target != nodeId:
+        continue
+      if b.semanticRequests[i].action notin supported:
+        continue
+      b.semanticRequestConsumed[i] = true
+      if not b.semanticActionAllowed(index, b.semanticRequests[i].action):
+        echo "Nuigi accessibility: rejected unavailable control"
+        continue
+      request = b.semanticRequests[i]
+      return true
+  false
+
+proc semanticActivateCount*(b: var UiBuilder, nodeId: UiNodeId): int =
+  result = 0
+  var request = default(UiSemanticRequest)
+  while b.takeSemanticRequest(nodeId, {SemanticActivate}, request):
+    inc result
+  if result > 0:
+    b.anythingAnimating = true
+
+proc applySemanticExpanded*(b: var UiBuilder, nodeId: UiNodeId, expanded: var bool,
+    activate = false): bool =
+  result = false
+  var request = default(UiSemanticRequest)
+  let supported = if activate: {SemanticActivate, SemanticExpand, SemanticCollapse}
+    else: {SemanticExpand, SemanticCollapse}
+  while b.takeSemanticRequest(nodeId, supported, request):
+    let newValue = if request.action == SemanticActivate: not expanded
+      else: request.action == SemanticExpand
+    if expanded != newValue:
+      expanded = newValue
+      result = true
+  when not defined(nuiNoSemantics):
+    let index = b.nodeIndex(nodeId)
+    if index >= 0:
+      let sem = b.ensureNodeSemantics(b.frame.nodes[index].addr).addr
+      sem.states.excl {SemanticExpanded, SemanticCollapsed}
+      sem.states.incl (if expanded: SemanticExpanded else: SemanticCollapsed)
+  if result:
+    b.anythingAnimating = true
+
+proc applySemanticNumeric*(b: var UiBuilder, nodeId: UiNodeId,
+    value: var float32, minValue, maxValue: float32): bool =
+  result = false
+  var request = default(UiSemanticRequest)
+  while b.takeSemanticRequest(nodeId, {SemanticSetNumericValue}, request):
+    if request.numericValue != request.numericValue or
+        request.numericValue == Inf or request.numericValue == -Inf:
+      echo "Nuigi accessibility: rejected non-finite numeric value"
+      continue
+    let newValue = clamp(request.numericValue, minValue.float64, maxValue.float64).float32
+    if newValue == Inf.float32 or newValue == -Inf.float32:
+      echo "Nuigi accessibility: numeric value exceeds float32 range"
+      continue
+    if newValue != value:
+      value = newValue
+      result = true
+  when not defined(nuiNoSemantics):
+    let index = b.nodeIndex(nodeId)
+    if index >= 0:
+      b.ensureNodeSemantics(b.frame.nodes[index].addr).numericValue = value
+  if result:
+    b.anythingAnimating = true
+
+proc finishSemanticRequests(b: var UiBuilder) =
+  for i in 0 ..< b.semanticRequests.len:
+    if not b.semanticRequestConsumed[i] and b.semanticRequests[i].action == SemanticFocus:
+      let index = b.nodeIndex(b.semanticRequests[i].target)
+      if b.semanticActionAllowed(index, SemanticFocus):
+        for itemIndex in 0 ..< b.frame.focusItems.len:
+          let item = b.frame.focusItems[itemIndex]
+          if item.nodeIndex == index and b.requestFocus(item.nodeId):
+            b.semanticRequestConsumed[i] = true
+            b.anythingAnimating = true
+            break
+    if not b.semanticRequestConsumed[i]:
+      echo "Nuigi accessibility: expired unsupported or stale request"
+  b.semanticRequests.setLen(0)
+  b.semanticRequestConsumed.setLen(0)
 
 proc isFocusWithin*(b: UiBuilder, scopeId: UiNodeId): bool =
   ## Whether keyboard focus is on this scope or on its remembered descendant path.
@@ -3646,6 +3891,9 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   ## Start a new UI frame. Computes interactions from previous frame, resets frame state, and creates the root node.
   prof("beginUiFrame")
   b.flushNextFrameActions()
+  b.semanticRequests = move(b.pendingSemanticRequests)
+  b.pendingSemanticRequests = @[]
+  b.semanticRequestConsumed = newSeq[bool](b.semanticRequests.len)
   b.computeFrameInteraction(ctx.input)
   b.focusNavigationHandled = false
   b.focusChangedByKeyboard = false
@@ -3684,6 +3932,7 @@ proc beginUiFrame*(b: var UiBuilder, ctx: UiFrameContext): var UiBuilder {.disca
   b.frame.transforms.setLen(0)
   b.frame.customCommands.setLen(0)
   b.frame.customLayouts.setLen(0)
+  b.frame.semantics.setLen(0)
   b.frame.focusItems.setLen(0)
   b.frame.focusScopes.setLen(0)
   b.deferredNodes.setLen(0)
@@ -3934,6 +4183,7 @@ proc insertVirtualTrees*(b: var UiBuilder) =
     let baseTransform = b.frame.transforms.len
     let baseCommands = b.frame.customCommands.len
     let baseLayouts = b.frame.customLayouts.len
+    let baseSemantics = b.frame.semantics.len
 
     b.frame.texts.add v.texts
     b.frame.styles.add v.styles
@@ -3942,6 +4192,7 @@ proc insertVirtualTrees*(b: var UiBuilder) =
     b.frame.transforms.add v.transforms
     b.frame.customCommands.add v.customCommands
     b.frame.customLayouts.add v.customLayouts
+    b.frame.semantics.add v.semantics
 
     let offset = b.frame.nodes.len
     let startIdx = offset
@@ -3980,6 +4231,8 @@ proc insertVirtualTrees*(b: var UiBuilder) =
         m.customLayoutIndex = uint16(baseLayouts + int(m.customLayoutIndex))
       if m.customChildLayoutIndex != 0'u16:
         m.customChildLayoutIndex = uint16(baseLayouts + int(m.customChildLayoutIndex))
+      if m.semanticsIndex != 0'u16:
+        m.semanticsIndex = uint16(baseSemantics + int(m.semanticsIndex))
       b.frame.nodes.add m
 
     # A node whose (remapped) parent falls outside the appended range is a forest
@@ -4097,6 +4350,7 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
     transformMap = initTable[int, int]()
     commandMap = initTable[int, int]()
     layoutMap = initTable[int, int]()
+    semanticsMap = initTable[int, int]()
     commandRanges: seq[tuple[start, count: int]] = @[]
   for i in 0 ..< result.nodes.len:
     var n = addr result.nodes[i]
@@ -4178,6 +4432,20 @@ proc extractVirtualTree*(frame: var UiFrame, nodeIdx: int): UiVirtualTree =
         else:
           result.customLayouts.add default(UiNodeCustomLayout)
       n.customChildLayoutIndex = uint16(layoutMap.getOrQuit(slot) + 1)
+    if n.semanticsIndex != 0'u16:
+      let slot = int(n.semanticsIndex) - 1
+      if not semanticsMap.hasKey(slot):
+        semanticsMap[slot] = result.semantics.len
+        if slot < frame.semantics.len:
+          result.semantics.add frame.semantics[slot]
+          # Virtual trees outlive the frame, so borrowed label views must be
+          # copied into owned strings.
+          result.semantics[^1].label.ensureOwned
+          result.semantics[^1].description.ensureOwned
+          result.semantics[^1].valueText.ensureOwned
+        else:
+          result.semantics.add UiSemantics()
+      n.semanticsIndex = uint16(semanticsMap.getOrQuit(slot) + 1)
 
   # Copy the referenced vertex data and only then take pointers, now that neither
   # persistent buffer grows any further; the copies outlive the frame arena.
@@ -4288,6 +4556,7 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
     b.buildDebugHoverTooltip()
   b.removeStaleAnimations()
   b.updateVirtualTrees()
+  b.finishSemanticRequests()
 
   if b.dragData.external:
     if not b.frameCtx.input.externalDragActive:
@@ -6200,6 +6469,91 @@ proc textFlags*(b: var UiBuilder, flags: UiTextFlags): var UiBuilder {.discardab
     t.textFlags = flags
     t.measuredTextDirty = true
     b.updateNodeFit(b.currentNode)
+  b
+
+# Semantic accessibility metadata (see docs/accessibility.md). These setters
+# only touch the `UiFrame.semantics` side array; nothing in layout or
+# rendering reads it. With -d:nuiNoSemantics they compile to no-ops.
+
+proc semanticRole*(b: var UiBuilder, role: UiSemanticRole): var UiBuilder {.discardable.} =
+  ## Set the current node's semantic role.
+  when not defined(nuiNoSemantics):
+    b.ensureNodeSemantics(b.currentNode).role = role
+  b
+
+proc semanticLabel*(b: var UiBuilder, value: string): var UiBuilder {.discardable.} =
+  ## Set the current node's explicit accessible name (owned copy). Overrides
+  ## names derived from text or `semanticLabelledBy`.
+  when not defined(nuiNoSemantics):
+    let label = value.uiString
+    b.ensureNodeSemantics(b.currentNode).label = label
+  b
+
+proc semanticLabel*(b: var UiBuilder, value: openArray[char]): var UiBuilder {.discardable.} =
+  ## Set the current node's explicit accessible name as a borrowed view. The
+  ## caller must keep the backing storage alive until the end of the frame.
+  when not defined(nuiNoSemantics):
+    let label = value.uiString
+    b.ensureNodeSemantics(b.currentNode).label = label
+  b
+
+proc semanticDescription*(b: var UiBuilder, value: string): var UiBuilder {.discardable.} =
+  ## Set the current node's accessible description (owned copy).
+  when not defined(nuiNoSemantics):
+    let description = value.uiString
+    b.ensureNodeSemantics(b.currentNode).description = description
+  b
+
+proc semanticValueText*(b: var UiBuilder, value: string): var UiBuilder {.discardable.} =
+  ## Set the current node's textual value (owned copy), e.g. the content of a
+  ## text input or the selected entry of a combo box.
+  when not defined(nuiNoSemantics):
+    let valueText = value.uiString
+    b.ensureNodeSemantics(b.currentNode).valueText = valueText
+  b
+
+proc semanticValueText*(b: var UiBuilder, value: openArray[char]): var UiBuilder {.discardable.} =
+  ## Set the current node's textual value as a borrowed view. The caller must
+  ## keep the backing storage alive until the end of the frame.
+  when not defined(nuiNoSemantics):
+    let valueText = value.uiString
+    b.ensureNodeSemantics(b.currentNode).valueText = valueText
+  b
+
+proc semanticLabelledBy*(b: var UiBuilder, nodeId: UiNodeId): var UiBuilder {.discardable.} =
+  ## Declare that the node with `nodeId` provides the accessible name of the
+  ## current node (e.g. the text label next to a checkbox).
+  when not defined(nuiNoSemantics):
+    b.ensureNodeSemantics(b.currentNode).labelledBy = nodeId
+  b
+
+proc semanticState*(b: var UiBuilder, states: UiSemanticStates): var UiBuilder {.discardable.} =
+  ## Add semantic states (checked, expanded, disabled, ...) to the current
+  ## node for this frame.
+  when not defined(nuiNoSemantics):
+    let semantics = b.ensureNodeSemantics(b.currentNode).addr
+    semantics.states.incl states
+  b
+
+proc semanticValue*(b: var UiBuilder, value: float32, minValue = 0.0'f32,
+    maxValue = 0.0'f32, step = 0.0'f32): var UiBuilder {.discardable.} =
+  ## Set the current node's numeric value and optional range/step (sliders,
+  ## progress indicators, spin buttons).
+  when not defined(nuiNoSemantics):
+    let semantics = b.ensureNodeSemantics(b.currentNode).addr
+    semantics.numericValue = value
+    semantics.numericMin = minValue
+    semantics.numericMax = maxValue
+    semantics.numericStep = step
+    semantics.hasNumericValue = true
+  b
+
+proc semanticHidden*(b: var UiBuilder): var UiBuilder {.discardable.} =
+  ## Exclude the current node and all of its descendants from accessibility
+  ## (decorative subtrees such as focus highlights).
+  when not defined(nuiNoSemantics):
+    let semantics = b.ensureNodeSemantics(b.currentNode).addr
+    semantics.states.incl SemanticHideSubtree
   b
 
 proc minSize*(b: var UiBuilder, w, h: float32): var UiBuilder {.discardable.} =

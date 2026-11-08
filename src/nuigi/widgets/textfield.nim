@@ -218,7 +218,9 @@ proc textFieldDeferred(b: var UiBuilder, nodeIdx: int, rawData: int) {.nimcall.}
 
 proc textField*(b: var UiBuilder, text: var string, hint: string = "",
   state: TextFieldStorage = nil, maxWidth = 0.0'f32,
-  minWidth = 0.0'f32): bool =
+  minWidth = 0.0'f32, labelledBy = UiNodeId(0)): bool =
+  ## `labelledBy` names the field after another node for accessibility; when
+  ## absent, the hint is used as the accessible label.
   prof("textField")
   var submitted = false
 
@@ -228,6 +230,12 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
     let nodePtr = b.currentNode
     let nodeIndex = b.currentNodeIndex
     discard b.focusable({FocusTabStop, FocusTextInput})
+    discard b.semanticRole(SemanticTextInput)
+    discard b.semanticActions({SemanticSetTextValue})
+    if labelledBy != noneNodeId():
+      discard b.semanticLabelledBy(labelledBy)
+    elif hint.len > 0:
+      discard b.semanticLabel(hint)
     let storage: TextFieldStorage = if state != nil:
       cast[TextFieldStorage](state)
     else:
@@ -353,6 +361,16 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
         b.clearFocus()
         submitted = true
 
+    var semanticRequest = default(UiSemanticRequest)
+    while b.takeSemanticRequest(nodeId, {SemanticSetTextValue}, semanticRequest):
+      let replacement = semanticRequest.textValue.sanitizedSingleLine
+      text.replaceRange(0, text.len, replacement)
+      storage.cursorPos = text.graphemeBoundaryAtOrBefore(text.len)
+      storage.selectionAnchor = storage.cursorPos
+      storage.selectionActive = false
+      storage.draggingSelection = false
+      storage.scrollOffsetX = 0.0'f32
+
     storage.textWidth = b.measuredPrefixWidth(text, text.len, textStyle)
     storage.cursorX = b.measuredPrefixWidth(text, storage.cursorPos, textStyle)
     storage.selectionNodeIndex = -1
@@ -384,6 +402,8 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
       b.node:
         b.debugName("textfield-text")
         storage.textNodeIndex = b.currentNodeIndex
+        # Display only; the content is reported as the field's value.
+        discard b.semanticHidden()
         discard b.styleIndex(if text.len > 0: UiStyleIndexDefault else: UiStyleIndexTextFieldHint)
         discard b.copyTextStyleIndex(if text.len > 0: UiStyleIndexTextFieldText else: UiStyleIndexTextFieldHintText)
         discard b.position(0, 0).fitX().fitY().anchorsY(0.5, 0.5).pivotY(0.5).finishAnchors().noHover()
@@ -404,6 +424,9 @@ proc textField*(b: var UiBuilder, text: var string, hint: string = "",
         discard b.fillBackground().ignoreInContentExtent().noHover()
 
     discard b.deferBuild(textFieldDeferred, cast[int](storage))
+    # Report the (possibly just edited) content as the accessible value. The
+    # inner display node is part of the control, not a separate label.
+    discard b.semanticValueText(text)
   discard b.popId()
 
   submitted

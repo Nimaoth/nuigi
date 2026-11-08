@@ -2641,6 +2641,86 @@ when defined(nuigiProfiler):
       echo "Profiler recording and UI tests passed"
 
 
+proc testSemantics() =
+  # Semantic accessibility metadata (docs/accessibility.md): setters fill the
+  # per-frame side array, readers expose it, extraction carries it along.
+  var b = newTestBuilder(400, 400)
+  discard b.beginUiFrame(400, 400)
+  discard b.semanticRole(SemanticWindow)
+  discard b.semanticLabel("Root Window")
+  var labelId = noneNodeId()
+  var checkboxIdx = -1
+  var sliderIdx = -1
+  var plainIdx = -1
+  b.node("semantics-label"):
+    discard b.size(50, 10)
+    discard b.text("Mute")
+    labelId = b.currentNode.id
+  b.node("semantics-checkbox"):
+    discard b.size(10, 10)
+    discard b.semanticRole(SemanticCheckBox)
+    discard b.semanticState({SemanticChecked, SemanticDisabled})
+    discard b.semanticLabelledBy(labelId)
+    checkboxIdx = b.currentNodeIndex()
+  b.node("semantics-slider"):
+    discard b.size(100, 10)
+    discard b.semanticRole(SemanticSlider)
+    discard b.semanticValue(0.25'f32, 0.0'f32, 1.0'f32, 0.05'f32)
+    discard b.semanticValueText("25 %")
+    sliderIdx = b.currentNodeIndex()
+  b.node("semantics-plain"):
+    discard b.size(10, 10)
+    plainIdx = b.currentNodeIndex()
+  b.endUiFrame(buildRenderCommands = false)
+
+  let rootSemantics = b.nodeSemantics(0)
+  require(rootSemantics != nil, "root should carry semantics")
+  require(rootSemantics.role == SemanticWindow, "root role should be Window")
+  require($rootSemantics.label == "Root Window", "root label should be set")
+
+  let checkboxSemantics = b.nodeSemantics(checkboxIdx)
+  require(checkboxSemantics != nil, "checkbox should carry semantics")
+  require(checkboxSemantics.role == SemanticCheckBox,
+    "checkbox role should be CheckBox")
+  require(SemanticChecked in checkboxSemantics.states and
+    SemanticDisabled in checkboxSemantics.states,
+    "checkbox states should accumulate")
+  require(checkboxSemantics.labelledBy == labelId,
+    "labelledBy should reference the label node")
+  require(not checkboxSemantics.hasNumericValue,
+    "checkbox should not report a numeric value")
+
+  let sliderSemantics = b.nodeSemantics(sliderIdx)
+  require(sliderSemantics != nil, "slider should carry semantics")
+  require(sliderSemantics.hasNumericValue, "slider should have a numeric value")
+  require(approxEq(sliderSemantics.numericValue, 0.25'f32) and
+    approxEq(sliderSemantics.numericMin, 0.0'f32) and
+    approxEq(sliderSemantics.numericMax, 1.0'f32) and
+    approxEq(sliderSemantics.numericStep, 0.05'f32),
+    "slider numeric value and range should be stored")
+  require($sliderSemantics.valueText == "25 %",
+    "slider value text should be stored")
+
+  require(b.nodeSemantics(plainIdx) == nil,
+    "unannotated node should have no semantics")
+  require(b.nodeSemantics(-1) == nil and b.nodeSemantics(999999) == nil,
+    "out-of-range indices should have no semantics")
+
+  # Virtual-tree roundtrip: semantics are extracted with the subtree and the
+  # node's index is rebased into the local side array.
+  let extracted = extractVirtualTree(b.frame, checkboxIdx)
+  require(extracted.nodes.len == 1,
+    "extracted subtree should contain the checkbox node")
+  require(extracted.semantics.len == 1,
+    "extracted subtree should carry its semantics")
+  require(extracted.nodes[0].semanticsIndex == 1,
+    "extracted semantics index should be rebased")
+  require(extracted.semantics[0].role == SemanticCheckBox and
+    extracted.semantics[0].labelledBy == labelId,
+    "extracted semantics should match the original")
+  echo "Semantics metadata tests passed"
+
+
 when isMainModule:
   if paramCount() > 0:
     var builder = newBuilder(fixedMeasureText)
@@ -2655,6 +2735,7 @@ when isMainModule:
     quit "Expected named theme API to reject invalid input"
   testNamedThemeStyles()
   runTests()
+  testSemantics()
   when defined(nuigiProfiler):
     testProfiler()
 

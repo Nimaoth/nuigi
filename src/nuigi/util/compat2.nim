@@ -48,6 +48,9 @@ else:
     echo line
 
 when not defined(nimony):
+  template uncheckedBorrow(value: untyped): untyped {.used.} =
+    value
+
   from std/paths import Path
 
   proc path*(s: string): Path {.inline.} =

@@ -14,7 +14,7 @@ import nuigi/debug/profiler, nuigi, nuigi/rendering/mesh
 
 type
   PlotPointFn* = proc (x: float32, userData: int): float32 {.gcsafe, raises: [].}
-  PlotXTransformFn* = proc (x: float32): float32 {.gcsafe, raises: [].}
+  PlotXTransformFn* = proc (x: float32): float32 {.closure, gcsafe, raises: [].}
 
   PlotSeries* = object
     fn*: PlotPointFn
@@ -161,7 +161,9 @@ proc buildPlotVertices*(b: var UiBuilder, pos, size: Vec2,
     let dataXm = xRange.x + (mousePos.x - pos.x) / size.x * (xRange.y - xRange.x)
     var xLabel = ""
     if showHoverX:
-      let displayX = if transformHoverX == nil: dataXm else: transformHoverX(dataXm)
+      # LLVM requires an addressable value for closure comparisons.
+      let noTransform: PlotXTransformFn = nil
+      let displayX = if transformHoverX == noTransform: dataXm else: transformHoverX(dataXm)
       xLabel = " (x: " & formatFloat(displayX, ffDecimal, 2) & ")"
 
     for s in 0 ..< series.len:

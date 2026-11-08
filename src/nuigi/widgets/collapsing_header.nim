@@ -43,6 +43,7 @@ template collapsingHeader*(b: var UiBuilder, label: string,
     expanded: var bool, body: untyped): untyped =
   block:
     prof("collapsingHeader")
+    var headerId = noneNodeId()
     discard b.pushId(label)
     b.layoutVertical:
       b.debugName("collapsing-header")
@@ -50,14 +51,19 @@ template collapsingHeader*(b: var UiBuilder, label: string,
 
       b.layoutHorizontal:
         b.debugName("collapsing-header-toggle")
-        let headerId = b.currentNode.id
+        headerId = b.currentNode.id
         discard b.fillX().fitY().noChildHover()
         discard b.styleIndex(UiStyleIndexHeader)
         discard b.fillBackground()
         discard b.focusable({FocusTabStop, FocusActivatable})
+        discard b.semanticRole(SemanticButton)
+        discard b.semanticState(
+          if expanded: {SemanticExpanded} else: {SemanticCollapsed})
 
         b.node:
           b.debugName("collapsing-header-chevron")
+          # Decorative; the expansion state is reported by the header.
+          discard b.semanticHidden()
           if b.backendType == UiBackendType.Terminal:
             discard b.fitX().fitY()
             discard b.copyTextStyleIndex(UiStyleIndexHeaderText)
@@ -78,6 +84,8 @@ template collapsingHeader*(b: var UiBuilder, label: string,
         elif b.wasFocusActivated():
           expanded = not expanded
         discard b.focusHighlight()
+
+      discard b.applySemanticExpanded(headerId, expanded, activate = true)
 
       b.node:
         b.debugName("collapsing-header-content")

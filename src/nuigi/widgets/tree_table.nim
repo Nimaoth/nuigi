@@ -51,6 +51,7 @@ type
     initialized*: bool
     pendingToggleCursor*: TreeCursor
     pendingExpandCursor: TreeCursor
+    pendingSemanticExpansions: seq[tuple[cursor: TreeCursor, expanded: bool]]
     expandAllWork: seq[ExpandAllWork]
     expandingAll: bool
     walkCursor*: TreeCursor
@@ -985,7 +986,7 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) {.gcsafe.} 
   ## Renders one row with indentation, expansion control, background, and cells.
   prof("treeTableField")
   let hasChildren = e.walkCursor.childCount() > 0
-  let isExpanded = hasChildren and nodeIsExpanded(e, e.walkCursor, 0)
+  var isExpanded = hasChildren and nodeIsExpanded(e, e.walkCursor, 0)
 
   # Alternating row background (zebra) – drawn first so hover can override.
   if e.alternatingRowBackground:
@@ -1007,6 +1008,25 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) {.gcsafe.} 
   # current node is table row, each node created here is one column
 
   b.debugName("tree-table-row")
+  let rowNodeId = b.currentNode.id
+  discard b.semanticRole(SemanticTreeItem)
+  if hasChildren:
+    discard b.semanticState(
+      if isExpanded: {SemanticExpanded} else: {SemanticCollapsed})
+    discard b.semanticActions({SemanticActivate, SemanticExpand, SemanticCollapse})
+    let wasExpanded = isExpanded
+    discard b.applySemanticExpanded(rowNodeId, isExpanded, activate = true)
+    if wasExpanded != isExpanded:
+      var foundPending = false
+      let cursorKey = e.walkCursor.cursorKey()
+      for pendingIndex in 0 ..< e.pendingSemanticExpansions.len:
+        let pending {.cursor.} = e.pendingSemanticExpansions[pendingIndex]
+        if pending.cursor.cursorKey() == cursorKey:
+          e.pendingSemanticExpansions[pendingIndex].expanded = isExpanded
+          foundPending = true
+          break
+      if not foundPending:
+        e.pendingSemanticExpansions.add((e.walkCursor.clone(), isExpanded))
   discard b.fitY()
   if b.backendType == UiBackendType.Terminal:
     discard b.gap(1).padding(0)
@@ -1064,6 +1084,8 @@ proc treeTableField*(b: var UiBuilder; e: var TreeTable, index: int) {.gcsafe.} 
         1.0'f32 / treeTableBaseFontSize)
     b.node:
       b.debugName("symbol")
+      # Decorative chevron; the expansion state is reported by the row.
+      discard b.semanticHidden()
       if b.backendType == UiBackendType.Terminal:
         discard b.size(1.0'f32, 1.0'f32).alignCenter()
       else:
@@ -1530,6 +1552,16 @@ proc treeTable*(b: var UiBuilder; cursor: TreeCursor, options: TreeTableOptions,
       toggleNode(ctx, pendingToggleCursor)
       ctx.pendingToggleCursor = nil
       b.anythingAnimating = true
+    for pendingIndex in 0 ..< ctx.pendingSemanticExpansions.len:
+      let pending {.cursor.} = ctx.pendingSemanticExpansions[pendingIndex]
+      if pending.cursor == nil:
+        continue
+      if pending.expanded:
+        ctx.expandNode(pending.cursor)
+      elif ctx.findExpandedNode(pending.cursor.cursorKey()) >= 0:
+        ctx.toggleNode(pending.cursor)
+      b.anythingAnimating = true
+    ctx.pendingSemanticExpansions.setLen(0)
   except:
     return
 

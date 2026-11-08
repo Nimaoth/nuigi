@@ -252,6 +252,37 @@ proc buildSdl3Wasm() =
   # copyFile(libPath, "./build/sdl3_wasm/libSDL3.a")
   echo "wasm: SDL3 wasm static lib ready at build/sdl3_wasm/libSDL3.a"
 
+proc installAccessKit() =
+  # AccessKit ships prebuilt libraries in vendor/accesskit-c. Copy the shared
+  # library next to the executables so it is found at runtime when building
+  # with -d:nuiAccessKit, and the import library into build/ for linking.
+  echo "installAccessKit"
+  createDir("build")
+  createDir("bin")
+  when defined(windows):
+    let src = "vendor/accesskit-c/lib/windows/x86_64/msvc/shared"
+    copyFile(src & "/accesskit.dll", "bin/accesskit.dll")
+    copyFile(src & "/accesskit.lib", "build/accesskit.lib")
+    # Import library for gcc-based builds (nimony).
+    copyFile("vendor/accesskit-c/lib/windows/x86_64/mingw/shared/libaccesskit.a",
+      "build/libaccesskit.a")
+  elif defined(macosx):
+    let arch = if hostCPU == "arm64": "arm64" else: "x86_64"
+    let src = "vendor/accesskit-c/lib/macos/" & arch & "/shared"
+    copyFile(src & "/libaccesskit.dylib", "bin/libaccesskit.dylib")
+    copyFile(src & "/libaccesskit.dylib", "build/libaccesskit.dylib")
+  else:
+    let src = "vendor/accesskit-c/lib/linux/x86_64/shared"
+    copyFile(src & "/libaccesskit.so", "bin/libaccesskit.so")
+    copyFile(src & "/libaccesskit.so", "build/libaccesskit.so")
+
+proc generateAccessKitBindings() =
+  # Regenerates the Nim bindings from vendor/accesskit-c/include/accesskit.h.
+  # Requires Python 3 with the clang package (pip install clang) and libclang.
+  echo "generateAccessKitBindings"
+  requireProgram("python", "Install Python 3 and run `pip install clang`.")
+  shell "python tools/generate_accesskit_bindings.py"
+
 proc buildFreetype(debug = false) =
   echo "buildFreetype"
   createDir("vendor")
@@ -406,6 +437,8 @@ proc buildNuiDemo(compiler: NimCompiler, staticDependencies = false) =
     else:
       ""
   let noHarfbuzz = if staticDependencies: "-d:nuiNoHarfbuzz" else: ""
+  if "nuiAccessKit" in passthroughArgs:
+    installAccessKit()
   case compiler
   of Nim2:
     shell nimCommand(&"c {outFlag} --cc:clang -d:freetypeStatic -d:sdl3 --nimcache:build/nimcache-nim {noHarfbuzz} {sdlLink} {sdlSystemLink} {passthroughArgs} examples/demo.nim")
@@ -572,6 +605,53 @@ proc buildFocusTest(compiler: NimCompiler) =
     shellCapture(
       &"nimony c -r -o:bin/ui-focus-test-nimony.exe --path:src {passthroughArgs} tests/ui_focus_test.nim",
       "ui-focus-test-nimony"
+    )
+  else:
+    echo "not implemented"
+
+proc buildThreadQueueTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      nimCommand(&"c -r -o:bin/thread-queue-test-nim.exe --cc:clang --threads:on --assertions:on --path:src {passthroughArgs} tests/thread_queue_test.nim"),
+      "thread-queue-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/thread-queue-test-nimony.exe --path:src {passthroughArgs} tests/thread_queue_test.nim",
+      "thread-queue-test-nimony"
+    )
+  else:
+    quit("thread-queue-test supports --nim2 and --nimony", 1)
+
+proc buildSemanticActionsTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  case compiler
+  of Nim2:
+    shellCapture(
+      nimCommand(&"c -r -o:bin/semantic-actions-test-nim.exe --cc:clang --path:src {passthroughArgs} tests/semantic_actions_test.nim"),
+      "semantic-actions-test-nim2")
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/semantic-actions-test-nimony.exe --path:src {passthroughArgs} tests/semantic_actions_test.nim",
+      "semantic-actions-test-nimony")
+  else:
+    quit("semantic-actions-test supports --nim2 and --nimony", 1)
+
+proc buildAccessKitTreeTest(compiler: NimCompiler) =
+  let passthroughArgs = passthroughArgs.join(" ")
+  installAccessKit()
+  case compiler
+  of Nim2:
+    shellCapture(
+      nimCommand(&"c -r -o:bin/accesskit-tree-test-nim.exe --cc:clang --stackTrace:on --lineTrace:on --d:debug --path:src {passthroughArgs} tests/accesskit_tree_test.nim"),
+      "accesskit-tree-test-nim2"
+    )
+  of Nimony:
+    shellCapture(
+      &"nimony c -r -o:bin/accesskit-tree-test-nimony.exe --passL:-Lbuild --path:src {passthroughArgs} tests/accesskit_tree_test.nim",
+      "accesskit-tree-test-nimony"
     )
   else:
     echo "not implemented"
@@ -790,6 +870,21 @@ proc main() =
   of "fribidi":
     buildFribidi()
 
+  of "accesskit":
+    installAccessKit()
+
+  of "accesskit-bindings":
+    generateAccessKitBindings()
+
+  of "accesskit-test":
+    buildAccessKitTreeTest(compiler)
+
+  of "thread-queue-test":
+    buildThreadQueueTest(compiler)
+
+  of "semantic-actions-test":
+    buildSemanticActionsTest(compiler)
+
   of "clean":
     removeDir("./build", false)
 
@@ -814,6 +909,8 @@ proc main() =
 
   of "test":
     buildUiTest(compiler)
+    buildThreadQueueTest(compiler)
+    buildSemanticActionsTest(compiler)
     buildTextFieldTest(compiler)
     buildFocusTest(compiler)
     buildTerminalTest(compiler)
@@ -821,6 +918,9 @@ proc main() =
     buildTreeTableRefreshTest(compiler)
     buildTreeTableRefreshBench(compiler)
     buildFileSystemCursorBench(compiler)
+    when defined(windows):
+      # The AccessKit integration is currently Windows only.
+      buildAccessKitTreeTest(compiler)
 
   of "tree-table-refresh-test":
     buildTreeTableRefreshTest(compiler)

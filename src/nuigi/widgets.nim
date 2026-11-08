@@ -127,6 +127,8 @@ template tooltip*(b: var UiBuilder, body: untyped): untyped =
     let input = b.frameCtx.input
     b.withParent(b.overlays):
       b.node("tooltip"):
+        discard b.semanticRole(SemanticTooltip)
+        discard b.semanticState({SemanticLiveRegion})
         body
         discard b.offsets(input.mouse.x, input.mouse.y, 0, 0).pivot(0, 1).finishAnchors().noHover()
 
@@ -153,16 +155,20 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
         discard b.flexLayout(true).flexFlow(FlexDirectionRow, FlexWrap)
         discard b.animateHeight().animateDelayed()
         discard b.fillBackground()
+        discard b.semanticRole(SemanticTabList)
 
         var firstTabId = noneNodeId()
         var previousTabId = noneNodeId()
+        var tabNodeIndices: seq[int] = @[]
         for i in 0 ..< tabs.len:
           let isActive = i == activeTab
           discard b.pushId(i.uint64)
           b.node("tab-bar-item"):
             let tabId = b.currentNode.id
+            let tabNodeIdx = b.currentNodeIndex
             if firstTabId == noneNodeId():
               firstTabId = tabId
+            tabNodeIndices.add(tabNodeIdx)
             discard b.styleIndex(if isActive: UiStyleIndexTabBarItemActive else: UiStyleIndexTabBarItem)
             discard b.copyTextStyleIndex(if isActive: UiStyleIndexTabBarItemActiveText else: UiStyleIndexTabBarItemText)
             if b.backendType == UiBackendType.Terminal:
@@ -170,7 +176,14 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
             discard b.fitX().fitY()
             discard b.fillBackground()
             discard b.text(tabs[i])
+            discard b.semanticRole(SemanticTab)
+            if isActive:
+              discard b.semanticState({SemanticSelected})
+            discard b.semanticActions({SemanticSelect})
             discard b.focusable({FocusTabStop, FocusActivatable})
+            var request = default(UiSemanticRequest)
+            while b.takeSemanticRequest(tabId, {SemanticSelect}, request):
+              activeTab = i
             if previousTabId != noneNodeId():
               b.focusNavigationTarget(NavLeft, previousTabId)
               b.focusNavigationTarget(previousTabId, NavRight, tabId)
@@ -185,12 +198,21 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
             previousTabId = tabId
           discard b.popId()
 
+        when not defined(nuiNoSemantics):
+          for i in 0 ..< tabNodeIndices.len:
+            if tabNodeIndices[i] >= 0 and tabNodeIndices[i] < b.nodes.len:
+              let semantics = b.ensureNodeSemantics(b.nodes[tabNodeIndices[i]].addr).addr
+              semantics.states.excl {SemanticSelected}
+              if i == activeTab:
+                semantics.states.incl SemanticSelected
+
         if firstTabId != noneNodeId() and previousTabId != noneNodeId():
           b.focusNavigationTarget(firstTabId, NavLeft, previousTabId)
           b.focusNavigationTarget(previousTabId, NavRight, firstTabId)
 
       b.node("tab-bar-content"):
         discard b.styleIndex(UiStyleIndexTabBarContent)
+        discard b.semanticRole(SemanticTabPanel)
         if b.backendType == UiBackendType.Terminal:
           discard b.padding(0)
         discard b.sizeToParentX().sizeToParentY()
@@ -205,9 +227,12 @@ template tabBar*(b: var UiBuilder, tabs: openArray[string], activeTab: var int, 
               break
 
 proc button*(b: var UiBuilder, text: string): bool =
+  ## Returns true when activated; multiple semantic activations still return
+  ## one boolean true.
   prof("button")
   let nodeIndex = b.nodes.len
   var focusActivated = false
+  var semanticActivations = 0
 
   b.node:
     b.debugName("button")
@@ -215,7 +240,9 @@ proc button*(b: var UiBuilder, text: string): bool =
     discard b.copyTextStyleIndex(UiStyleIndexButtonText)
     discard b.fitX().fitY()
     discard b.text(text)
+    discard b.semanticRole(SemanticButton)
     let nodeId = b.currentNode.id
+    semanticActivations = b.semanticActivateCount(nodeId)
     discard b.focusable({FocusTabStop, FocusActivatable})
     if b.previousOutput.clickedId == nodeId:
       b.requestFocus()
@@ -234,13 +261,16 @@ proc button*(b: var UiBuilder, text: string): bool =
     discard b.focusHighlight()
 
   let id = b.nodes[nodeIndex].id
-  b.previousOutput.clickedId == id or focusActivated
+  b.previousOutput.clickedId == id or focusActivated or semanticActivations > 0
 
 template menuItem*(b: var UiBuilder, inBody: untyped, inHovered: untyped, inClicked: untyped): untyped =
   block:
     prof("menuItem")
     b.layoutVertical:
       discard b.copyStyleIndex(UiStyleIndexMenuItem)
+      discard b.semanticRole(SemanticMenuItem)
+      let menuItemId = b.currentNode.id
+      discard b.semanticActions({SemanticActivate})
       discard b.fitX().fitY().fillX()
       inBody
       let wasHovered = b.wasHovered(b.stack[^1], includeChildren = true)
@@ -258,6 +288,11 @@ template menuItem*(b: var UiBuilder, inBody: untyped, inHovered: untyped, inClic
       if b.wasClicked(includeChildren = true):
         inClicked
         discard
+      var request = default(UiSemanticRequest)
+      while b.takeSemanticRequest(menuItemId, {SemanticActivate}, request):
+        b.anythingAnimating = true
+        inClicked
+        discard
 
 template menuItem*(b: var UiBuilder, inBody: untyped): untyped =
   menuItem(b, inBody):
@@ -270,6 +305,9 @@ template menuBarItem*(b: var UiBuilder, inOpen: var bool, inBody: untyped, inHov
     prof("menuBarItem")
     b.node:
       discard b.copyStyleIndex(UiStyleIndexMenuItem)
+      discard b.semanticRole(SemanticMenuItem)
+      let menuItemId = b.currentNode.id
+      discard b.semanticActions({SemanticActivate})
       discard b.fitX().fitY().paddingRelative(4.0'f32 / 18.0'f32)
       inBody
       let wasHovered = b.wasHovered(b.stack[^1], includeChildren = true)
@@ -288,6 +326,12 @@ template menuBarItem*(b: var UiBuilder, inOpen: var bool, inBody: untyped, inHov
         inOpen = not inOpen
         inClicked
         discard
+      var request = default(UiSemanticRequest)
+      while b.takeSemanticRequest(menuItemId, {SemanticActivate}, request):
+        b.anythingAnimating = true
+        inOpen = not inOpen
+        inClicked
+        discard
 
     if inOpen:
       onOpen
@@ -296,6 +340,7 @@ template menuBar*(b: var UiBuilder, inBody: untyped): untyped =
   block:
     prof("menuBar")
     b.node("menu-bar"):
+      discard b.semanticRole(SemanticMenuBar)
       discard b.fillX().fitY()
         .paddingRelative(4.0'f32 / 18.0'f32)
       if b.backendType == UiBackendType.Terminal:
@@ -323,6 +368,7 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
           discard b.minWidth(inMinWidth)
           discard b.fitX().fitY()
           discard b.styleIndex(UiStyleIndexMenu)
+          discard b.semanticRole(SemanticMenu)
           if b.backendType == UiBackendType.Terminal:
             let borderWidths = b.currentNodeStyle()[].resolvedBorderWidths
             if borderWidths.left > 0.0'f32 or borderWidths.top > 0.0'f32 or
@@ -367,13 +413,18 @@ template menu*(b: var UiBuilder, inOpen: var bool, inAnchorX, inAnchorY: float32
         if MouseLeft in input.mousePressed and popupIdx >= 0 and not b.wasHovered(popupIdx, includeChildren = true):
           inOpen = false
 
-proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical = false): bool =
+proc checkbox*(b: var UiBuilder, label: string, value: var bool,
+    fillXInVertical = false, labelledBy = UiNodeId(0)): bool =
+  ## `labelledBy` names the checkbox after another node (e.g. a table-cell
+  ## label) for accessibility when `label` is empty.
   prof("checkbox")
   var boxNodeId = noneNodeId()
+  var checkboxNodeIdx = -1
   var previousBoxNodeIndex = -1
   var boxNodeIdx = -1
   var focusActivated = false
   var isFocused = false
+  var semanticActivations = 0
 
   discard b.pushId(label)
   b.layoutHorizontal:
@@ -384,6 +435,13 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
     else:
       discard b.gapRelative(6.0'f32 / 18.0'f32)
     discard b.focusable({FocusTabStop, FocusActivatable})
+    discard b.semanticRole(SemanticCheckBox)
+    checkboxNodeIdx = b.currentNodeIndex
+    semanticActivations = b.semanticActivateCount(b.currentNode.id)
+    if value:
+      discard b.semanticState({SemanticChecked})
+    if labelledBy != noneNodeId():
+      discard b.semanticLabelledBy(labelledBy)
     isFocused = b.isFocused()
 
     let parent = b.currentParent
@@ -394,6 +452,9 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
       b.node("checkbox-box"):
         b.debugName("checkbox-box")
         discard b.copyTextStyleIndex(UiStyleIndexCheckboxMarkText)
+        # The textual mark is decorative; the checked state is reported by
+        # the row's semantics.
+        discard b.semanticHidden()
         discard b.fitX().fitY()
         discard b.text(if value: "[x]" else: "[ ]")
         boxNodeIdx = b.nodes.high
@@ -450,12 +511,23 @@ proc checkbox*(b: var UiBuilder, label: string, value: var bool, fillXInVertical
       false
     else:
       b.wasClicked(boxNodeIdx, includeChildren = true)
-  let activated = clicked or focusActivated
-  if activated:
+  let activated = clicked or focusActivated or semanticActivations > 0
+  if clicked or focusActivated:
     value = not value
+  for _ in 0 ..< semanticActivations:
+    value = not value
+  when not defined(nuiNoSemantics):
+    if checkboxNodeIdx >= 0 and checkboxNodeIdx < b.nodes.len:
+      let semantics = b.ensureNodeSemantics(b.nodes[checkboxNodeIdx].addr).addr
+      semantics.states.excl {SemanticChecked}
+      if value:
+        semantics.states.incl SemanticChecked
   activated
 
-proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue = 1.0'f32, defaultValue = 0.5'f32): bool =
+proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32,
+    maxValue = 1.0'f32, defaultValue = 0.5'f32,
+    labelledBy = UiNodeId(0)): bool =
+  ## `labelledBy` names the slider after another node for accessibility.
   prof("slider")
   let trackWidth = 160.0'f32
   let trackHeight = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: 18.0'f32
@@ -465,6 +537,7 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
   let high = max(minValue, maxValue)
   let span = max(0.0001'f32, high - low)
   value = clamp(value, low, high)
+  let initialValue = value
 
   var trackNodeId = noneNodeId()
   var trackNodeIdx = -1
@@ -490,6 +563,10 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
       trackNodeId = b.currentNode.id
       trackNodeIdx = b.stack[^1]
       discard b.focusable({FocusTabStop, FocusDirectionalInput})
+      discard b.semanticRole(SemanticSlider)
+      discard b.semanticValue(value, low, high)
+      if labelledBy != noneNodeId():
+        discard b.semanticLabelledBy(labelledBy)
       if b.wasClicked(trackNodeId, includeChildren = true, indexHint = trackNodeIdx):
         b.requestFocus()
       previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
@@ -558,6 +635,7 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
   if rightClicked and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
     value = defaultValue
 
+  var pointerChanged = false
   if (dragging or clicked) and trackNodeIdx >= 0 and trackNodeIdx < b.nodes.len:
     let track = b.nodes[trackNodeIdx].addr
     let trackPos = b.absoluteNodePosPrev(b.nodes[trackNodeIdx].id, trackNodeIdx)
@@ -567,11 +645,13 @@ proc slider*(b: var UiBuilder, value: var float32, minValue = 0.0'f32, maxValue 
       else:
         clamp((input.mouse.x - trackPos.x) / track.size.x, 0.0'f32, 1.0'f32)
     let newValue = low + pointerT * span
-    let changed = abs(newValue - value) > 0.0001'f32
+    pointerChanged = abs(newValue - value) > 0.0001'f32
     value = newValue
-    return changed
-
-  keyboardChanged
+  let semanticChanged = b.applySemanticNumeric(trackNodeId, value, low, high)
+  if semanticChanged:
+    value != initialValue
+  else:
+    pointerChanged or keyboardChanged
 
 const dragFloatNegInf: float32 = -Inf.float32
 const dragFloatInf: float32 = Inf.float32
@@ -590,7 +670,9 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
     default: float32,
     minValue: float32 = dragFloatNegInf.float32,
     maxValue: float32 = dragFloatInf.float32,
-    trackWidth: float32 = dragFloatDefaultWidth.float32): bool =
+    trackWidth: float32 = dragFloatDefaultWidth.float32,
+    labelledBy = UiNodeId(0)): bool =
+  ## `labelledBy` names the control after another node for accessibility.
   prof("dragFloat")
   let trackHeight = if b.backendType == UiBackendType.Terminal: 1.0'f32 else: dragFloatHeight
 
@@ -599,6 +681,7 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
   let low = if hasMin: minValue else: -3.4028235e38'f32
   let high = if hasMax: maxValue else: 3.4028235e38'f32
   let span = max(0.0001'f32, high - low)
+  let initialValue = value
 
   var trackNodeId = noneNodeId()
   var trackNodeIdx = -1
@@ -617,6 +700,13 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
     trackNodeId = b.currentNode.id
     trackNodeIdx = b.stack[^1]
     discard b.focusable({FocusTabStop, FocusDirectionalInput})
+    discard b.semanticRole(SemanticSpinButton)
+    if hasMin and hasMax:
+      discard b.semanticValue(value, low, high)
+    else:
+      discard b.semanticValue(value)
+    if labelledBy != noneNodeId():
+      discard b.semanticLabelledBy(labelledBy)
     if b.wasClicked(trackNodeId, includeChildren = true, indexHint = trackNodeIdx):
       b.requestFocus()
     previousTrackIndex = b.previousNodeIndex(trackNodeId, trackNodeIdx)
@@ -632,6 +722,8 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
 
     b.node("dragfloat-text"):
       discard b.copyTextStyleIndex(UiStyleIndexSliderText)
+      # Decorative value text; the value is reported by the track semantics.
+      discard b.semanticHidden()
       discard b.fitX().fitY().alignCenter().noHover()
       discard b.text(fmt2(value))
 
@@ -705,6 +797,9 @@ proc dragFloat*(b: var UiBuilder, value: var float32,
           if hasMax and value > high: value = high.float32
           changed = true
 
+  let semanticChanged = b.applySemanticNumeric(trackNodeId, value, low, high)
+  if semanticChanged:
+    changed = value != initialValue
   changed
 
 proc dragFloatLabelStrings(mode: DragFloatLabelMode, n: int, custom: seq[string]): seq[string] =
@@ -875,7 +970,9 @@ proc dropdownPopupReposition(b: var UiBuilder, nodeIdx: int, rawData: int) {.nim
   popup.pos.x = popupX
   popup.pos.y = popupY
 
-proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, hint: string = "Select"): bool =
+proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int,
+    hint: string = "Select", labelledBy = UiNodeId(0)): bool =
+  ## `labelledBy` names the dropdown after another node for accessibility.
   prof("dropdown")
   var changed = false
 
@@ -888,6 +985,11 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
 
     if options.len > 0:
       selected = clamp(selected, 0, options.len - 1)
+    let selectedLabel =
+      if options.len > 0 and selected >= 0 and selected < options.len:
+        options[selected]
+      else:
+        hint
 
     var btnIdx = -1
     var btnId = noneNodeId()
@@ -900,14 +1002,21 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
         .gapRelative(6.0'f32 / 18.0'f32)
       discard b.copyStyleIndex(UiStyleIndexButton)
       discard b.fillBackground().noChildHover()
+      discard b.semanticRole(SemanticComboBox)
+      discard b.semanticValueText(selectedLabel)
+      discard b.semanticState(
+        if storage.open: {SemanticExpanded} else: {SemanticCollapsed})
+      if labelledBy != noneNodeId():
+        discard b.semanticLabelledBy(labelledBy)
 
       b.layoutHorizontal("dropdown-button-row"):
+        # Decorative; the selected entry is reported as the combo box value.
+        discard b.semanticHidden()
         discard b.fit().gapRelative(6.0'f32 / 18.0'f32)
         b.node("dropdown-button-label"):
           discard b.fit()
           discard b.copyTextStyleIndex(UiStyleIndexButtonText)
-          let label = if options.len > 0 and selected >= 0 and selected < options.len: options[selected] else: hint
-          discard b.text(label)
+          discard b.text(selectedLabel)
         b.node("dropdown-button-arrow"):
           discard b.fitX().fitY().alignCenter()
           discard b.copyTextStyleIndex(UiStyleIndexButtonText)
@@ -916,6 +1025,7 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
 
     if b.previousOutput.clickedId == btnId:
       storage.open = not storage.open
+    discard b.applySemanticExpanded(btnId, storage.open, activate = true)
 
     if storage.open and btnIdx >= 0 and btnIdx < b.nodes.len:
       let btnAbsPos = b.absoluteNodePosPrev(btnId, btnIdx)
@@ -936,6 +1046,7 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
           discard b.minWidth(btnNode.size.x)
           discard b.fitX().fitY()
           discard b.styleIndex(UiStyleIndexMenu)
+          discard b.semanticRole(SemanticListBox)
           if b.backendType == UiBackendType.Terminal:
             let borderWidths = b.currentNodeStyle()[].resolvedBorderWidths
             if borderWidths.left > 0.0'f32 or borderWidths.top > 0.0'f32 or
@@ -943,11 +1054,18 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
               discard b.padding(1)
           discard b.fillBackground()
 
+          var optionNodeIndices: seq[int] = @[]
           for i in 0 ..< options.len:
             let optIdx = i
             discard b.pushId(i.uint64)
             b.layoutVertical("dropdown-option"):
+              let optionNodeIdx = b.currentNodeIndex
+              optionNodeIndices.add(optionNodeIdx)
               discard b.copyStyleIndex(UiStyleIndexMenuItem)
+              discard b.semanticRole(SemanticListItem)
+              discard b.semanticActions({SemanticSelect, SemanticActivate})
+              if optIdx == selected:
+                discard b.semanticState({SemanticSelected})
               if b.backendType == UiBackendType.Terminal:
                 discard b.padding(0)
               discard b.fitX().fitY().fillX()
@@ -962,12 +1080,25 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
                 b.ensureNodeText(b.currentNode).textColor = b.themeTextStyle(UiStyleIndexMenuItemHoverText)[].textColor
               else:
                 b.ensureNodeText(b.currentNode).textColor = b.themeTextStyle(UiStyleIndexMenuItemText)[].textColor
-              if b.wasClicked(includeChildren = true):
+              var request = default(UiSemanticRequest)
+              var wasSelected = false
+              while b.takeSemanticRequest(b.currentNode.id,
+                  {SemanticSelect, SemanticActivate}, request):
+                wasSelected = true
+              if b.wasClicked(includeChildren = true) or wasSelected:
                 if selected != optIdx:
                   selected = optIdx
                   changed = true
                 storage.open = false
             discard b.popId()
+
+          when not defined(nuiNoSemantics):
+            for i in 0 ..< optionNodeIndices.len:
+              if optionNodeIndices[i] >= 0 and optionNodeIndices[i] < b.nodes.len:
+                let semantics = b.ensureNodeSemantics(b.nodes[optionNodeIndices[i]].addr).addr
+                semantics.states.excl {SemanticSelected}
+                if i == selected:
+                  semantics.states.incl SemanticSelected
 
       if KeyEscape in input.keysPressed:
         storage.open = false
@@ -977,6 +1108,17 @@ proc dropdown*(b: var UiBuilder, options: openArray[string], selected: var int, 
         let btnHovered = b.wasHovered(btnIdx, includeChildren = true)
         if not popupHovered and not btnHovered:
           storage.open = false
+
+    discard b.applySemanticExpanded(btnId, storage.open, activate = true)
+    when not defined(nuiNoSemantics):
+      if btnIdx >= 0 and btnIdx < b.nodes.len:
+        let semantics = b.ensureNodeSemantics(b.nodes[btnIdx].addr).addr
+        let selectedLabel =
+          if options.len > 0 and selected >= 0 and selected < options.len:
+            options[selected]
+          else:
+            hint
+        semantics.valueText = selectedLabel.uiString
 
   changed
 
