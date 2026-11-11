@@ -5,7 +5,7 @@
 ## Applications must initialize and destroy `Render2D` against the same GPU
 ## device and provide the platform shaders compiled into `assets/`.
 
-import std/[os, syncio, times, tables, strutils, math]
+import std/[os, syncio, times, tables, strutils, math, assertions]
 import nuigi/backend/sdl3/sdl3
 import nuigi/debug/profiler, nuigi/core/[vecmath, array_view], nuigi/text/fonts, nuigi
 
@@ -62,6 +62,7 @@ type
     cVertices
     cClipPush
     cClipPop
+    cRenderTarget
 
   Command = object
     kind: CommandKind
@@ -75,6 +76,9 @@ type
     rawData: ptr Render2DVertex
     materialId: MaterialId
     materialUniform: ArrayView[uint8]
+    premultipliedAlpha: bool
+    target, targetMsaa: GPUTexture
+    targetWidth, targetHeight: uint32
 
   Render2D* = object
     device*: GPUDevice
@@ -82,6 +86,7 @@ type
     vertexShader*: GPUShader
     fragmentShader*: GPUShader
     pipeline*: GPUGraphicsPipeline
+    premultipliedPipeline: GPUGraphicsPipeline
     pipelineFormat*: GPUTextureFormat
     whiteTexture*: GPUTexture
     whiteSampler*: GPUSampler
@@ -424,10 +429,11 @@ proc buildGraphicsPipeline(
   vbDesc: openArray[GPUVertexBufferDescription],
   attrs: ptr UncheckedArray[GPUVertexAttribute],
   numAttrs: uint32,
-  sample_count: GPUSampleCount
+  sample_count: GPUSampleCount,
+  premultipliedAlpha = false
 ): GPUGraphicsPipeline =
   var blend = GPUColorTargetBlendState(
-    src_color_blendfactor: GPU_BLENDFACTOR_SRC_ALPHA,
+    src_color_blendfactor: if premultipliedAlpha: GPU_BLENDFACTOR_ONE else: GPU_BLENDFACTOR_SRC_ALPHA,
     dst_color_blendfactor: GPU_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
     color_blend_op: GPU_BLENDOP_ADD,
     src_alpha_blendfactor: GPU_BLENDFACTOR_ONE,
@@ -490,6 +496,9 @@ proc createPipeline(r: var Render2D, targetFormat: GPUTextureFormat, sample_coun
   if r.pipeline != nil:
     releaseGPUGraphicsPipeline(r.device, r.pipeline)
     r.pipeline = nil
+  if r.premultipliedPipeline != nil:
+    releaseGPUGraphicsPipeline(r.device, r.premultipliedPipeline)
+    r.premultipliedPipeline = nil
 
   if r.vertexShader == nil or r.fragmentShader == nil:
     return false
@@ -525,7 +534,11 @@ proc createPipeline(r: var Render2D, targetFormat: GPUTextureFormat, sample_coun
     sample_count
   )
   r.pipelineFormat = targetFormat
-  r.pipeline != nil
+  r.premultipliedPipeline = buildGraphicsPipeline(r.device, r.vertexShader,
+    r.fragmentShader, targetFormat, vbDesc,
+    cast[ptr UncheckedArray[GPUVertexAttribute]](attrs[0].addr),
+    attrs.len.uint32, sample_count, true)
+  r.pipeline != nil and r.premultipliedPipeline != nil
 
 proc buildMaterialPipeline(r {.byref.}: Render2D, fragmentShader: GPUShader): GPUGraphicsPipeline =
   prof("Render2D.buildMaterialPipeline")
@@ -874,6 +887,9 @@ proc deinitRender2D*(r: var Render2D) =
   r.cancelRender2DCommandBuffer()
   releaseRenderTarget(r)
   releaseBuffers(r)
+  if r.premultipliedPipeline != nil:
+    releaseGPUGraphicsPipeline(r.device, r.premultipliedPipeline)
+    r.premultipliedPipeline = nil
 
   for id, m in r.materials.mpairs:
     if m.pipeline != nil:
@@ -1020,12 +1036,13 @@ proc uploadFontAtlasGPU*(r: var Render2D): bool =
   r.fontRender[].clearFontAtlasDirty()
   true
 
-proc addCommand(r: var Render2D, start, count: int, textureIndex: int, texture: GPUTexture = nil, sampler: GPUSampler = nil, rawData: ptr Render2DVertex = nil, materialId: MaterialId = 0, materialUniform: ArrayView[uint8] = default(ArrayView[uint8])) =
+proc addCommand(r: var Render2D, start, count: int, textureIndex: int, texture: GPUTexture = nil, sampler: GPUSampler = nil, rawData: ptr Render2DVertex = nil, materialId: MaterialId = 0, materialUniform: ArrayView[uint8] = default(ArrayView[uint8]), premultipliedAlpha = false) =
   if r.commands.len > 0:
     let last = r.commands[^1].addr
     let requireBindingChange = ((texture != nil and last.customTexture != nil and
       (texture != last.customTexture or sampler != last.customSampler)) or
-      last.materialId != materialId or last.materialUniform.len > 0 or materialUniform.len > 0)
+      last.materialId != materialId or last.materialUniform.len > 0 or materialUniform.len > 0 or
+      last.premultipliedAlpha != premultipliedAlpha)
     if last.kind == cVertices and not requireBindingChange:
       last.count += count
       r.textureIndices.add (count, textureIndex)
@@ -1046,6 +1063,7 @@ proc addCommand(r: var Render2D, start, count: int, textureIndex: int, texture: 
     rawData: rawData,
     materialId: materialId,
     materialUniform: materialUniform,
+    premultipliedAlpha: premultipliedAlpha,
   )
   r.textureIndices.add (count, textureIndex)
   r.vertexIndex += count
@@ -1231,6 +1249,7 @@ proc drawVertices*(
   samplerMode: Render2DSamplerMode = Render2DSamplerMode.Linear,
   materialId: MaterialId = 0,
   materialUniform: ArrayView[uint8] = default(ArrayView[uint8]),
+  premultipliedAlpha = false,
 ): bool =
   if vertices.len == 0:
     return false
@@ -1254,8 +1273,17 @@ proc drawVertices*(
   let customSampler = case samplerMode
     of Render2DSamplerMode.Linear: r.whiteSampler
     of Render2DSamplerMode.Nearest: r.nearestSampler
-  r.addCommand(oldLen, vertices.len, textureIndex, texture2, customSampler, materialId = materialId, materialUniform = materialUniform)
+  r.addCommand(oldLen, vertices.len, textureIndex, texture2, customSampler,
+    materialId = materialId, materialUniform = materialUniform,
+    premultipliedAlpha = premultipliedAlpha)
   true
+
+proc bindRenderTarget*(r: var Render2D, target: GPUTexture, msaa: GPUTexture,
+    width, height: uint32) =
+  ## Queue a target switch. Passing nil restores the main framebuffer.
+  assert r.clipStack.len == 0, "render target switches require an empty clip stack"
+  r.commands.add Command(kind: cRenderTarget, target: target,
+    targetMsaa: msaa, targetWidth: width, targetHeight: height)
 
 proc restartRenderpass*(r: var Render2D) =
   prof("Render2D.restartRenderpass")
@@ -1271,7 +1299,7 @@ proc restartRenderpass*(r: var Render2D) =
   if r.sample_count != GPU_SAMPLECOUNT_1:
     target = r.targetMsaa
     resolveTarget = r.target
-    storeOp = GPU_STOREOP_RESOLVE
+    storeOp = GPU_STOREOP_RESOLVE_AND_STORE
   var targetInfo = GPUColorTargetInfo(
     texture: target,
     mip_level: 0,
@@ -1351,6 +1379,15 @@ proc popClipRect*(r: var Render2D) =
 
 proc flush(r: var Render2D): bool =
   prof("Render2D.flush")
+  let mainTarget = r.target
+  let mainMsaa = r.targetMsaa
+  let mainWidth = r.targetWidth
+  let mainHeight = r.targetHeight
+  defer:
+    r.target = mainTarget
+    r.targetMsaa = mainMsaa
+    r.targetWidth = mainWidth
+    r.targetHeight = mainHeight
   var hasDrawWork = false
   for c in r.commands:
     if c.kind == cVertices:
@@ -1441,17 +1478,32 @@ proc flush(r: var Render2D): bool =
       uploadToGPUBuffer(copyPass, src.addr, dst.addr, true)
     endGPUCopyPass(copyPass)
 
+  var lastPremultiplied = false
   for commandIndex in 0 ..< r.commands.len:
     let c = r.commands[commandIndex].addr
     case c.kind
     of cClear:
       prof("Render2D.clear")
       r.state.loadOp = GPU_LOADOP_CLEAR
+    of cRenderTarget:
+      # A queued clear must execute even if no geometry preceded this switch.
+      if r.renderPass == nil and r.state.loadOp == GPU_LOADOP_CLEAR:
+        r.restartRenderpass()
+      if r.renderPass != nil:
+        endGPURenderPass(r.renderPass)
+        r.renderPass = nil
+      r.target = if c.target != nil: c.target else: mainTarget
+      r.targetMsaa = if c.target != nil: c.targetMsaa else: mainMsaa
+      r.targetWidth = if c.target != nil: c.targetWidth else: mainWidth
+      r.targetHeight = if c.target != nil: c.targetHeight else: mainHeight
+      r.state.loadOp = if c.target != nil: GPU_LOADOP_CLEAR else: GPU_LOADOP_LOAD
+      lastPremultiplied = false
 
     of cClipPush:
       prof("Render2D.pushClip")
       if r.renderPass == nil:
         r.restartRenderpass()
+        lastPremultiplied = false
       let pass = r.renderPass
       if pass != nil:
         var scissor = c.scissorRect
@@ -1470,15 +1522,16 @@ proc flush(r: var Render2D): bool =
       prof("Render2D.flush.cVertices")
       if r.renderPass == nil:
         r.restartRenderpass()
+        lastPremultiplied = false
 
       let pass = r.renderPass
       if pass == nil:
         continue
 
-      if r.lastBoundMaterial != c.materialId:
+      if r.lastBoundMaterial != c.materialId or lastPremultiplied != c.premultipliedAlpha:
         let mat = r.materials.getOrDefault(c.materialId, emptyRender2DMaterial())
         let desiredPipeline = if c.materialId == r.defaultMaterialId:
-            r.pipeline
+            (if c.premultipliedAlpha: r.premultipliedPipeline else: r.pipeline)
           elif mat.pipeline != nil:
             mat.pipeline
           else:
@@ -1488,6 +1541,7 @@ proc flush(r: var Render2D): bool =
         if mat.hasFragmentUniform and c.materialUniform.len > 0:
           pushGPUFragmentUniformData(r.commandBuffer, 0, c.materialUniform.toOpenArray(0, c.materialUniform.high).data, uint32(c.materialUniform.len))
         r.lastBoundMaterial = c.materialId
+        lastPremultiplied = c.premultipliedAlpha
 
       r.activeTextures[2] = GPUTextureSamplerBinding(
         texture: if c.customTexture != nil: c.customTexture else: r.whiteTexture,

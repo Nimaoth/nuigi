@@ -49,6 +49,12 @@ type
       ## Internal: the node's size changed during post-processing, requiring a re-pass of descendants.
     VirtualTree
       ## Internal: the node was extracted into a virtual-node subtree (`extractVirtualTree`).
+    CopiedFromPreviousFrame
+      ## Internal: this node was copied by `reuseCachedNode`.
+    CacheSubtree
+      ## Internal: request a texture for this subtree.
+    UseCachedTexture
+      ## Internal: render the subtree as one cached image.
     AlignCenter
       ## Center children along the cross axis of a vertical/horizontal layout.
     FillX
@@ -670,6 +676,8 @@ type
       ## Pop the top transform.
     CmdRawVertices
       ## User-supplied vertex batch (`vertexData`, `vertexCount`, `materialId`, `materialUniform`).
+    CmdRenderTarget
+      ## Bind `imageId` with pixel `size` and clear it; zero restores the main target.
 
   UiImageId* = distinct uint64
     ## Handle identifying a texture (image, font atlas, or render target) for `CmdImage`/`CmdText`.
@@ -711,10 +719,14 @@ type
       ## Line/stroke thickness (`CmdLine`/`CmdRectStroke`).
     imageId*: UiImageId
       ## Texture handle for `CmdImage` or font atlas for `CmdText`.
+    premultipliedAlpha*: bool
+      ## Cached images contain premultiplied color and require ONE/SRC_ALPHA blending.
     vertexData*: ptr UncheckedArray[UiVertex]
       ## Vertex pointer for `CmdRawVertices`.
     vertexCount*: int32
       ## Number of vertices in `vertexData`.
+    vertexCoordinatesLocal*: bool
+      ## Custom raw vertices are relative to node content; translated at render time.
     transformOrigin*: Vec2
       ## Transform origin used by `CmdTransformPush`.
     pivot*: Vec2
@@ -945,12 +957,29 @@ type
       ## True when the drag comes from outside the application. `nodeId` is then
       ## `externalDragNodeId()` and `userData` a `UiExternalDragUserData`.
 
+  UiCreateCacheTextureFn* = proc(userData: pointer, width, height: int): UiImageId {.nimcall, raises: [].}
+  UiFreeCacheTextureFn* = proc(userData: pointer, image: UiImageId) {.nimcall, raises: [].}
+
+  UiWidgetCache = object
+    image: UiImageId
+    size, viewport: Vec2
+    ready: bool
+    release: UiFreeCacheTextureFn
+    context: pointer
+
   UiBuilder* = object
     ## The central UI object. Owns the current and previous frames, the node stack,
     ## ID scopes, theme styles, animations, node storage, and frame output. Mutators
     ## return `var UiBuilder` (`.discardable`) so calls chain.
     backendType*: UiBackendType
       ## Rendering environment used to select backend-appropriate UI behavior.
+    cachingEnabled*: bool = true
+      ## Enable subtree texture caching. Disabling releases caches when rendering the frame.
+    createCacheTextureFn*: UiCreateCacheTextureFn
+    freeCacheTextureFn*: UiFreeCacheTextureFn
+    cacheTextureUserData*: pointer
+      ## Host context for the optional texture callbacks. Clear caches before replacing it.
+    widgetCaches: Table[uint64, UiWidgetCache]
     stack*: seq[int]
       ## Index stack of nodes currently being built (innermost last); mirrors the begin/end nesting.
     nodeIdStack*: seq[UiNodeId]
@@ -4471,6 +4500,142 @@ proc virtualNodeFromNode*(b: var UiBuilder, nodeIdx: int): UiVirtualTree =
   ## Convenience wrapper around `extractVirtualTree` operating on the current frame.
   extractVirtualTree(b.frame, nodeIdx)
 
+proc clearWidgetCaches*(b: var UiBuilder) =
+  ## Release textures before host teardown or callback/context replacement.
+  for _, cache in b.widgetCaches:
+    cache.release(cache.context, cache.image)
+  b.widgetCaches.clear()
+
+proc reuseCachedNode*(b: var UiBuilder, dirty = false): bool =
+  ## Request caching of the current node. A hit copies its previous subtree.
+  ## Call before children; mark dirty for content/style/layout changes.
+  let createTexture = b.createCacheTextureFn
+  let freeTexture = b.freeCacheTextureFn
+  if not b.cachingEnabled or createTexture == nil or freeTexture == nil or
+      b.backendType == UiBackendType.Terminal:
+    return false
+  let root = b.stack[^1]
+  assert root > 0 and b.frame.nodes[root].lastChild < 0,
+    "reuseCachedNode must be called inside an empty widget root"
+  b.frame.nodes[root].flags.incl CacheSubtree
+  let id = b.frame.nodes[root].id.uint64
+  if dirty or not b.widgetCaches.hasKey(id):
+    if b.widgetCaches.hasKey(id):
+      b.widgetCaches.getOrQuit(id).ready = false
+    return false
+  let cache = b.widgetCaches.getOrQuit(id)
+  let previous = b.previousNodeIndex(b.frame.nodes[root].id)
+  if not cache.ready or previous < 0 or cache.viewport != b.frameCtx.viewportSize:
+    return false
+  let freshRoot = b.frame.nodes[root]
+  if (SizeXKnown in freshRoot.flags and freshRoot.size.x != b.previousFrame.nodes[previous].size.x) or
+      (SizeYKnown in freshRoot.flags and freshRoot.size.y != b.previousFrame.nodes[previous].size.y):
+    b.widgetCaches.getOrQuit(id).ready = false
+    return false
+
+  var indices = @[previous]
+  var remap = initTable[int, int]()
+  remap[previous] = root
+  var read = 0
+  while read < indices.len:
+    let old = indices[read]
+    inc read
+    let tail = int(b.previousFrame.nodes[old].lastChild)
+    if tail >= 0:
+      var child = int(b.previousFrame.nodes[tail].nextSibling)
+      while true:
+        remap[child] = b.frame.nodes.len
+        indices.add child
+        b.frame.nodes.add UiNode()
+        b.autoChildCounter.add 0'u32
+        b.configuringAnimationStack.add false
+        b.animationTriggerStack.add true
+        if child == tail: break
+        child = int(b.previousFrame.nodes[child].nextSibling)
+
+  for old in indices:
+    var node = b.previousFrame.nodes[old]
+    let target = remap.getOrQuit(old)
+    template copySide(index, destination, source: untyped) =
+      if index != 0:
+        destination.add source[int(index) - 1]
+        index = uint16(destination.len)
+    copySide(node.textIndex, b.frame.texts, b.previousFrame.texts)
+    if node.textIndex != 0:
+      b.frame.texts[int(node.textIndex) - 1].text.ensureOwned()
+    copySide(node.styleIndex, b.frame.styles, b.previousFrame.styles)
+    copySide(node.gapIndex, b.frame.gaps, b.previousFrame.gaps)
+    copySide(node.anchorIndex, b.frame.anchors, b.previousFrame.anchors)
+    copySide(node.transformIndex, b.frame.transforms, b.previousFrame.transforms)
+    copySide(node.customLayoutIndex, b.frame.customLayouts, b.previousFrame.customLayouts)
+    copySide(node.customChildLayoutIndex, b.frame.customLayouts, b.previousFrame.customLayouts)
+    copySide(node.semanticsIndex, b.frame.semantics, b.previousFrame.semantics)
+    if node.semanticsIndex != 0:
+      let semantics = b.frame.semantics[int(node.semanticsIndex) - 1].addr
+      semantics.label.ensureOwned()
+      semantics.description.ensureOwned()
+      semantics.valueText.ensureOwned()
+    if node.commandsIndex != 0:
+      var source = b.previousFrame.customCommands[int(node.commandsIndex) - 1]
+      var commands = b.frame.arena[].allocArray(source.len, UiRenderCommand)
+      for i in 0 ..< source.len:
+        var command = source[i]
+        if command.nodeIndex >= 0:
+          command.nodeIndex = remap.getOrDefault(int(command.nodeIndex), target).int32
+        if command.textIndex > 0:
+          b.frame.texts.add b.previousFrame.texts[int(command.textIndex) - 1]
+          b.frame.texts[^1].text.ensureOwned()
+          command.textIndex = uint16(b.frame.texts.len)
+        if command.vertexData != nil and command.vertexCount > 0:
+          var vertices = b.frame.arena[].allocArray(int(command.vertexCount), UiVertex)
+          for v in 0 ..< vertices.len:
+            vertices[v] = command.vertexData[v]
+          command.vertexData = vertices.data
+        if command.materialUniform.len > 0:
+          var sourceUniform = command.materialUniform
+          var uniform = b.frame.arena[].allocArray(sourceUniform.len, uint8)
+          for u in 0 ..< uniform.len:
+            uniform[u] = sourceUniform[u]
+          command.materialUniform = uniform
+        commands[i] = command
+      b.frame.customCommands.add commands
+      node.commandsIndex = uint16(b.frame.customCommands.len)
+    node.parent = remap.getOrDefault(int(node.parent), -1).int32
+    node.lastChild = remap.getOrDefault(int(node.lastChild), -1).int32
+    node.nextSibling = remap.getOrDefault(int(node.nextSibling), -1).int32
+    node.renderParent = remap.getOrDefault(int(node.renderParent), -1).int32
+    node.renderChildLast = remap.getOrDefault(int(node.renderChildLast), -1).int32
+    node.renderSibling = remap.getOrDefault(int(node.renderSibling), -1).int32
+    node.flags.incl CopiedFromPreviousFrame
+    node.layerIndex = freshRoot.layerIndex
+    node.flags.excl UseCachedTexture
+    if old == previous:
+      let lastChild = node.lastChild
+      let oldRoot = b.previousFrame.nodes[previous]
+      node = freshRoot
+      node.lastChild = lastChild
+      node.cursor = oldRoot.cursor
+      node.contentExtent = oldRoot.contentExtent
+      if SizeXKnown notin node.flags: node.size.x = oldRoot.size.x
+      if SizeYKnown notin node.flags: node.size.y = oldRoot.size.y
+      node.flags.incl {CacheSubtree, UseCachedTexture, CopiedFromPreviousFrame}
+    b.frame.nodes[target] = node
+    b.frame.nodeIdToIndex[node.id.uint64] = target
+    if b.nodeStorage.hasKey(node.id.uint64):
+      b.nodeStorage.getOrQuit(node.id.uint64).lastAccess = b.frameCtx.input.frameIndex
+  for item in b.previousFrame.focusItems:
+    if item.nodeIndex != previous and remap.hasKey(int(item.nodeIndex)):
+      var copied = item
+      copied.nodeIndex = remap.getOrQuit(item.nodeIndex)
+      b.frame.focusItems.add copied
+  for scope in b.previousFrame.focusScopes:
+    let oldScope = b.previousNodeIndex(scope.nodeId)
+    if oldScope != previous and remap.hasKey(oldScope):
+      b.frame.focusScopes.add scope
+  b.currentNode = b.frame.nodes[root].addr
+  b.currentParent = b.frame.nodes[freshRoot.parent].addr
+  true
+
 proc collectGarbage*(b: var UiBuilder) =
   prof("collectGarbage")
 
@@ -4541,6 +4706,8 @@ proc updateVirtualTrees(b: var UiBuilder) =
 
   b.insertVirtualTrees()
 
+proc prepareWidgetCaches(b: var UiBuilder, meshCommands: bool): seq[UiRenderCommand]
+
 proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarbage: bool = true, buildMeshRenderCommands: bool = false) =
   ## End the UI frame. Flushes deferred nodes, removes stale animations, and builds render commands.
   prof("endUiFrame")
@@ -4566,6 +4733,7 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
 
   b.frameOutput.clearFrameOutput()
   if buildRenderCommands:
+    let cacheCommands = b.prepareWidgetCaches(buildMeshRenderCommands)
     var clipStack = newSeq[UiClipRect]()
     if buildMeshRenderCommands:
       b.buildMeshRenderCommands(0, 0, 0, 0'i32, clipStack)
@@ -4578,6 +4746,7 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
       len += b.frameOutput.commandLayers[i].len
 
     b.frameOutput.commands = newSeqOfCap[UiRenderCommand](len)
+    b.frameOutput.commands.add cacheCommands
     for i in 0 ..< b.frameOutput.commandLayers.len:
       b.frameOutput.commands.add(b.frameOutput.commandLayers[i])
 
@@ -4606,6 +4775,9 @@ proc endUiFrame*(b: var UiBuilder, buildRenderCommands: bool = true, collectGarb
 
   if collectGarbage:
     b.collectGarbage()
+  if not buildRenderCommands:
+    for _, cache in b.widgetCaches.mpairs:
+      cache.ready = false
 
 proc keepAlive*(b: var UiBuilder, nodeId: UiNodeId) =
   ## Mark a node and all its ancestors as alive, preventing their storage from being garbage-collected.
@@ -4628,8 +4800,25 @@ proc pushRenderCommand*(b: var UiBuilder, layerIndex: int32, command: sink UiRen
   let layer = max(0, layerIndex.int)
   if layer >= b.frameOutput.commandLayers.len:
     b.frameOutput.commandLayers.setLen(layer + 1)
-    b.frameOutput.commandLayers[layer] = newSeq[UiRenderCommand](2048)
+    b.frameOutput.commandLayers[layer] = newSeqOfCap[UiRenderCommand](2048)
   b.frameOutput.commandLayers[layer].add(command)
+
+proc resolveCustomRenderCommand(b: var UiBuilder, cmd: UiRenderCommand,
+    idx: int, contentOrigin: Vec2, transform: UiAffine2): UiRenderCommand =
+  result = cmd
+  if result.nodeIndex < 0:
+    result.nodeIndex = idx.int32
+  result.pos += contentOrigin
+  result.pos2 += contentOrigin
+  if cmd.kind == CmdRawVertices and cmd.vertexCoordinatesLocal and
+      cmd.vertexData != nil and cmd.vertexCount > 0:
+    var vertices = b.frame.arena[].allocArray(int(cmd.vertexCount), UiVertex)
+    for i in 0 ..< vertices.len:
+      vertices[i] = cmd.vertexData[i]
+      let position = transform * (vertices[i].pos + contentOrigin)
+      vertices[i].pos = position
+    result.vertexData = vertices.data
+    result.vertexCoordinatesLocal = false
 
 proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedLayoutIndex: int32, clipStack: var seq[UiClipRect], transformStack: var seq[UiAffine2]) =
   prof("buildMeshRenderCommands")
@@ -4656,6 +4845,23 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
     transformStack.add nextTransform
 
   let transform = transformStack[^1]
+
+  if UseCachedTexture in n.flags:
+    let cache = b.widgetCaches.getOrQuit(n.id.uint64)
+    var vertices = b.frame.arena[].allocArray(6, UiVertex)
+    let points = [absPos, absPos + vec2(cache.size.x, 0), absPos + cache.size,
+      absPos + vec2(0, cache.size.y)]
+    let uvs = [vec2(0, 0), vec2(1, 0), vec2(1, 1), vec2(0, 1)]
+    const corners = [0, 1, 2, 0, 2, 3]
+    for i, corner in corners:
+      vertices[i] = UiVertex(pos: transform * points[corner], uv: uvs[corner],
+        color: rgba(1, 1, 1, 1))
+    b.pushRenderCommand(layerIndex, UiRenderCommand(kind: CmdRawVertices,
+      nodeIndex: idx.int32, imageId: cache.image, vertexData: vertices.data,
+      vertexCount: 6, premultipliedAlpha: true), clipStack)
+    if n.transformIndex >= 0 and transformStack.len > 1:
+      discard transformStack.pop()
+    return
 
   if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
     let (vertexData, vertexCount) = if nodeStyle[].hasPerCornerRadii:
@@ -4733,11 +4939,7 @@ proc buildMeshRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheri
         ), clipStack)
 
   for cmd in b.nodeCustomCommands(n)[]:
-    var outCmd = cmd
-    if outCmd.nodeIndex < 0:
-      outCmd.nodeIndex = idx.int32
-    outCmd.pos += contentOrigin
-    outCmd.pos2 += contentOrigin
+    let outCmd = b.resolveCustomRenderCommand(cmd, idx, contentOrigin, transform)
     b.pushRenderCommand(layerIndex, outCmd, clipStack)
 
   for childIdx in b.children(idx):
@@ -4808,7 +5010,8 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
     max(0.0'f32, absSize.y - nodeStyle.paddingY * 2),
   )
 
-  if n.transformIndex >= 0:
+  let pushTransform = n.transformIndex > 0 or UseCachedTexture notin n.flags
+  if pushTransform:
     let nodeTransform = b.nodeTransform(n)
     b.pushRenderCommand(layerIndex, UiRenderCommand(
       kind: CmdTransformPush,
@@ -4819,6 +5022,16 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
       scale: nodeTransform.scale,
       rotation: nodeTransform.rotation,
     ), clipStack)
+
+  if UseCachedTexture in n.flags:
+    let cache = b.widgetCaches.getOrQuit(n.id.uint64)
+    b.pushRenderCommand(layerIndex, UiRenderCommand(kind: CmdImage,
+      nodeIndex: idx.int32, imageId: cache.image, pos: absPos, size: cache.size,
+      uv1: vec2(1, 1), color: rgba(1, 1, 1, 1), premultipliedAlpha: true), clipStack)
+    if pushTransform:
+      b.pushRenderCommand(layerIndex, UiRenderCommand(kind: CmdTransformPop,
+        nodeIndex: idx.int32), clipStack)
+    return
 
   if FillBackground in n.flags and nodeStyle.fillColor.a > 0:
     b.pushRenderCommand(layerIndex, UiRenderCommand(
@@ -4869,11 +5082,7 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
         size: vec2(arrangement.size.x, thickness),
       ), clipStack)
   for cmd in b.nodeCustomCommands(n)[]:
-    var outCmd = cmd
-    if outCmd.nodeIndex < 0:
-      outCmd.nodeIndex = idx.int32
-    outCmd.pos += contentOrigin
-    outCmd.pos2 += contentOrigin
+    let outCmd = b.resolveCustomRenderCommand(cmd, idx, contentOrigin, identityAffine2())
     b.pushRenderCommand(layerIndex, outCmd, clipStack)
 
   for childIdx in b.children(idx):
@@ -4917,6 +5126,97 @@ proc buildRenderCommands(b: var UiBuilder, idx: int, ox, oy: float32, inheritedL
       kind: CmdTransformPop,
       nodeIndex: idx.int32,
     ), clipStack)
+
+proc prepareWidgetCaches(b: var UiBuilder, meshCommands: bool): seq[UiRenderCommand] =
+  result = @[]
+  let createTexture = b.createCacheTextureFn
+  let freeTexture = b.freeCacheTextureFn
+  if not b.cachingEnabled or createTexture == nil or freeTexture == nil or
+      b.backendType == UiBackendType.Terminal:
+    b.clearWidgetCaches()
+    for i in 0 ..< b.frame.nodes.len:
+      b.frame.nodes[i].flags.excl UseCachedTexture
+    return
+  var live = initTable[uint64, bool]()
+  for idx in countdown(b.frame.nodes.high, 1):
+    let node = b.frame.nodes[idx]
+    if CacheSubtree notin node.flags: continue
+    let id = node.id.uint64
+    live[id] = true
+    var ancestor = int(node.parent)
+    var coveredByHit = false
+    while ancestor >= 0:
+      if {CopiedFromPreviousFrame, UseCachedTexture} <= b.frame.nodes[ancestor].flags:
+        let ancestorNode = b.frame.nodes[ancestor]
+        let ancestorCache = b.widgetCaches.getOrDefault(ancestorNode.id.uint64)
+        if ancestorCache.ready and ancestorCache.size ==
+            vec2(ceil(ancestorNode.size.x), ceil(ancestorNode.size.y)):
+          coveredByHit = true
+          break
+      ancestor = int(b.frame.nodes[ancestor].parent)
+    if coveredByHit: continue
+    let pixels = vec2(ceil(node.size.x), ceil(node.size.y))
+    var eligible = pixels.x > 0 and pixels.y > 0
+    var subtree = @[idx]
+    var cursor = 0
+    while cursor < subtree.len:
+      let childIdx = subtree[cursor]
+      inc cursor
+      let child = b.frame.nodes[childIdx]
+      if child.layerIndex != node.layerIndex or child.renderParent >= 0 or child.renderChildLast >= 0 or
+          VirtualTree in child.flags or VirtualizeNode in child.flags:
+        eligible = false
+      for animation in b.animations:
+        if animation.nodeId == child.id:
+          eligible = false
+      for child in b.children(childIdx):
+        subtree.add child
+    if not eligible:
+      b.frame.nodes[idx].flags.excl UseCachedTexture
+      if b.widgetCaches.hasKey(id):
+        let oldCache = b.widgetCaches.getOrQuit(id)
+        oldCache.release(oldCache.context, oldCache.image)
+        b.widgetCaches.del(id)
+      continue
+    var cache = b.widgetCaches.getOrDefault(id)
+    if cache.image.uint64 != 0 and cache.size != pixels:
+      cache.release(cache.context, cache.image)
+      cache = UiWidgetCache()
+    if UseCachedTexture in node.flags and cache.ready and cache.size == pixels:
+      continue
+    if cache.image.uint64 == 0:
+      cache.image = createTexture(b.cacheTextureUserData, int(pixels.x), int(pixels.y))
+      if cache.image.uint64 == 0: quit "Widget cache texture allocation failed"
+      cache.release = freeTexture
+      cache.context = b.cacheTextureUserData
+    cache.size = pixels
+    cache.viewport = b.frameCtx.viewportSize
+    cache.ready = true
+    b.widgetCaches[id] = cache
+    b.frame.nodes[idx].flags.excl UseCachedTexture
+    # Capture in local coordinates without the root transform or ancestor clips.
+    let transformIndex = b.frame.nodes[idx].transformIndex
+    b.frame.nodes[idx].transformIndex = 0
+    var clips: seq[UiClipRect] = @[]
+    if meshCommands:
+      b.buildMeshRenderCommands(idx, -node.pos.x, -node.pos.y, node.layerIndex, clips)
+    else:
+      b.buildRenderCommands(idx, -node.pos.x, -node.pos.y, node.layerIndex, clips)
+    b.frame.nodes[idx].transformIndex = transformIndex
+    result.add UiRenderCommand(kind: CmdRenderTarget, imageId: cache.image,
+      size: pixels, nodeIndex: idx.int32)
+    for layer in b.frameOutput.commandLayers:
+      result.add layer
+    result.add UiRenderCommand(kind: CmdRenderTarget)
+    b.frameOutput.commandLayers.setLen(0)
+    b.frame.nodes[idx].flags.incl UseCachedTexture
+  var expired: seq[uint64] = @[]
+  for id, cache in b.widgetCaches:
+    if not live.hasKey(id):
+      cache.release(cache.context, cache.image)
+      expired.add id
+  for id in expired:
+    b.widgetCaches.del(id)
 
 proc removeStaleAnimations(b: var UiBuilder) =
   var writeIdx = 0
@@ -7662,6 +7962,16 @@ template node*(b: var UiBuilder, body: untyped): untyped =
 proc beginAttach*(b: var UiBuilder, parentIdx: int): bool =
   ## Pushes the existing node at parentIdx as the current node. Use `endAttach` to pop it and restore the previous current node.
   if parentIdx >= 0 and parentIdx < b.frame.nodes.len:
+    # An external build is not copied with its originating cached subtree.
+    var ancestor = if b.stack.len > 0: b.stack[^1] else: -1
+    while ancestor >= 0:
+      if CacheSubtree in b.frame.nodes[ancestor].flags:
+        var targetAncestor = parentIdx
+        while targetAncestor >= 0 and targetAncestor != ancestor:
+          targetAncestor = int(b.frame.nodes[targetAncestor].parent)
+        if targetAncestor < 0:
+          b.frame.nodes[ancestor].flags.excl CacheSubtree
+      ancestor = int(b.frame.nodes[ancestor].parent)
     b.stack.add parentIdx
     b.nodeIdStack.add b.frame.nodes[parentIdx].id
     b.currentNode = b.frame.nodes[parentIdx].addr

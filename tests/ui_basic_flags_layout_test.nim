@@ -4,6 +4,8 @@ when defined(nimony):
 import nuigi, nuigi/widgets, nuigi/layout/[flex, grid], nuigi/core/[vecmath, arena, array_view]
 import nuigi/widgets/[tree_table, file_system_cursor]
 import nuigi/widgets/plot
+import nuigi/widgets/collapsing_header
+import nuigi/demo/demo_window
 import nuigi/styling/theme
 when defined(nuigiProfiler):
   import nuigi/debug/[profiler, profiler_ui]
@@ -72,6 +74,471 @@ proc newTestBuilder(viewW = 200.0'f32, viewH = 120.0'f32): UiBuilder =
   var b = newBuilder(fixedMeasureText)
   discard b.beginUiFrame(viewW, viewH)
   b
+
+type CacheTestState = object
+  created, freed: int
+  width, height: int
+
+proc createTestCache(context: pointer, width, height: int): UiImageId {.nimcall, gcsafe, raises: [].} =
+  let state = cast[ptr CacheTestState](context)
+  inc state.created
+  state.width = width
+  state.height = height
+  UiImageId(100 + state.created)
+
+proc freeTestCache(context: pointer, image: UiImageId) {.nimcall, gcsafe, raises: [].} =
+  inc cast[ptr CacheTestState](context).freed
+
+block widgetCaching:
+  for mesh in [false, true]:
+    var state = CacheTestState()
+    var b = newBuilder(fixedMeasureText)
+    b.createCacheTextureFn = createTestCache
+    b.freeCacheTextureFn = freeTestCache
+    b.cacheTextureUserData = state.addr
+    var widgetId = noneNodeId()
+    var childId = noneNodeId()
+    for frame in 0 ..< 6:
+      discard b.beginUiFrame(200, 120)
+      b.node:
+        discard b.size(if frame == 4: 60.0'f32 else: 50.0'f32, 40).position(float32(frame), 0)
+        widgetId = b.currentNode.id
+        let hit = b.reuseCachedNode(dirty = frame == 3)
+        require(hit == (frame == 1 or frame == 2),
+          "cache should hit until dirty or resized")
+        if not hit:
+          b.node:
+            discard b.size(20, 20).backgroundColor(rgba(1.0, 0.0, 0.0, 0.5))
+            discard b.text("cached")
+            discard b.focusable()
+            childId = b.currentNode.id
+            var vertices = b.frame.arena[].allocArray(3, UiVertex)
+            vertices[0] = UiVertex(pos: vec2(2, 3))
+            vertices[1] = UiVertex(pos: vec2(4, 5))
+            vertices[2] = UiVertex(pos: vec2(6, 7))
+            var commands = b.frame.arena[].allocArray(1, UiRenderCommand)
+            commands[0] = UiRenderCommand(kind: CmdRawVertices,
+              vertexData: vertices.data, vertexCount: 3)
+            discard b.customRenderCommands(commands)
+        else:
+          require(CopiedFromPreviousFrame in b.currentNode.flags,
+            "cache hit should mark copied root")
+          let child = b.currentNodeIndex(childId)
+          require(child >= 0 and b.frame.nodes[child].parent == b.currentNodeIndex(widgetId),
+            "cache hit should preserve child IDs and remap links")
+          var commands = b.frame.customCommands[int(b.frame.nodes[child].commandsIndex) - 1]
+          require(commands[0].vertexData[2].pos == vec2(6, 7),
+            "copied arena vertices should survive repeated frame swaps")
+      b.endUiFrame(buildMeshRenderCommands = mesh)
+      require(b.frame.focusItems.len == 1, "cached subtree should preserve focus declarations")
+      var targetCount = 0
+      var cachedDraws = 0
+      var widgetCommandCount = 0
+      for command in b.frameOutput.commands:
+        if command.kind == CmdRenderTarget: inc targetCount
+        if command.premultipliedAlpha: inc cachedDraws
+        if command.nodeIndex == b.currentNodeIndex(widgetId):
+          inc widgetCommandCount
+      require(targetCount == (if frame == 1 or frame == 2: 0 else: 2),
+        "miss should render into texture; hit should not regenerate subtree commands")
+      require(cachedDraws == 1, "subtree should be composed with exactly one cached draw")
+      if frame == 1 or frame == 2:
+        require(widgetCommandCount == 1,
+          "an untransformed cached root should emit exactly one command")
+    require(state.created == 3 and state.freed == 2,
+      "dirty should reuse allocation; resizing should free and recreate textures")
+    discard b.beginUiFrame(200, 120)
+    b.endUiFrame()
+    require(state.freed == state.created, "absent widgets should release cache textures")
+    b.clearWidgetCaches()
+    require(state.freed == state.created, "cache teardown should be idempotent")
+
+block widgetCachingDisabled:
+  var b = newTestBuilder()
+  b.node:
+    require(not b.reuseCachedNode(), "nil texture callbacks should disable caching")
+  var state = CacheTestState()
+  b.createCacheTextureFn = createTestCache
+  b.cacheTextureUserData = state.addr
+  b.node:
+    require(not b.reuseCachedNode(), "both texture callbacks are required")
+  b.endUiFrame()
+  require(state.created == 0, "disabled caching should allocate no textures")
+
+block widgetCachingToggle:
+  for mesh in [false, true]:
+    var state = CacheTestState()
+    var b = newBuilder(fixedMeasureText)
+    require(b.cachingEnabled, "subtree caching should default to enabled")
+    b.createCacheTextureFn = createTestCache
+    b.freeCacheTextureFn = freeTestCache
+    b.cacheTextureUserData = state.addr
+    var builds = 0
+    for frame in 0 ..< 7:
+      b.cachingEnabled = frame != 2 and frame != 3
+      discard b.beginUiFrame(200, 120)
+      b.node:
+        discard b.size(50, 40)
+        let hit = b.reuseCachedNode()
+        require(hit == (frame == 1 or frame == 5 or frame == 6),
+          "disabled caching must rebuild, and re-enabling must start with a miss")
+        if not hit:
+          inc builds
+          b.node:
+            discard b.size(20, 20).text("cached")
+      # Settings may toggle caching after earlier widgets have already reused it.
+      if frame == 6: b.cachingEnabled = false
+      b.endUiFrame(buildMeshRenderCommands = mesh)
+      var targets = 0
+      var cachedDraws = 0
+      for command in b.frameOutput.commands:
+        if command.kind == CmdRenderTarget: inc targets
+        if command.premultipliedAlpha: inc cachedDraws
+      if not b.cachingEnabled:
+        require(targets == 0 and cachedDraws == 0,
+          "disabled frames must use ordinary render commands even after a cache hit")
+        require(state.freed == state.created, "disabled rendering must release cache textures")
+        require(UseCachedTexture notin b.frame.nodes[1].flags,
+          "disabled rendering must clear cached texture flags")
+      else:
+        require(cachedDraws == 1, "enabled frames should draw the cached image")
+        require(targets == (if frame == 0 or frame == 4: 2 else: 0),
+          "only enabled misses should capture a texture")
+    require(builds == 4, "disabled frames should build widget children normally")
+    require(state.created == 2 and state.freed == 2,
+      "re-enabling must allocate a fresh cache and disabling must free it")
+
+block widgetCachingNested:
+  var state = CacheTestState()
+  var b = newBuilder(fixedMeasureText)
+  b.createCacheTextureFn = createTestCache
+  b.freeCacheTextureFn = freeTestCache
+  b.cacheTextureUserData = state.addr
+  for frame in 0 ..< 3:
+    discard b.beginUiFrame(if frame == 2: 250.0'f32 else: 200.0'f32, 120)
+    b.node:
+      discard b.fit()
+      let hit = b.reuseCachedNode()
+      require(hit == (frame == 1), "viewport changes should invalidate a cached subtree")
+      if not hit:
+        b.node:
+          discard b.size(30.25'f32, 20.5'f32)
+          if not b.reuseCachedNode():
+            b.node:
+              discard b.size(15, 10).backgroundColor(rgba(1, 0, 0, 1))
+    b.endUiFrame()
+    var targetCount = 0
+    for command in b.frameOutput.commands:
+      if command.kind == CmdRenderTarget: inc targetCount
+    require(targetCount == (if frame == 1: 0 else: 4),
+      "nested hits must not render either subtree into a texture again")
+    require(approxEq(b.frame.nodes[1].size.x, 30.25'f32),
+      "fit sizing must survive cached subtree copying")
+    require(state.width == 31 and state.height == 21,
+      "texture allocation should round fractional bounds upwards")
+  b.createCacheTextureFn = nil
+  b.freeCacheTextureFn = nil
+  discard b.beginUiFrame(200, 120)
+  b.endUiFrame()
+  require(state.freed == state.created,
+    "disabling callbacks should release textures through their original owner")
+
+proc buildExternalCachePopup(b: var UiBuilder, nodeIdx, userData: int)
+    {.nimcall, gcsafe, raises: [].} =
+  b.withParent(userData):
+    b.node("cache-popup"):
+      discard b.size(80, 30).position(120, 20).text("popup")
+
+block widgetCachingExternalParent:
+  for mesh in [false, true]:
+    for deferred in [false, true]:
+      var state = CacheTestState()
+      var b = newBuilder(fixedMeasureText)
+      b.createCacheTextureFn = createTestCache
+      b.freeCacheTextureFn = freeTestCache
+      b.cacheTextureUserData = state.addr
+      var popupId = noneNodeId()
+      for frame in 0 ..< 9:
+        let popupOpen = frame >= 2 and frame <= 6
+        let mouse = if popupOpen: vec2(125 + frame.float32, 25) else: vec2(220, 140)
+        discard b.beginUiFrame(240, 160, UiInputSnapshot(mouse: mouse, mouseDelta: vec2(1, 0)))
+        var externalParent = -1
+        b.node("cache-overlay-root"):
+          externalParent = b.currentNodeIndex
+          discard b.size(240, 160)
+        b.node("cache-editor"):
+          discard b.size(100, 100)
+          let outerHit = b.reuseCachedNode(dirty = frame == 2)
+          require(outerHit == (frame == 1 or frame == 8),
+            "external popup builds must invalidate every cached ancestor until closed")
+          if not outerHit:
+            b.node("cache-editor-body"):
+              discard b.size(100, 100)
+              let innerHit = b.reuseCachedNode(dirty = frame == 2)
+              require(not innerHit, "inner cached roots must also rebuild external popups")
+              if not innerHit:
+                b.node:
+                  discard b.size(20, 20).text("editor")
+                  if popupOpen:
+                    if deferred:
+                      discard b.deferBuild(buildExternalCachePopup, externalParent)
+                    else:
+                      b.buildExternalCachePopup(b.currentNodeIndex, externalParent)
+        b.endUiFrame(buildMeshRenderCommands = mesh)
+        var popupIndex = -1
+        for i in 0 ..< b.frame.nodes.len:
+          if b.nodeText(i).text == "popup".uiString: popupIndex = i
+        require((popupIndex >= 0) == popupOpen,
+          "the popup must appear on every open frame, including repeated mouse movement")
+        if popupOpen:
+          popupId = b.frame.nodes[popupIndex].id
+          if frame > 2:
+            require(b.previousOutput.hoveredId == popupId,
+              "external popup must stay available to hover hit testing")
+          require(state.freed == state.created,
+            "external builds must release originating cache textures")
+      b.clearWidgetCaches()
+
+block widgetCachingInternalParent:
+  var state = CacheTestState()
+  var b = newBuilder(fixedMeasureText)
+  b.createCacheTextureFn = createTestCache
+  b.freeCacheTextureFn = freeTestCache
+  b.cacheTextureUserData = state.addr
+  for frame in 0 ..< 2:
+    discard b.beginUiFrame(200, 120)
+    b.node:
+      discard b.size(100, 100)
+      let hit = b.reuseCachedNode()
+      require(hit == (frame == 1), "attaching within a cache must not disable reuse")
+      if not hit:
+        var childIndex = -1
+        b.node:
+          childIndex = b.currentNodeIndex
+          discard b.size(80, 80)
+        b.withParent(childIndex):
+          b.node:
+            discard b.size(20, 20).text("internal")
+    b.endUiFrame()
+  require(state.created == 1, "internal attaches should retain the existing texture")
+  b.clearWidgetCaches()
+
+proc shiftChevronParent(b: var UiBuilder, nodeIdx, userData: int)
+    {.nimcall, gcsafe, raises: [].} =
+  b.frame.nodes[userData].pos.y += 11.0'f32
+
+block collapsingHeaderCachedCoordinates:
+  for mesh in [false, true]:
+    var state = CacheTestState()
+    var b = newBuilder(fixedMeasureText)
+    b.createCacheTextureFn = createTestCache
+    b.freeCacheTextureFn = freeTestCache
+    b.cacheTextureUserData = state.addr
+    var expanded = false
+    for frame in 0 ..< 12:
+      b.cachingEnabled = frame mod 2 == 0
+      discard b.beginUiFrame(400, 300)
+      var rootIndex = -1
+      b.node:
+        rootIndex = b.currentNodeIndex
+        discard b.size(180, 160).position(40, 30 + frame.float32)
+        require(not b.reuseCachedNode(dirty = true), "dirty chevron frame must rebuild")
+        b.collapsingHeader("Changes", expanded):
+          b.node:
+            discard b.size(100, 30)
+        b.node:
+          discard b.size(0, 0).deferBuild(shiftChevronParent, rootIndex)
+      b.endUiFrame(buildMeshRenderCommands = mesh)
+      var iconIndex = -1
+      for i in 0 ..< b.frame.nodes.len:
+        if b.nodeCustomCommands(i)[].len == 1 and
+            b.nodeCustomCommands(i)[][0].vertexCoordinatesLocal:
+          iconIndex = i
+      require(iconIndex >= 0, "collapsing header must build its chevron")
+      var custom = b.nodeCustomCommands(iconIndex)[]
+      require(custom.len == 1 and custom[0].vertexCoordinatesLocal,
+        "chevron geometry must stay node-local until rendering")
+      let origin = b.absoluteNodePos(iconIndex) +
+        vec2(b.nodeStyle(iconIndex)[].paddingX, b.nodeStyle(iconIndex)[].paddingY)
+      var captureOffset = vec2(0.0'f32)
+      var rendered = 0
+      for command in b.frameOutput.commands:
+        if command.kind == CmdRenderTarget:
+          captureOffset = if command.imageId.uint64 == 0: vec2(0.0'f32)
+            else: b.absoluteNodePos(command.nodeIndex.int)
+        elif command.kind == CmdRawVertices and command.nodeIndex == iconIndex.int32:
+          inc rendered
+          require(not command.vertexCoordinatesLocal, "renderers must receive resolved vertices")
+          require(command.vertexCount == custom[0].vertexCount,
+            "rendering must preserve chevron geometry")
+          for i in 0 ..< command.vertexCount.int:
+            let expected = custom[0].vertexData[i].pos + origin - captureOffset
+            require(approxEq(command.vertexData[i].pos.x, expected.x) and
+              approxEq(command.vertexData[i].pos.y, expected.y),
+              "icon position must follow final layout in ordinary and cache-capture frames")
+      require(rendered == 1, "each frame must emit exactly one correctly positioned chevron")
+    require(state.created > 0, "chevron regression must exercise real cache captures")
+    b.clearWidgetCaches()
+
+block customLocalMeshTransforms:
+  for local in [false, true]:
+    var b = newBuilder(fixedMeasureText)
+    discard b.beginUiFrame(300, 200)
+    var index = -1
+    b.node:
+      index = b.currentNodeIndex
+      discard b.size(40, 40).position(30, 20).padding(2)
+        .transformPivot(0, 0).transformScale(2)
+      var vertices = b.frame.arena[].allocArray(3, UiVertex)
+      for i in 0 ..< vertices.len:
+        vertices[i] = UiVertex(pos: vec2(1 + i.float32, 3))
+      var commands = b.frame.arena[].allocArray(1, UiRenderCommand)
+      commands[0] = UiRenderCommand(kind: CmdRawVertices, vertexData: vertices.data,
+        vertexCount: 3, vertexCoordinatesLocal: local)
+      discard b.customRenderCommands(commands)
+    b.endUiFrame(buildMeshRenderCommands = true)
+    var found = false
+    for command in b.frameOutput.commands:
+      if command.kind == CmdRawVertices and command.nodeIndex == index.int32:
+        found = true
+        let expected = if local: vec2(36, 30) else: vec2(1, 3)
+        require(approxEq(command.vertexData[0].pos.x, expected.x) and
+          approxEq(command.vertexData[0].pos.y, expected.y),
+          "local raw meshes must follow node transforms without changing legacy absolute meshes")
+        require(b.nodeCustomCommands(index)[][0].vertexData[0].pos == vec2(1, 3),
+          "rendering must not mutate stored custom vertices")
+    require(found, "custom raw mesh must be emitted")
+
+block widgetCachingNonRenderingFrame:
+  var state = CacheTestState()
+  var b = newBuilder(fixedMeasureText)
+  b.createCacheTextureFn = createTestCache
+  b.freeCacheTextureFn = freeTestCache
+  b.cacheTextureUserData = state.addr
+  for frame in 0 ..< 3:
+    discard b.beginUiFrame(200, 120)
+    b.node:
+      discard b.size(50, 40)
+      let hit = b.reuseCachedNode(dirty = frame == 1)
+      require(not hit, "a non-rendered dirty frame must not leave a valid texture")
+      if not hit:
+        b.node:
+          discard b.size(20, 20).backgroundColor(rgba(1, 0, 0, 1))
+    b.endUiFrame(buildRenderCommands = frame != 1)
+  b.clearWidgetCaches()
+
+block widgetCachingUnsupported:
+  var state = CacheTestState()
+  var b = newBuilder(fixedMeasureText)
+  b.createCacheTextureFn = createTestCache
+  b.freeCacheTextureFn = freeTestCache
+  b.cacheTextureUserData = state.addr
+  for frame in 0 ..< 2:
+    discard b.beginUiFrame(200, 120)
+    b.node:
+      discard b.size(50, 40)
+      require(not b.reuseCachedNode(), "cross-layer subtrees must not be cached")
+      b.node:
+        discard b.size(20, 20).backgroundColor(rgba(1, 0, 0, 1))
+        b.currentNode.layerIndex = 1
+    b.endUiFrame()
+  require(state.created == 0, "unsupported render trees should allocate no textures")
+
+when not defined(nuiNoSemantics):
+  block widgetCachingDemoControls:
+    var state = CacheTestState()
+    var b = newBuilder(fixedMeasureText)
+    b.createCacheTextureFn = createTestCache
+    b.freeCacheTextureFn = freeTestCache
+    b.cacheTextureUserData = state.addr
+    template drawCacheDemo() =
+      discard b.beginUiFrame(1200, 900)
+      b.buildCacheExamples()
+      b.endUiFrame()
+    template activateCacheControl(label: string, requestedAction: UiSemanticAction = SemanticActivate) =
+      var target = noneNodeId()
+      for i in 0 ..< b.frame.nodes.len:
+        let node = b.frame.nodes[i]
+        if node.textIndex > 0 and b.frame.texts[int(node.textIndex) - 1].text.value == label:
+          target = node.id
+          if node.parent >= 0:
+            let parentSemantics = b.nodeSemantics(int(node.parent))
+            if parentSemantics != nil and parentSemantics.role == SemanticCheckBox:
+              target = b.frame.nodes[node.parent].id
+          break
+      require(target != noneNodeId(), "cache demo control should exist: " & label)
+      b.enqueueSemanticRequest(UiSemanticRequest(target: target, action: requestedAction))
+      drawCacheDemo()
+    template demoRoot(): untyped =
+      block:
+        var root = -1
+        for i in 0 ..< b.frame.nodes.len:
+          if CacheSubtree in b.frame.nodes[i].flags:
+            root = i
+            break
+        require(root >= 0, "cache demo root should exist")
+        root
+    template expectDemoHit(expected: bool) =
+      require((CopiedFromPreviousFrame in b.frame.nodes[demoRoot()].flags) == expected,
+        "cache demo should have the expected hit/rebuild state")
+
+    drawCacheDemo()
+    expectDemoHit(false)
+    drawCacheDemo()
+    expectDemoHit(true)
+    activateCacheControl("Change data only")
+    expectDemoHit(true)
+    activateCacheControl("Mark widget dirty")
+    expectDemoHit(false)
+    drawCacheDemo()
+    expectDemoHit(true)
+    activateCacheControl("Move (no dirty)")
+    expectDemoHit(true)
+    activateCacheControl("Rotate (no dirty)")
+    expectDemoHit(true)
+    let oldSize = b.frame.nodes[demoRoot()].size
+    activateCacheControl("Resize width")
+    expectDemoHit(false)
+    require(b.frame.nodes[demoRoot()].size.x > oldSize.x, "width control should resize the widget")
+    drawCacheDemo()
+    activateCacheControl("Resize height")
+    expectDemoHit(false)
+    require(b.frame.nodes[demoRoot()].size.y > oldSize.y, "height control should resize the widget")
+    drawCacheDemo()
+    activateCacheControl("Fractional size")
+    expectDemoHit(false)
+    activateCacheControl("Mark nested dirty")
+    expectDemoHit(false)
+    activateCacheControl("Overflow child")
+    expectDemoHit(false)
+    drawCacheDemo()
+    expectDemoHit(true)
+    activateCacheControl("Clip stage")
+    expectDemoHit(true)
+    activateCacheControl("Nested cache")
+    expectDemoHit(false)
+    drawCacheDemo()
+    expectDemoHit(true)
+    activateCacheControl("Nested cache")
+    activateCacheControl("Animate child (cache fallback)")
+    require(UseCachedTexture notin b.frame.nodes[demoRoot()].flags,
+      "animated demo subtree should use ordinary rendering")
+    drawCacheDemo()
+    expectDemoHit(false)
+    activateCacheControl("Animate child (cache fallback)")
+    for frame in 0 ..< 4:
+      drawCacheDemo()
+    expectDemoHit(true)
+    activateCacheControl("Zero size")
+    require(UseCachedTexture notin b.frame.nodes[demoRoot()].flags and
+      b.frame.nodes[demoRoot()].size == vec2(0),
+      "zero-size control should disable texture rendering")
+    activateCacheControl("Zero size")
+    activateCacheControl("Hide widget")
+    require(state.created == state.freed, "hiding the demo widget should free both caches")
+    activateCacheControl("Hide widget")
+    expectDemoHit(false)
+    b.clearWidgetCaches()
 
 block virtualTreeOwnership:
   var source = newTestBuilder()

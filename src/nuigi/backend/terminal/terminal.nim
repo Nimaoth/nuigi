@@ -528,7 +528,7 @@ proc render*(backend: var TerminalBackend, builder: var UiBuilder) =
       for y in rect.y ..< rect.y + rect.h:
         for x in rect.x ..< rect.x + rect.w:
           backend.putCell(x, y, "░", 1, command.color.rgb, clips[^1])
-    of CmdRawVertices:
+    of CmdRawVertices, CmdRenderTarget:
       discard
 
   var output = newStringOfCap(backend.width * backend.height * 2)

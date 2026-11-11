@@ -4,7 +4,7 @@
 ## Browser run transfers control to Emscripten without returning normally;
 ## the app must outlive all browser callbacks. Desktop run blocks until quit.
 ## Font callbacks use a global renderer pointer; only one app may be active.
-import std/[os, math, strutils, tables, hashes]
+import std/[os, math, strutils, tables, hashes, assertions]
 import nuigi
 import nuigi/backend/sdl3/sdl3
 import nuigi/core/vecmath
@@ -126,6 +126,8 @@ type
     render2D*: Render2D
     fontRender*: FontRender
     ui*: UiBuilder
+    cacheMsaa: Table[uint64, GPUTexture]
+    cacheSampleCount: GPUSampleCount
     input*: UiInputSnapshot
     running*: bool
     renderOnDemand*: bool
@@ -574,6 +576,7 @@ proc initTray(app: var Sdl3App, tooltip: string) =
 
 proc deinit*(app: var Sdl3App) =
   app.running = false
+  app.ui.clearWidgetCaches()
   app.gamepad.shutdown()
   if app.tray != nil:
     destroyTray(app.tray)
@@ -616,6 +619,41 @@ proc deinit*(app: var Sdl3App) =
     sdl3.quitSubSystem(app.sdlInitializedFlags)
   app.initialized = false
   app.sdlInitialized = false
+
+proc createAppCacheTexture(userData: pointer, width, height: int): UiImageId {.nimcall, gcsafe, raises: [].} =
+  let app = cast[ptr Sdl3App](userData)
+  when defined(emscripten):
+    let texture = createTexture(app.renderer, PIXELFORMAT_RGBA32,
+      TEXTUREACCESS_TARGET, width.cint, height.cint)
+    if texture == nil: quit "Could not create widget texture: " & $getError()
+    result = UiImageId(cast[uint64](texture) or (1'u64 shl 62))
+  else:
+    var info = GPUTextureCreateInfo(`type`: GPU_TEXTURETYPE_2D,
+      format: app.render2D.pipelineFormat,
+      usage: (GPU_TEXTUREUSAGE_COLOR_TARGET or GPU_TEXTUREUSAGE_SAMPLER).uint32,
+      width: width.uint32, height: height.uint32, layer_count_or_depth: 1,
+      num_levels: 1, sample_count: GPU_SAMPLECOUNT_1)
+    let texture = createGPUTexture(app.gpu, info.addr)
+    if texture == nil: quit "Could not create widget texture: " & $getError()
+    result = cast[UiImageId](texture)
+    if app.sampleCount != GPU_SAMPLECOUNT_1:
+      info.usage = GPU_TEXTUREUSAGE_COLOR_TARGET.uint32
+      info.sample_count = app.sampleCount
+      let msaa = createGPUTexture(app.gpu, info.addr)
+      if msaa == nil:
+        releaseGPUTexture(app.gpu, texture)
+        quit "Could not create widget MSAA texture: " & $getError()
+      app.cacheMsaa[result.uint64] = msaa
+
+proc freeAppCacheTexture(userData: pointer, image: UiImageId) {.nimcall, gcsafe, raises: [].} =
+  let app = cast[ptr Sdl3App](userData)
+  when defined(emscripten):
+    destroyTexture(cast[Texture](image.uint64 and not (3'u64 shl 62)))
+  else:
+    if app.cacheMsaa.hasKey(image.uint64):
+      releaseGPUTexture(app.gpu, app.cacheMsaa.getOrQuit(image.uint64))
+      app.cacheMsaa.del(image.uint64)
+    releaseGPUTexture(app.gpu, cast[GPUTexture](image))
 
 proc init*(app: var Sdl3App, config: Sdl3AppConfig,
     renderUi: Sdl3RenderUiCallback, update: Sdl3UpdateCallback = nil,
@@ -700,6 +738,10 @@ proc init*(app: var Sdl3App, config: Sdl3AppConfig,
     assumeSyncBlock:
       activeFontRender = app.fontRender.addr
     app.ui = newBuilder(arrangeSdl3Text, meshSdl3Text)
+    app.ui.createCacheTextureFn = createAppCacheTexture
+    app.ui.freeCacheTextureFn = freeAppCacheTexture
+    app.ui.cacheTextureUserData = app.addr
+    app.cacheSampleCount = app.sampleCount
     app.themeEditor.listFonts = listSdl3Fonts
     app.themeEditor.resolveFont = resolveSdl3Font
     proc openUrl(url: string): bool {.nimcall, raises: [].} =
@@ -912,7 +954,8 @@ func sampler(mode: TextureSamplerMode): Render2DSamplerMode =
 proc drawUiVertices(app: var Sdl3App, vertices: ptr UncheckedArray[UiVertex],
     count: int, image = UiImageId(0), mode = TextureSamplerMode.Linear,
     materialId: MaterialId = 0,
-    materialUniform: ArrayView[uint8] = default(ArrayView[uint8])): bool =
+    materialUniform: ArrayView[uint8] = default(ArrayView[uint8]),
+    premultipliedAlpha = false): bool =
   when defined(emscripten):
     var texture: Texture
     if image.uint64 == 1:
@@ -920,6 +963,11 @@ proc drawUiVertices(app: var Sdl3App, vertices: ptr UncheckedArray[UiVertex],
     else:
       texture = cast[Texture](image.uint64 and not (3'u64 shl 62))
     if texture != nil:
+      let blend = if premultipliedAlpha:
+        composeCustomBlendMode(BLENDFACTOR_ONE, BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+          BLENDOPERATION_ADD, BLENDFACTOR_ONE, BLENDFACTOR_ONE_MINUS_SRC_ALPHA, BLENDOPERATION_ADD)
+      else: BLENDMODE_BLEND
+      if not texture.setTextureBlendMode(blend): sdlFailure("Could not set widget texture blending")
       let scale = if mode == TextureSamplerMode.Linear: SCALEMODE_LINEAR else: SCALEMODE_NEAREST
       if not texture.setTextureScaleMode(scale): sdlFailure("Could not set texture scale mode")
     let stride = sizeof(UiVertex).cint
@@ -929,7 +977,7 @@ proc drawUiVertices(app: var Sdl3App, vertices: ptr UncheckedArray[UiVertex],
   else:
     app.render2D.drawVertices(cast[ptr UncheckedArray[Render2DVertex]](vertices)
       .toOpenArray(0, count - 1), resolveTexture(image), sampler(mode),
-      materialId, materialUniform)
+      materialId, materialUniform, premultipliedAlpha)
 
 when defined(emscripten):
   proc syncBrowserFontAtlas(app: var Sdl3App) =
@@ -954,7 +1002,7 @@ when defined(emscripten):
 
 proc drawQuad(app: var Sdl3App, transform: UiAffine2, pos, size: Vec2,
     color: UiColor, image = UiImageId(0), uv0 = vec2(0), uv1 = vec2(1),
-    mode = TextureSamplerMode.Linear) =
+    mode = TextureSamplerMode.Linear, premultipliedAlpha = false) =
   if size.x <= 0 or size.y <= 0: return
   let points = [pos, pos + vec2(size.x, 0), pos + size, pos + vec2(0, size.y)]
   let uvs = [uv0, vec2(uv1.x, uv0.y), uv1, vec2(uv0.x, uv1.y)]
@@ -964,7 +1012,7 @@ proc drawQuad(app: var Sdl3App, transform: UiAffine2, pos, size: Vec2,
     vertices[i] = UiVertex(pos: transform.transformPoint2(points[index]),
       uv: uvs[index], color: color)
   if not app.drawUiVertices(cast[ptr UncheckedArray[UiVertex]](vertices[0].addr),
-      6, image, mode):
+      6, image, mode, premultipliedAlpha = premultipliedAlpha):
     sdlFailure("Could not draw UI quad")
 
 proc renderCommands(app: var Sdl3App) =
@@ -973,6 +1021,19 @@ proc renderCommands(app: var Sdl3App) =
     let command {.cursor.} = app.ui.frameOutput.commands[index]
     let transform = transforms[^1]
     case command.kind
+    of CmdRenderTarget:
+      assert transforms.len == 1, "render target switches require balanced transforms"
+      when defined(emscripten):
+        assert app.clips.len == 0, "render target switches require balanced clips"
+        let target = cast[Texture](command.imageId.uint64 and not (3'u64 shl 62))
+        if not app.renderer.setRenderTarget(target): sdlFailure("Could not bind widget texture")
+        if target != nil:
+          if not app.renderer.setRenderDrawColor(0, 0, 0, 0): sdlFailure("Could not clear widget texture")
+          if not app.renderer.renderClear(): sdlFailure("Could not clear widget texture")
+      else:
+        app.render2D.bindRenderTarget(cast[GPUTexture](command.imageId),
+          app.cacheMsaa.getOrDefault(command.imageId.uint64),
+          uint32(command.size.x), uint32(command.size.y))
     of CmdTransformPush:
       transforms.add applyNodeRenderTransform(transform, command.pivot,
         command.offset, command.rotation, command.scale)
@@ -981,7 +1042,8 @@ proc renderCommands(app: var Sdl3App) =
     of CmdRawVertices:
       if command.vertexData != nil and command.vertexCount > 0:
         if not app.drawUiVertices(command.vertexData, command.vertexCount,
-            command.imageId, command.samplerMode, command.materialId, command.materialUniform):
+            command.imageId, command.samplerMode, command.materialId, command.materialUniform,
+            command.premultipliedAlpha):
           sdlFailure("Could not draw UI vertices")
     of CmdRectFill:
       app.drawQuad(transform, command.pos, command.size, command.color)
@@ -1033,7 +1095,7 @@ proc renderCommands(app: var Sdl3App) =
           sdlFailure("Could not draw UI line")
     of CmdImage:
       app.drawQuad(transform, command.pos, command.size, command.color,
-        command.imageId, command.uv0, command.uv1, command.samplerMode)
+        command.imageId, command.uv0, command.uv1, command.samplerMode, command.premultipliedAlpha)
     of CmdText:
       if command.textIndex > 0:
         let text = app.ui.textForRender(command.textIndex)
@@ -1143,6 +1205,9 @@ proc tick*(app: var Sdl3App): bool =
       app.ui.fontAtlasImageId = gpuTextureToImageId(app.render2D.fontTexture)
     when defined(nuiAccessKit):
       app.accessKit.prepareFrame()
+    if app.cacheSampleCount != app.sampleCount:
+      app.ui.clearWidgetCaches()
+      app.cacheSampleCount = app.sampleCount
     discard app.ui.beginUiFrame(width.float32, height.float32, app.input)
     when defined(nuiAccessKit):
       # Name the frame root after the window so assistive technology

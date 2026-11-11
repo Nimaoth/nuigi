@@ -4,6 +4,26 @@
 
 Rebuilding does not mean allocating and rendering every possible element. nuigi uses frame arenas to keep per-frame allocation low, caches text arrangements and meshes, and emits a flat, backend-agnostic command list. Applications may build the UI every frame, as games usually do, or only in response to events. Animations and incremental work can request further frames, while an otherwise idle application can stop redrawing.
 
+## Can unchanged widgets reuse a rendered texture?
+
+Yes. Inside an empty widget root, configure its sizing and styles, then use `if not b.reuseCachedNode(dirty = widgetDirty):` to build its children only on a cache miss. The call requests a texture even on a miss. A hit copies the previous subtree, preserving node IDs, layout data, focus declarations and semantics, and emits one cached draw instead of generating descendant render commands. Set `widgetDirty` when data, styling, fonts, layout or interaction-driven appearance changes; child-building callbacks do not run on a hit.
+
+The builder exposes optional `createCacheTextureFn(userData, width, height): UiImageId` and `freeCacheTextureFn(userData, image)` callbacks with a `cacheTextureUserData` context. Both callbacks are required; otherwise caching is disabled and the call returns false. Allocation must return a nonzero handle. `Sdl3App` installs the callbacks and handles teardown automatically. Other hosts must call `clearWidgetCaches()` before destroying their texture device or context.
+
+`UiBuilder.cachingEnabled` defaults to `true`. Set it to `false` to make
+`reuseCachedNode` return false and render ordinary subtrees. Rendering the frame
+releases existing cache textures and suppresses new allocations; re-enabling
+starts with a cache miss before reuse resumes.
+
+Cache textures clip overflowing children to the root bounds, rounded up to whole pixels. Nested caches are supported. Viewport and explicit size changes cause misses, dirty frames repaint existing allocations, and omitted widgets release textures. Animated or virtual subtrees, multiple render layers and explicit render-tree links are not cached. Rendering uses `CmdRenderTarget` to bind and clear offscreen textures (zero restores the main target); cached images require premultiplied-alpha blending.
+
+Building under an external parent with `withParent`/`beginAttach`, including
+deferred popup builds under the overlay root, disables caching for originating
+roots that do not contain that parent. Their callbacks must keep running to
+rebuild those external nodes. Caching resumes once external builds stop.
+
+The demo's `Caching` tab has explicit dirty buttons, build/hit counters, nested caching, resize/move/rotate controls, fractional and zero sizes, clipping/overflow, hide/show cleanup and an animated-child fallback.
+
 ## Aren't immediate-mode interfaces difficult to theme consistently?
 
 nuigi has shared style and text-style slots for controls and their states, including hover, focus, and selection variants. Applications can replace theme slots globally, assign them by index, and inspect or edit them with the live theme editor. A copied style is only needed for a genuine one-off variation, so most widget code does not hard-code colors, padding, borders, or fonts.

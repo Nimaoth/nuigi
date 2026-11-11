@@ -2344,6 +2344,162 @@ proc buildDragDropExample*(b: var UiBuilder) =
       discard b.textColor(b.themeTextStyle(UiStyleIndexHeadingText)[].textColor)
     b.buildExternalDropZone()
 
+type CacheDemoState = object
+  revision, renderedRevision, builds, hits, nestedBuilds: int
+  dirty, nestedDirty: bool
+  wide, tall, moved, rotated, fractional, zeroSize: bool
+  animate, nested, overflow, clip, hidden: bool
+
+var cacheDemo = CacheDemoState(dirty: true, nestedDirty: true, nested: true, clip: true)
+
+proc buildCacheExamples*(b: var UiBuilder) =
+  let unit = b.defaultText.fontSize * b.fontScale / demoBaseFontSize
+  b.layoutVertical:
+    b.debugName("cache-demos")
+    discard b.fillX().fitY().styleIndex(UiStyleIndexPanel)
+    b.label("Widget texture caching"):
+      discard b.textStyleIndex(int(UiStyleIndexHeadingText))
+    b.labelWrapped("Change data without marking dirty to see the old texture; then explicitly repaint."):
+      discard b.fillX().textStyleIndex(int(UiStyleIndexMutedText))
+
+    b.node:
+      b.debugName("cache-controls")
+      discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap)
+      b.demoHorizontalGap(8.0'f32)
+      if b.button("Change data only"):
+        inc cacheDemo.revision
+      if b.button("Mark widget dirty"):
+        cacheDemo.dirty = true
+      if b.button("Change data + dirty"):
+        inc cacheDemo.revision
+        cacheDemo.dirty = true
+      if b.button("Mark nested dirty"):
+        cacheDemo.nestedDirty = true
+        cacheDemo.dirty = true
+      if b.button("Reset counters"):
+        cacheDemo.builds = 0
+        cacheDemo.hits = 0
+        cacheDemo.nestedBuilds = 0
+
+    b.node:
+      b.debugName("cache-geometry-controls")
+      discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap)
+      b.demoHorizontalGap(8.0'f32)
+      if b.button("Resize width"):
+        cacheDemo.wide = not cacheDemo.wide
+      if b.button("Resize height"):
+        cacheDemo.tall = not cacheDemo.tall
+      if b.button("Move (no dirty)"):
+        cacheDemo.moved = not cacheDemo.moved
+      if b.button("Rotate (no dirty)"):
+        cacheDemo.rotated = not cacheDemo.rotated
+      if b.checkbox("Fractional size", cacheDemo.fractional): discard
+      if b.checkbox("Zero size", cacheDemo.zeroSize): discard
+      if b.checkbox("Hide widget", cacheDemo.hidden): discard
+      if b.checkbox("Clip stage", cacheDemo.clip): discard
+
+    b.node:
+      b.debugName("cache-content-controls")
+      discard b.fillX().fitY().flexLayout().flexFlow(FlexDirectionRow, FlexWrap)
+      b.demoHorizontalGap(8.0'f32)
+      if b.checkbox("Animate child (cache fallback)", cacheDemo.animate):
+        cacheDemo.dirty = true
+      if b.checkbox("Nested cache", cacheDemo.nested):
+        cacheDemo.dirty = true
+        cacheDemo.nestedDirty = true
+      if b.checkbox("Overflow child", cacheDemo.overflow):
+        cacheDemo.dirty = true
+
+    let enabled = b.createCacheTextureFn != nil and b.freeCacheTextureFn != nil and
+      b.backendType != UiBackendType.Terminal
+    if not enabled:
+      b.labelWrapped("Caching unavailable: the host needs both texture callbacks. The tree is rebuilt normally."):
+        discard b.fillX().textStyleIndex(int(UiStyleIndexMutedText))
+    if cacheDemo.animate:
+      b.anythingAnimating = true
+    var hit = false
+    var rootId = noneNodeId()
+    b.node:
+      b.debugName("cache-stage")
+      discard b.fillX().heightRelative(300.0'f32 / demoBaseFontSize)
+        .styleIndex(UiStyleIndexStage).fillBackground()
+      if cacheDemo.clip:
+        discard b.maskChildren()
+      if not cacheDemo.hidden:
+        b.node:
+          b.debugName("cached-widget")
+          rootId = b.currentNode.id
+          let w = if cacheDemo.wide: 540.0'f32 else: 440.0'f32
+          let h = if cacheDemo.tall: 340.0'f32 else: 270.0'f32
+          discard b.sizeRelative(w / demoBaseFontSize, h / demoBaseFontSize)
+            .position(round((if cacheDemo.moved: 130.0'f32 else: 20.0'f32) * unit),
+              round(20.0'f32 * unit))
+            .styleIndex(UiStyleIndexPanel).fillBackground()
+          if cacheDemo.fractional:
+            discard b.size(b.currentNode.size + vec2(0.25'f32, 0.5'f32))
+          if cacheDemo.zeroSize:
+            discard b.size(0, 0)
+          discard b.transformRotation(if cacheDemo.rotated: 0.15'f32 else: 0.0'f32)
+          hit = b.reuseCachedNode(dirty = cacheDemo.dirty or cacheDemo.animate)
+          if hit:
+            inc cacheDemo.hits
+          else:
+            inc cacheDemo.builds
+            cacheDemo.renderedRevision = cacheDemo.revision
+            b.node:
+              b.debugName("cached-heading")
+              discard b.fillX().fitY().textStyleIndex(int(UiStyleIndexHeadingText))
+                .text("Rendered revision: " & $cacheDemo.revision)
+            b.node:
+              b.debugName("cached-nested")
+              discard b.sizeRelative(170.0'f32 / demoBaseFontSize, 55.0'f32 / demoBaseFontSize)
+                .position(round(10.0'f32 * unit), round(45.0'f32 * unit))
+                .styleIndex(UiStyleIndexAccent).fillBackground()
+              let nestedHit = if cacheDemo.nested:
+                b.reuseCachedNode(dirty = cacheDemo.nestedDirty)
+              else:
+                false
+              if not nestedHit:
+                inc cacheDemo.nestedBuilds
+                b.node:
+                  b.debugName("cached-nested-label")
+                  discard b.fillX().fitY().textStyleIndex(int(UiStyleIndexButtonText))
+                    .text("Nested build: " & $cacheDemo.nestedBuilds)
+            b.node:
+              b.debugName("cached-moving-child")
+              discard b.sizeRelative(90.0'f32 / demoBaseFontSize, 35.0'f32 / demoBaseFontSize)
+                .styleIndex(UiStyleIndexAccent).fillBackground()
+                .textStyleIndex(int(UiStyleIndexButtonText))
+              let x = if cacheDemo.overflow: w - 20.0'f32 else: 10.0'f32
+              if cacheDemo.animate:
+                b.animate:
+                  discard b.positionAnim(
+                    (x + (sin(b.frameCtx.time * 2.0'f32) + 1.0'f32) * 35.0'f32) * unit,
+                    round(115.0'f32 * unit))
+              else:
+                discard b.position(round(x * unit), round(115.0'f32 * unit))
+              discard b.text(if cacheDemo.animate: "Animated" else: "Static")
+          cacheDemo.dirty = false
+          cacheDemo.nestedDirty = false
+
+    b.label("This build: " & (if cacheDemo.hidden: "hidden" elif hit: "cache hit" else: "rebuild") &
+        " | builds: " & $cacheDemo.builds & " | hits: " & $cacheDemo.hits &
+        " | nested builds: " & $cacheDemo.nestedBuilds):
+      discard b.textStyleIndex(int(UiStyleIndexMutedText))
+    b.label("Data revision: " & $cacheDemo.revision & " | last built revision: " &
+        $cacheDemo.renderedRevision):
+      discard b.textStyleIndex(int(UiStyleIndexMutedText))
+    let previous = b.previousNodeIndex(rootId)
+    if previous >= 0:
+      b.label("Previous rendered frame: " &
+          (if UseCachedTexture in b.previousFrame.nodes[previous].flags:
+            "texture composed" else: "ordinary subtree rendering")):
+        discard b.textStyleIndex(int(UiStyleIndexMutedText))
+    b.labelWrapped("Resize invalidates automatically. Move/rotate reuse the texture. Zero size and animation fall back; hiding releases it."):
+      discard b.fillX().textStyleIndex(int(UiStyleIndexMutedText))
+    b.labelWrapped("Overflow is clipped to the cache bounds. Resize the window to exercise viewport invalidation; turn animation off to cache again."):
+      discard b.fillX().textStyleIndex(int(UiStyleIndexMutedText))
+
 proc buildAllExamples(b: var UiBuilder)
 
 type P = object
@@ -2364,6 +2520,7 @@ var examples = [
   P(fun: buildTextStyleExamples, scrollBox: true, title: "Text"),
   P(fun: buildMaskChildrenExamples, scrollBox: true, title: "Mask/Hover"),
   P(fun: buildAnimationExamples, scrollBox: true, title: "Animation"),
+  P(fun: buildCacheExamples, scrollBox: true, title: "Caching"),
   P(fun: buildTransformExamples, scrollBox: true, title: "Transform"),
   P(fun: buildLayoutExamples, scrollBox: true, title: "Layouts"),
   P(fun: buildAllWidgetsExample, scrollBox: true, title: "Widgets"),

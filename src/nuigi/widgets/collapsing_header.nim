@@ -22,7 +22,7 @@ proc buildCollapsingHeaderChevron(b: var UiBuilder, nodeIdx: int, expandedRaw: i
   let direction = if expandedRaw != 0: vec2(0.0'f32, 1.0'f32) else: vec2(1.0'f32, 0.0'f32)
   let (vertices, vertexCount) = buildChevronVertices(
     arena,
-    b.absoluteNodePos(nodeIdx) + vec2(inset),
+    vec2(inset) - vec2(b.nodeStyle(node)[].paddingX, b.nodeStyle(node)[].paddingY),
     iconSize,
     direction,
     color,
@@ -35,6 +35,7 @@ proc buildCollapsingHeaderChevron(b: var UiBuilder, nodeIdx: int, expandedRaw: i
     kind: CmdRawVertices,
     vertexData: vertices,
     vertexCount: vertexCount.int32,
+    vertexCoordinatesLocal: true,
     color: color)
   b.withParent(nodeIdx):
     discard b.customRenderCommands(commands)
