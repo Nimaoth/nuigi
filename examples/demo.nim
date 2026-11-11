@@ -64,9 +64,9 @@ proc main(quitImmediately: bool) =
   when not defined(emscripten):
     config.fontPaths = @[
       "assets/dontuse/fonts/DejaVuSansMono.ttf",
-      "assets/dontuse/fonts/DejaVuSansMono-Bold.ttf",
-      "assets/dontuse/fonts/DejaVuSansMono-Oblique.ttf",
-      "assets/dontuse/fonts/DejaVuSansMono-BoldOblique.ttf",
+      # "assets/dontuse/fonts/DejaVuSansMono-Bold.ttf",
+      # "assets/dontuse/fonts/DejaVuSansMono-Oblique.ttf",
+      # "assets/dontuse/fonts/DejaVuSansMono-BoldOblique.ttf",
     ]
 
   assumeSyncBlock:
