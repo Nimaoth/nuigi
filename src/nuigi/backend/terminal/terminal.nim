@@ -113,13 +113,13 @@ const
 const DefaultKittyKeyboardFlags* = 25
 
 type
-  TerminalColor = object
-    r, g, b: uint8
+  TerminalColor* = object
+    r*, g*, b*: uint8
 
-  TerminalCell = object
-    grapheme: string
-    foreground, background: TerminalColor
-    continuation: bool
+  TerminalCell* = object
+    grapheme*: string
+    foreground*, background*: TerminalColor
+    continuation*: bool
 
   CellRect = object
     x, y, w, h: int
@@ -135,6 +135,8 @@ type
     kittyKeyboard: bool
     requestedKittyKeyboardFlags: int
     active*: bool
+    sizeOverrideWidth*, sizeOverrideHeight*: int
+      ## When both are positive, used instead of the real console size (for headless testing).
 
 proc rgb(color: UiColor): TerminalColor =
   return TerminalColor(
@@ -202,6 +204,15 @@ proc terminalSize(): tuple[width, height: int] =
     except CatchableError:
       return (width: 80, height: 24)
 
+proc currentSize(backend: TerminalBackend): tuple[width, height: int] =
+  if backend.sizeOverrideWidth > 0 and backend.sizeOverrideHeight > 0:
+    return (width: backend.sizeOverrideWidth, height: backend.sizeOverrideHeight)
+  terminalSize()
+
+proc cell*(backend: TerminalBackend, x, y: int): lent TerminalCell =
+  ## Cell rendered by the last `render` call. `x`/`y` must be inside the grid.
+  backend.cells[y * backend.width + x]
+
 proc setEscapeTimeout*(backend: var TerminalBackend, timeoutMs: int) =
   backend.inputParser.setEscapeTimeout(timeoutMs)
 
@@ -210,7 +221,7 @@ proc init*(backend: var TerminalBackend,
   escapeTimeoutMs = DefaultEscapeTimeoutMs) =
   if backend.active:
     return
-  let size = terminalSize()
+  let size = backend.currentSize()
   backend.resize(size.width, size.height)
   backend.previousCells.setLen(0)
   backend.setEscapeTimeout(escapeTimeoutMs)
@@ -261,7 +272,7 @@ proc deinit*(backend: var TerminalBackend) =
     except CatchableError:
       discard
 
-proc readAvailableInput(): string =
+proc readAvailableInput*(): string =
   var input = ""
   when defined(nimony):
     while terminalKbhit() != 0:
@@ -351,7 +362,7 @@ proc pollInput*(backend: var TerminalBackend,
     let event = backend.lastEvents[eventIndex]
     backend.applyInputEvent(event)
 
-  let size = terminalSize()
+  let size = backend.currentSize()
   if size.width != backend.width or size.height != backend.height:
     backend.resize(size.width, size.height)
     backend.hadEvents = true
