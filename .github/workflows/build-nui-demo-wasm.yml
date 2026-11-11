@@ -132,7 +132,8 @@ jobs:
           key: ${{ runner.os }}-nimony-90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Build Nimony
-        if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }} && false
+        # if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }}
+        if: false
         working-directory: nimony
         run: |
           nim c -o:bin/hastur.exe ./src/hastur/hastur.nim
