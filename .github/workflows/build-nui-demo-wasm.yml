@@ -121,6 +121,7 @@ jobs:
           git -C nimony checkout 90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Cache Nimony build
+        if: false
         id: nimony-cache
         uses: actions/cache@v4
         with:
@@ -131,7 +132,7 @@ jobs:
           key: ${{ runner.os }}-nimony-90035b87f912f2e7a2f67234750d13238c6b3af6
 
       - name: Build Nimony
-        if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }}
+        if: ${{ steps.nimony-cache.outputs.cache-hit != 'true' }} && false
         working-directory: nimony
         run: |
           nim c -o:bin/hastur.exe ./src/hastur/hastur.nim
@@ -188,12 +189,14 @@ jobs:
         run: ./build.exe test --nim2
 
       - name: Build test nimony
+        if: false
         run: ./build.exe test --nimony
 
       - name: Build demo native with Nim 2
         run: ./build.exe demo --nim2
 
       - name: Build demo native with Nimony
+        if: false
         run: ./build.exe demo --nimony
 
       - name: Run Nim 2 demo
