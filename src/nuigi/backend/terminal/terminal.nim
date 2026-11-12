@@ -155,16 +155,25 @@ func intersection(a, b: CellRect): CellRect =
 func contains(rect: CellRect, x, y: int): bool {.inline.} =
   return x >= rect.x and y >= rect.y and x < rect.x + rect.w and y < rect.y + rect.h
 
+func snapToCell(v: float32): int {.inline.} =
+  floor(v + 0.5'f32).int
+
+func cellCenter(x, y: SomeInteger): Vec2 {.inline.} =
+  ## Cell `c` shows layout content snapped to `c`, i.e. the range [c - 0.5, c + 0.5).
+  vec2(x.float32 + 0.5'f32, y.float32 + 0.5'f32)
+
 proc transformedCellRect(transform: UiAffine2, pos, size: Vec2): CellRect =
+  # Round both edges (instead of floor/ceil) so fractionally positioned layouts
+  # (e.g. percentage sized popups) keep 1-cell items 1 cell wide and adjacent
+  # rects tile without overlap. Non-empty rects always cover at least one cell.
   let bounds = transformedRectAabb(transform, pos, size)
-  let x = floor(bounds.pos.x).int
-  let y = floor(bounds.pos.y).int
-  return CellRect(
-    x: x,
-    y: y,
-    w: max(0, ceil(bounds.pos.x + bounds.size.x).int - x),
-    h: max(0, ceil(bounds.pos.y + bounds.size.y).int - y),
-  )
+  let x = snapToCell(bounds.pos.x)
+  let y = snapToCell(bounds.pos.y)
+  var x1 = snapToCell(bounds.pos.x + bounds.size.x)
+  var y1 = snapToCell(bounds.pos.y + bounds.size.y)
+  if x1 == x and bounds.size.x > 0: x1 = x + 1
+  if y1 == y and bounds.size.y > 0: y1 = y + 1
+  return CellRect(x: x, y: y, w: max(0, x1 - x), h: max(0, y1 - y))
 
 proc terminalMeasureText*(text: openArray[char], fontId: UiFontId,
     fontSize: float32, maxWidth: float32, textFlags: UiTextFlags): UiTextArrangement {.raises: [].} =
@@ -322,7 +331,7 @@ proc applyInputEvent(backend: var TerminalBackend, event: TerminalInputEvent) =
       backend.input.keysReleased.incl event.key
   of TerminalMouseButton:
     let oldMouse = backend.input.mouse
-    backend.input.mouse = vec2(event.buttonX.float32, event.buttonY.float32)
+    backend.input.mouse = cellCenter(event.buttonX, event.buttonY)
     backend.input.mouseDelta += backend.input.mouse - oldMouse
     backend.input.modsDown = event.buttonMods
     case event.mouseAction
@@ -338,11 +347,11 @@ proc applyInputEvent(backend: var TerminalBackend, event: TerminalInputEvent) =
       discard
   of TerminalMouseMove:
     let oldMouse = backend.input.mouse
-    backend.input.mouse = vec2(event.moveX.float32, event.moveY.float32)
+    backend.input.mouse = cellCenter(event.moveX, event.moveY)
     backend.input.mouseDelta += backend.input.mouse - oldMouse
     backend.input.modsDown = event.moveMods
   of TerminalMouseWheel:
-    backend.input.mouse = vec2(event.wheelX.float32, event.wheelY.float32)
+    backend.input.mouse = cellCenter(event.wheelX, event.wheelY)
     backend.input.wheel.y += event.wheelDelta.float32
     backend.input.modsDown = event.wheelMods
   of TerminalGridSize:
@@ -402,17 +411,26 @@ proc putCell(backend: var TerminalBackend, x, y: int, grapheme: string, width: i
     backend.cells[index + offset].foreground = foreground
     backend.cells[index + offset].continuation = true
 
+proc blend(dst: TerminalColor, src: UiColor): TerminalColor =
+  ## Source-over blend of `src` onto the opaque cell color `dst`.
+  let a = clamp(src.a, 0.0'f32, 1.0'f32)
+  proc channel(d: uint8, s: float32): uint8 =
+    uint8(clamp(round(d.float32 * (1.0'f32 - a) + s * 255.0'f32 * a), 0.0'f32, 255.0'f32))
+  TerminalColor(r: channel(dst.r, src.r), g: channel(dst.g, src.g), b: channel(dst.b, src.b))
+
 proc fillRect(backend: var TerminalBackend, rect, clip: CellRect, color: UiColor) =
   if color.a <= 0.0'f32:
     return
   let area = intersection(intersection(rect, clip), CellRect(x: 0, y: 0, w: backend.width, h: backend.height))
+  let opaque = color.a >= 1.0'f32
   let background = color.rgb
   for y in area.y ..< area.y + area.h:
     for x in area.x ..< area.x + area.w:
       backend.clearWideCell(x, y)
       let index = y * backend.width + x
       backend.cells[index].grapheme = " "
-      backend.cells[index].background = background
+      backend.cells[index].background =
+        if opaque: background else: backend.cells[index].background.blend(color)
       backend.cells[index].continuation = false
 
 proc drawLine(backend: var TerminalBackend, first, last: Vec2, color: UiColor, clip: CellRect) =
@@ -454,8 +472,8 @@ proc drawStroke(backend: var TerminalBackend, rect, clip: CellRect, color: UiCol
 
 proc drawText(backend: var TerminalBackend, pos: Vec2, text: openArray[char], color: UiColor,
     clip: CellRect, wrap: bool) =
-  var x = floor(pos.x).int
-  var y = floor(pos.y).int
+  var x = snapToCell(pos.x)
+  var y = snapToCell(pos.y)
   let lineStart = x
   for grapheme in text.terminalGraphemes:
     if grapheme.newline:
